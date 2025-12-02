@@ -1,0 +1,7 @@
+# Core dependencies
+autogen-core>=0.7
+autogen-ext>=0.7
+
+# Development dependencies
+mypy>=1.0
+black>=23.0
