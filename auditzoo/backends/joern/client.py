@@ -3,7 +3,7 @@
 Low-level wrapper for interacting with Joern and querying the CPG.
 """
 
-import subprocess
+import subprocess  # nosec B404 - subprocess needed for Joern interaction
 from typing import Any
 
 from auditzoo.backends.base import BackendConnectionError

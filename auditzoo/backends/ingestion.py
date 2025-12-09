@@ -39,12 +39,12 @@ async def create_backend(config: BackendConfig) -> CPGBackend:
         ValueError: If backend type is unknown
     """
     if config.backend_type == "joern":
-        from auditzoo.backends.joern.backend import JoernBackend
+        # from auditzoo.backends.joern.backend import JoernBackend
 
-        assert isinstance(config, JoernConfig), "Expected JoernConfig for joern backend"
-        backend = JoernBackend(config)
-        await backend.connect()
-        return backend
+        # backend = JoernBackend(config)
+        # await backend.connect()
+        # return backend
+        raise NotImplementedError("Joern backend not yet implemented")
 
     elif config.backend_type == "treesitter":
         # Placeholder for TreeSitter backend
