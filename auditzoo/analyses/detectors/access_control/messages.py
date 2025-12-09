@@ -4,7 +4,6 @@ Defines the payload structure for access control detection tasks and results.
 """
 
 from dataclasses import dataclass
-from typing import List, Optional
 
 
 @dataclass
@@ -16,8 +15,8 @@ class AccessControlTaskPayload:
         check_patterns: Optional patterns to identify auth checks
     """
 
-    target_functions: Optional[List[str]] = None
-    check_patterns: Optional[List[str]] = None
+    target_functions: list[str] | None = None
+    check_patterns: list[str] | None = None
 
 
 @dataclass

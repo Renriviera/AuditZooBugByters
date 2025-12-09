@@ -4,9 +4,9 @@ Low-level wrapper for interacting with Joern and querying the CPG.
 """
 
 import subprocess
-import json
-from typing import List, Dict, Any, Optional
-from auditzoo.backends.base import BackendConnectionError, BackendQueryError
+from typing import Any
+
+from auditzoo.backends.base import BackendConnectionError
 
 
 class JoernClient:
@@ -29,10 +29,10 @@ class JoernClient:
         self.joern_path = joern_path
         self.host = host
         self.port = port
-        self._process: Optional[subprocess.Popen] = None
+        self._process: subprocess.Popen | None = None
         self._connected = False
 
-    async def connect(self, cpg_path: Optional[str] = None):
+    async def connect(self, cpg_path: str | None = None):
         """Connect to Joern server or start a new one.
 
         Args:
@@ -53,7 +53,7 @@ class JoernClient:
             self._process = None
         self._connected = False
 
-    async def query(self, query_str: str) -> List[Dict[str, Any]]:
+    async def query(self, query_str: str) -> list[dict[str, Any]]:
         """Execute a CPG query.
 
         Args:
@@ -76,7 +76,7 @@ class JoernClient:
         # For now, return a placeholder
         return []
 
-    async def get_methods(self) -> List[Dict[str, Any]]:
+    async def get_methods(self) -> list[dict[str, Any]]:
         """Get all methods in the CPG.
 
         Returns:
@@ -84,7 +84,7 @@ class JoernClient:
         """
         return await self.query("cpg.method.toJson")
 
-    async def get_cfg(self, method_name: str) -> Dict[str, Any]:
+    async def get_cfg(self, method_name: str) -> dict[str, Any]:
         """Get CFG for a specific method.
 
         Args:
@@ -94,9 +94,9 @@ class JoernClient:
             CFG structure as a dictionary
         """
         query = f'cpg.method.name("{method_name}").controlStructure.toJson'
-        return await self.query(query)
+        return await self.query(query)  # type: ignore[return-value]
 
-    async def get_call_graph(self) -> List[Dict[str, Any]]:
+    async def get_call_graph(self) -> list[dict[str, Any]]:
         """Get the call graph.
 
         Returns:
@@ -105,8 +105,8 @@ class JoernClient:
         return await self.query("cpg.call.toJson")
 
     async def get_data_flow(
-        self, source: str, sink: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+        self, source: str, sink: str | None = None
+    ) -> list[dict[str, Any]]:
         """Get data flow from source to sink.
 
         Args:

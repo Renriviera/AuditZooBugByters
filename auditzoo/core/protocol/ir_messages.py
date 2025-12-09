@@ -4,7 +4,8 @@ This module defines the messages used to interact with IRStoreAgent.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 from auditzoo.contracts.facts import Fact, FactType
 
 
@@ -19,8 +20,8 @@ class GetFactsRequest:
     """
 
     program_id: str
-    fact_types: Optional[List[FactType]] = None
-    filters: Dict[str, Any] = field(default_factory=dict)
+    fact_types: list[FactType] | None = None
+    filters: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -34,7 +35,7 @@ class GetFactsResponse:
     """
 
     program_id: str
-    facts: List[Fact]
+    facts: list[Fact]
     version: int
 
 
@@ -49,7 +50,7 @@ class UpdateFactsRequest:
     """
 
     program_id: str
-    facts: List[Fact]
+    facts: list[Fact]
     replace: bool = False
 
 
@@ -67,7 +68,7 @@ class UpdateFactsResponse:
     program_id: str
     success: bool
     version: int
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
@@ -95,7 +96,7 @@ class CheckFactsExistRequest:
     """
 
     program_id: str
-    fact_types: List[FactType]
+    fact_types: list[FactType]
 
 
 @dataclass
@@ -109,5 +110,5 @@ class CheckFactsExistResponse:
     """
 
     program_id: str
-    existing: List[FactType]
-    missing: List[FactType]
+    existing: list[FactType]
+    missing: list[FactType]

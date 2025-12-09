@@ -4,7 +4,9 @@ This agent helps detectors and complex analyses ensure that their required
 facts exist before they run.
 """
 
-from typing import List, Set
+from dataclasses import dataclass
+
+from auditzoo.contracts.facts import FactType
 from auditzoo.core.agents.base import BaseZooAgent
 from auditzoo.core.agents.ir_store import IRStoreAgent
 from auditzoo.core.agents.plugin_registry import (
@@ -12,10 +14,8 @@ from auditzoo.core.agents.plugin_registry import (
     QueryAgentsByFactRequest,
 )
 from auditzoo.core.agents.task_router import TaskRouterAgent
-from auditzoo.core.protocol.ir_messages import CheckFactsExistRequest
 from auditzoo.core.protocol.envelope import TaskEnvelope
-from auditzoo.contracts.facts import FactType
-from dataclasses import dataclass
+from auditzoo.core.protocol.ir_messages import CheckFactsExistRequest
 
 
 @dataclass
@@ -29,8 +29,8 @@ class EnsureFactsRequest:
     """
 
     program_id: str
-    required_facts: List[FactType]
-    language: str = None
+    required_facts: list[FactType]
+    language: str | None = None
 
 
 @dataclass
@@ -46,8 +46,8 @@ class EnsureFactsResponse:
 
     program_id: str
     success: bool
-    missing: List[FactType] = None
-    error: str = None
+    missing: list[FactType] | None = None
+    error: str | None = None
 
 
 class DependencyManagerAgent(BaseZooAgent):
@@ -101,18 +101,18 @@ class DependencyManagerAgent(BaseZooAgent):
         )
         check_response = await self.ir_store.handle_message(check_request)
 
-        if not check_response.missing:
+        if not check_response.missing:  # type: ignore[union-attr]
             self.log_info(f"All required facts already exist for {program_id}")
             return EnsureFactsResponse(program_id=program_id, success=True, missing=[])
 
         self.log_info(
             f"Missing facts for {program_id}: "
-            f"{[ft.value for ft in check_response.missing]}"
+            f"{[ft.value for ft in check_response.missing]}"  # type: ignore[union-attr]
         )
 
         # Find agents that can produce missing facts
         agents_to_run = {}
-        for fact_type in check_response.missing:
+        for fact_type in check_response.missing:  # type: ignore[union-attr]
             query = QueryAgentsByFactRequest(
                 fact_type=fact_type, language=request.language
             )

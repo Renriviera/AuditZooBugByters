@@ -1,0 +1,199 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "auditzoo"
+version = "0.1.0"
+description = "CPG-centered, agent-based program analysis framework built on Joern and AutoGen-Core"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "TBD"}
+authors = [
+    {name = "Zhuo Zhang (BiScope.AI)", email = "zz3474@columbia.edu"}
+]
+keywords = ["program-analysis", "security", "cpg", "joern", "static-analysis", "agent"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Security",
+    "Topic :: Software Development :: Code Generators",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Operating System :: OS Independent",
+]
+
+# Core dependencies (matches requirements.txt)
+dependencies = [
+    "autogen-core>=0.7",
+    "autogen-ext>=0.7",
+    "tree-sitter>=0.20.0",
+    "dataclasses-json>=0.6.0",
+    "aiofiles>=23.0.0",
+]
+
+[project.optional-dependencies]
+# Development dependencies (matches requirements-dev.txt)
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+    "pytest-mock>=3.10.0",
+    "mypy>=1.0",
+    "types-aiofiles>=23.0.0",
+    "black>=23.0",
+    "ruff>=0.1.0",
+    "isort>=5.12.0",
+    "bandit[toml]>=1.7.0",
+    "pre-commit>=3.0.0",
+    "sphinx>=6.0.0",
+    "sphinx-rtd-theme>=1.2.0",
+    "myst-parser>=1.0.0",
+    "jupyter>=1.0.0",
+    "ipython>=8.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/your-org/auditzoo"
+Documentation = "https://github.com/your-org/auditzoo/blob/main/README.md"
+Repository = "https://github.com/your-org/auditzoo"
+Issues = "https://github.com/your-org/auditzoo/issues"
+
+[tool.setuptools]
+packages = ["auditzoo"]
+
+[tool.setuptools.package-data]
+auditzoo = ["py.typed"]
+
+# Black configuration
+[tool.black]
+line-length = 88
+target-version = ['py310', 'py311']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+# isort configuration
+[tool.isort]
+profile = "black"
+line_length = 88
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+ensure_newline_before_comments = true
+
+# Ruff configuration
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+lint.select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "C",   # flake8-comprehensions
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+]
+lint.ignore = [
+    "E501",  # line too long (handled by black)
+    "B008",  # do not perform function calls in argument defaults
+    "C901",  # too complex
+]
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".hg",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "venv",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]  # Allow unused imports in __init__.py
+
+# Mypy configuration
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+ignore_missing_imports = true
+
+# Pytest configuration
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--showlocals",
+]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+
+# Coverage configuration
+[tool.coverage.run]
+source = ["auditzoo"]
+branch = true
+omit = [
+    "*/tests/*",
+    "*/test_*.py",
+    "*/__pycache__/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+]
+precision = 2
+show_missing = true
+
+# Bandit security configuration
+[tool.bandit]
+exclude_dirs = ["/tests"]
+tests = ["B201", "B301"]
+skips = ["B101", "B601"]

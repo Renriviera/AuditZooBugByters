@@ -4,10 +4,10 @@ This module provides a base class for core agents (IRStore, TaskRouter, etc.)
 with common utilities for messaging and logging.
 """
 
-from typing import Any, Optional, Sequence
 import logging
-from autogen_core import MessageContext, RoutedAgent
-from autogen_core.models import FunctionCall
+from typing import Any
+
+from autogen_core import RoutedAgent
 
 
 class BaseZooAgent(RoutedAgent):
@@ -38,14 +38,7 @@ class BaseZooAgent(RoutedAgent):
         """Log a debug message."""
         self.logger.debug(message, extra=kwargs)
 
-    async def on_message(self, message: Any, ctx: MessageContext) -> Any:
-        """Handle an incoming message from AutoGen-Core.
-
-        This is the AutoGen-Core entry point. It delegates to handle_message.
-        """
-        return await self.handle_message(message)
-
-    async def handle_message(self, message: Any) -> Optional[Any]:
+    async def handle_message(self, message: Any) -> Any | None:
         """Handle an incoming message.
 
         To be implemented by subclasses.

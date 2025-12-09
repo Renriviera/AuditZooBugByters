@@ -4,7 +4,7 @@ This module defines the generic wrappers for analysis requests and results.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any
 from uuid import uuid4
 
 
@@ -23,10 +23,10 @@ class TaskEnvelope:
 
     task_kind: str
     program_id: str
-    payload: Dict[str, Any]
+    payload: dict[str, Any]
     task_id: str = field(default_factory=lambda: str(uuid4()))
-    requester: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    requester: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def with_requester(self, requester: str) -> "TaskEnvelope":
         """Create a copy with the requester set."""
@@ -58,17 +58,17 @@ class ResultEnvelope:
     task_kind: str
     program_id: str
     success: bool
-    payload: Dict[str, Any] = field(default_factory=dict)
-    error: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    payload: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_task(
         cls,
         task: TaskEnvelope,
         success: bool,
-        payload: Optional[Dict[str, Any]] = None,
-        error: Optional[str] = None,
+        payload: dict[str, Any] | None = None,
+        error: str | None = None,
     ) -> "ResultEnvelope":
         """Create a result envelope from a task envelope."""
         return cls(

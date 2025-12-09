@@ -3,11 +3,13 @@
 Detects potential access control vulnerabilities.
 """
 
-from auditzoo.sdk.base_agent import BaseAnalysisAgent, AnalysisContext
-from auditzoo.sdk.registry import analysis_agent
+from typing import Any
+
 from auditzoo.contracts.capabilities import AgentCapability
-from auditzoo.contracts.facts import FactType, IssueFact, IssueSeverity
-from auditzoo.core.protocol.envelope import TaskEnvelope, ResultEnvelope
+from auditzoo.contracts.facts import FactType
+from auditzoo.core.protocol.envelope import ResultEnvelope, TaskEnvelope
+from auditzoo.sdk.base_agent import AnalysisContext, BaseAnalysisAgent
+from auditzoo.sdk.registry import analysis_agent
 
 
 @analysis_agent(
@@ -52,42 +54,11 @@ class AccessControlDetectorAgent(BaseAnalysisAgent):
         Returns:
             Result envelope with issues found
         """
-        program_id = task.program_id
 
-        # Ensure required facts exist
-        success = await context.ensure_facts(
-            program_id, [FactType.CALL_GRAPH, FactType.TAINT]
-        )
-
-        if not success:
-            return ResultEnvelope.from_task(
-                task, success=False, error="Failed to ensure required facts"
-            )
-
-        # Get IR view
-        ir_view = await context.get_ir_view(program_id)
-        if not ir_view:
-            return ResultEnvelope.from_task(
-                task, success=False, error="No IR view available"
-            )
-
-        # Get required facts
-        call_graph_facts = await context.get_facts(
-            program_id, fact_types=[FactType.CALL_GRAPH]
-        )
-        taint_facts = await context.get_facts(program_id, fact_types=[FactType.TAINT])
-
-        # Placeholder: Analyze for access control issues
-        issues = await self._analyze_access_control(
-            ir_view, call_graph_facts, taint_facts
-        )
-
-        # Store issue facts
-        await context.update_facts(program_id, issues)
+        # TODO
 
         # Return result
         result_payload = {
-            "issues_found": len(issues),
             "functions_checked": 0,  # Placeholder
         }
 
@@ -100,7 +71,7 @@ class AccessControlDetectorAgent(BaseAnalysisAgent):
 
         This is a placeholder implementation.
         """
-        issues = []
+        issues: list[Any] = []
 
         # Placeholder: Create a sample issue
         # A real implementation would:

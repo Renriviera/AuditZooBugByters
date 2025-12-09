@@ -5,10 +5,11 @@ detectors) should inherit from.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any
+
 from autogen_core import MessageContext, RoutedAgent, message_handler
+
 from auditzoo.contracts.capabilities import AgentCapability
-from auditzoo.core.protocol.envelope import TaskEnvelope, ResultEnvelope
+from auditzoo.core.protocol.envelope import ResultEnvelope, TaskEnvelope
 
 
 class AnalysisContext:

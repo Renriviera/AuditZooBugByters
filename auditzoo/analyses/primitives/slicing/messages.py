@@ -4,7 +4,6 @@ Defines the payload structure for slicing task requests and results.
 """
 
 from dataclasses import dataclass
-from typing import List, Optional
 
 
 @dataclass
@@ -21,7 +20,7 @@ class SlicingTaskPayload:
     function_name: str
     seed: str
     direction: str = "backward"
-    max_depth: Optional[int] = None
+    max_depth: int | None = None
 
 
 @dataclass
@@ -33,5 +32,5 @@ class SlicingResultPayload:
         edges: Optional list of edges in the slice
     """
 
-    nodes: List[str]
-    edges: Optional[List[tuple]] = None
+    nodes: list[str]
+    edges: list[tuple] | None = None

@@ -7,7 +7,7 @@ This module defines how analysis agents declare their capabilities:
 """
 
 from dataclasses import dataclass, field
-from typing import List, Set
+
 from auditzoo.contracts.facts import FactType
 
 
@@ -25,10 +25,10 @@ class AgentCapability:
     """
 
     agent_type_id: str
-    task_kinds: Set[str] = field(default_factory=set)
-    produces: Set[FactType] = field(default_factory=set)
-    requires: Set[FactType] = field(default_factory=set)
-    languages: Set[str] = field(default_factory=set)
+    task_kinds: set[str] = field(default_factory=set)
+    produces: set[FactType] = field(default_factory=set)
+    requires: set[FactType] = field(default_factory=set)
+    languages: set[str] = field(default_factory=set)
     description: str = ""
 
     def can_handle_task(self, task_kind: str) -> bool:

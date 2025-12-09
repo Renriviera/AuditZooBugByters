@@ -1,12 +1,12 @@
-"""Canonical IR model for auditzoo.
+"""CPG-centered IR model for AuditZoo.
 
-This module defines the language-neutral intermediate representation that all
-analyses use, regardless of the backend (LSP, Joern, TreeSitter).
+This module defines minimal wrapper types around Joern's CPG.
+The IR is not a language-neutral abstraction - it directly exposes CPG concepts
+with convenience identifiers for common operations.
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any
-from enum import Enum
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -19,100 +19,62 @@ class ProgramId:
         return self.id
 
 
-@dataclass(frozen=True)
-class FunctionId:
-    """Unique identifier for a function within a program."""
+@dataclass
+class Function:
+    """A function/method in the program.
 
+    Wraps a CPG method node with convenience fields.
+    """
+
+    cpg_id: str  # CPG node ID for this method
     program_id: ProgramId
     name: str
-    file: Optional[str] = None
-    line: Optional[int] = None
+    signature: str | None = None
+    file: str | None = None
+    start_line: int | None = None
+    end_line: int | None = None
+    parameters: list[str] = field(default_factory=list)
+    return_type: str | None = None
+    language: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __str__(self) -> str:
         return f"{self.program_id}:{self.name}"
 
 
+# Legacy compatibility types (optional, can be removed if not needed)
 @dataclass(frozen=True)
-class NodeId:
-    """Unique identifier for a node/statement."""
+class FunctionId:
+    """Legacy function identifier (optional).
 
-    function_id: FunctionId
-    node_index: int
+    Kept for compatibility with existing code. New code should use
+    Function.cpg_id directly.
+    """
 
-    def __str__(self) -> str:
-        return f"{self.function_id}:node{self.node_index}"
-
-
-@dataclass(frozen=True)
-class BasicBlockId:
-    """Unique identifier for a basic block."""
-
-    function_id: FunctionId
-    block_index: int
-
-    def __str__(self) -> str:
-        return f"{self.function_id}:bb{self.block_index}"
-
-
-class NodeKind(Enum):
-    """Types of IR nodes."""
-
-    CALL = "call"
-    ASSIGNMENT = "assignment"
-    RETURN = "return"
-    BRANCH = "branch"
-    LITERAL = "literal"
-    IDENTIFIER = "identifier"
-    BINARY_OP = "binary_op"
-    UNARY_OP = "unary_op"
-    UNKNOWN = "unknown"
-
-
-@dataclass
-class IRNode:
-    """A node in the IR (statement, expression, etc.)."""
-
-    id: NodeId
-    kind: NodeKind
-    code: str
-    line: Optional[int] = None
-    column: Optional[int] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class BasicBlock:
-    """A basic block in the control flow graph."""
-
-    id: BasicBlockId
-    nodes: List[NodeId]
-    successors: List[BasicBlockId] = field(default_factory=list)
-    predecessors: List[BasicBlockId] = field(default_factory=list)
-
-
-@dataclass
-class Function:
-    """A function in the program."""
-
-    id: FunctionId
+    program_id: ProgramId
     name: str
-    file: Optional[str] = None
-    start_line: Optional[int] = None
-    end_line: Optional[int] = None
-    parameters: List[str] = field(default_factory=list)
-    return_type: Optional[str] = None
-    language: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    file: str | None = None
+    line: int | None = None
+
+    def __str__(self) -> str:
+        return f"{self.program_id}:{self.name}"
+
+
+# CPG Node Reference Type
+CPGNodeId = str  # Type alias for CPG node IDs (strings)
 
 
 @dataclass
 class Program:
-    """Top-level program/project representation."""
+    """Top-level program/project representation.
+
+    Minimal metadata wrapper - most information is in the CPG.
+    """
 
     id: ProgramId
     name: str
     root_path: str
     language: str
-    functions: Dict[str, FunctionId] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    version: int = 0
+    cpg_path: str | None = None  # Path to CPG database file
+    metadata: dict[str, Any] = field(default_factory=dict)
+    version: int = 0  # Logical version for change tracking

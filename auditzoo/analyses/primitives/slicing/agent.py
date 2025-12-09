@@ -3,15 +3,13 @@
 Implements program slicing (backward and forward).
 """
 
-from auditzoo.sdk.base_agent import BaseAnalysisAgent, AnalysisContext
-from auditzoo.sdk.registry import analysis_agent
+from typing import Any
+
 from auditzoo.contracts.capabilities import AgentCapability
-from auditzoo.contracts.facts import FactType, SliceFact
-from auditzoo.core.protocol.envelope import TaskEnvelope, ResultEnvelope
-from auditzoo.analyses.primitives.slicing.messages import (
-    SlicingTaskPayload,
-    SlicingResultPayload,
-)
+from auditzoo.contracts.facts import FactType
+from auditzoo.core.protocol.envelope import ResultEnvelope, TaskEnvelope
+from auditzoo.sdk.base_agent import AnalysisContext, BaseAnalysisAgent
+from auditzoo.sdk.registry import analysis_agent
 
 
 @analysis_agent(
@@ -56,40 +54,10 @@ class SlicingAnalysisAgent(BaseAnalysisAgent):
         Returns:
             Result envelope with slice information
         """
-        program_id = task.program_id
-        payload = task.payload
 
-        # Extract slicing parameters
-        function_name = payload.get("function_name")
-        seed = payload.get("seed")
-        direction = payload.get("direction", "backward")
+        # TODO
 
-        # Get IR view
-        ir_view = await context.get_ir_view(program_id)
-        if not ir_view:
-            return ResultEnvelope.from_task(
-                task, success=False, error="No IR view available"
-            )
-
-        # Placeholder: Compute the slice
-        # In a real implementation, this would:
-        # 1. Get the CFG for the function
-        # 2. Locate the seed node
-        # 3. Perform backward/forward slicing
-        # 4. Collect all nodes in the slice
-        slice_nodes = await self._compute_slice(ir_view, function_name, seed, direction)
-
-        # Create slice fact
-        slice_fact = SliceFact(
-            program_id=program_id, seed=seed, nodes=slice_nodes, direction=direction
-        )
-
-        # Store the fact
-        await context.update_facts(program_id, [slice_fact])
-
-        # Return result
-        result_payload = {"nodes": slice_nodes, "direction": direction}
-
+        result_payload: dict[str, Any] = {}
         return ResultEnvelope.from_task(task, success=True, payload=result_payload)
 
     async def _compute_slice(

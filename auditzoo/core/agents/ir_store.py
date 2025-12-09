@@ -6,22 +6,23 @@ This agent is the single source of truth for:
 - Program version tracking
 """
 
-from typing import Dict, List, Optional
 from collections import defaultdict
+
 from autogen_core import message_handler
+
+from auditzoo.contracts.facts import Fact
 from auditzoo.core.agents.base import BaseZooAgent
 from auditzoo.core.ir.view import IRView
 from auditzoo.core.protocol.ir_messages import (
-    GetFactsRequest,
-    GetFactsResponse,
-    UpdateFactsRequest,
-    UpdateFactsResponse,
-    GetIRVersionRequest,
-    GetIRVersionResponse,
     CheckFactsExistRequest,
     CheckFactsExistResponse,
+    GetFactsRequest,
+    GetFactsResponse,
+    GetIRVersionRequest,
+    GetIRVersionResponse,
+    UpdateFactsRequest,
+    UpdateFactsResponse,
 )
-from auditzoo.contracts.facts import Fact, FactType
 
 
 class IRStoreAgent(BaseZooAgent):
@@ -36,16 +37,16 @@ class IRStoreAgent(BaseZooAgent):
 
     def __init__(self):
         super().__init__("ir_store")
-        self._ir_views: Dict[str, IRView] = {}
-        self._facts: Dict[str, List[Fact]] = defaultdict(list)
-        self._versions: Dict[str, int] = defaultdict(int)
+        self._ir_views: dict[str, IRView] = {}
+        self._facts: dict[str, list[Fact]] = defaultdict(list)
+        self._versions: dict[str, int] = defaultdict(int)
 
     def register_ir_view(self, program_id: str, ir_view: IRView):
         """Register an IR view for a program."""
         self._ir_views[program_id] = ir_view
         self.log_info(f"Registered IR view for program {program_id}")
 
-    def get_ir_view(self, program_id: str) -> Optional[IRView]:
+    def get_ir_view(self, program_id: str) -> IRView | None:
         """Get the IR view for a program."""
         return self._ir_views.get(program_id)
 
@@ -108,7 +109,7 @@ class IRStoreAgent(BaseZooAgent):
         try:
             if request.replace:
                 # Replace existing facts of the same type
-                fact_types_to_replace = set(f.fact_type for f in request.facts)
+                fact_types_to_replace = {f.fact_type for f in request.facts}
                 self._facts[program_id] = [
                     f
                     for f in self._facts.get(program_id, [])
@@ -152,7 +153,7 @@ class IRStoreAgent(BaseZooAgent):
         """Handle a request to check which fact types exist."""
         program_id = request.program_id
         all_facts = self._facts.get(program_id, [])
-        existing_types = set(f.fact_type for f in all_facts)
+        existing_types = {f.fact_type for f in all_facts}
 
         existing = [ft for ft in request.fact_types if ft in existing_types]
         missing = [ft for ft in request.fact_types if ft not in existing_types]

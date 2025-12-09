@@ -4,21 +4,22 @@ This module provides the context object that analysis agents use to interact
 with the infrastructure (IR, facts, dependency management).
 """
 
-from typing import List, Optional, Dict, Any
-from auditzoo.core.agents.ir_store import IRStoreAgent
+from typing import Any
+
+from auditzoo.contracts.facts import Fact, FactType
 from auditzoo.core.agents.dependency_mgr import (
     DependencyManagerAgent,
     EnsureFactsRequest,
 )
+from auditzoo.core.agents.ir_store import IRStoreAgent
 from auditzoo.core.agents.task_router import TaskRouterAgent
 from auditzoo.core.ir.view import IRView
+from auditzoo.core.protocol.envelope import ResultEnvelope, TaskEnvelope
 from auditzoo.core.protocol.ir_messages import (
     GetFactsRequest,
-    UpdateFactsRequest,
     GetIRVersionRequest,
+    UpdateFactsRequest,
 )
-from auditzoo.core.protocol.envelope import ResultEnvelope, TaskEnvelope
-from auditzoo.contracts.facts import Fact, FactType
 
 
 class AnalysisContext:
@@ -42,7 +43,7 @@ class AnalysisContext:
         self.dependency_manager = dependency_manager
         self.task_router = task_router
 
-    async def get_ir_view(self, program_id: str) -> Optional[IRView]:
+    async def get_ir_view(self, program_id: str) -> IRView | None:
         """Get the IR view for a program."""
         return self.ir_store.get_ir_view(program_id)
 
@@ -50,14 +51,14 @@ class AnalysisContext:
         """Get the current IR version for a program."""
         request = GetIRVersionRequest(program_id=program_id)
         response = await self.ir_store.handle_message(request)
-        return response.version
+        return response.version  # type: ignore[no-any-return,union-attr]
 
     async def get_facts(
         self,
         program_id: str,
-        fact_types: Optional[List[FactType]] = None,
-        filters: Optional[Dict[str, Any]] = None,
-    ) -> List[Fact]:
+        fact_types: list[FactType] | None = None,
+        filters: dict[str, Any] | None = None,
+    ) -> list[Fact]:
         """Get facts for a program.
 
         Args:
@@ -72,10 +73,10 @@ class AnalysisContext:
             program_id=program_id, fact_types=fact_types, filters=filters or {}
         )
         response = await self.ir_store.handle_message(request)
-        return response.facts
+        return response.facts  # type: ignore[no-any-return,union-attr]
 
     async def update_facts(
-        self, program_id: str, facts: List[Fact], replace: bool = False
+        self, program_id: str, facts: list[Fact], replace: bool = False
     ) -> bool:
         """Update facts for a program.
 
@@ -91,13 +92,13 @@ class AnalysisContext:
             program_id=program_id, facts=facts, replace=replace
         )
         response = await self.ir_store.handle_message(request)
-        return response.success
+        return response.success  # type: ignore[no-any-return,union-attr]
 
     async def ensure_facts(
         self,
         program_id: str,
-        required_facts: List[FactType],
-        language: Optional[str] = None,
+        required_facts: list[FactType],
+        language: str | None = None,
     ) -> bool:
         """Ensure that required facts exist for a program.
 
@@ -112,10 +113,12 @@ class AnalysisContext:
             True if all facts are available, False otherwise
         """
         request = EnsureFactsRequest(
-            program_id=program_id, required_facts=required_facts, language=language
+            program_id=program_id,
+            required_facts=required_facts,
+            language=language or "",
         )
         response = await self.dependency_manager.handle_message(request)
-        return response.success
+        return response.success  # type: ignore[no-any-return]
 
     async def send_result(self, result: ResultEnvelope):
         """Send a result envelope back to the router."""

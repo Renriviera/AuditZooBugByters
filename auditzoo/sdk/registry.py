@@ -4,17 +4,17 @@ This module provides utilities for registering analysis agent types and
 their capabilities with the plugin registry.
 """
 
-from typing import Type, Callable
+from collections.abc import Callable
+
 from auditzoo.contracts.capabilities import AgentCapability
 
-
 # Global registry of agent types
-_agent_registry: dict[str, Type] = {}
+_agent_registry: dict[str, type] = {}
 _capability_registry: dict[str, AgentCapability] = {}
 
 
 def register_analysis_agent(
-    agent_type_id: str, agent_class: Type, capability: AgentCapability
+    agent_type_id: str, agent_class: type, capability: AgentCapability
 ):
     """Register an analysis agent type.
 
@@ -40,7 +40,7 @@ def analysis_agent(capability: AgentCapability) -> Callable:
             ...
     """
 
-    def decorator(cls: Type) -> Type:
+    def decorator(cls: type) -> type:
         # Extract agent_type_id from capability
         agent_type_id = capability.agent_type_id
         register_analysis_agent(agent_type_id, cls, capability)
@@ -49,7 +49,7 @@ def analysis_agent(capability: AgentCapability) -> Callable:
     return decorator
 
 
-def get_registered_agents() -> dict[str, Type]:
+def get_registered_agents() -> dict[str, type]:
     """Get all registered agent types."""
     return dict(_agent_registry)
 

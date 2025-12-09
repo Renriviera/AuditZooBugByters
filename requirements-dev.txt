@@ -1,0 +1,31 @@
+# Development-only dependencies
+# Install with: pip install -r requirements-dev.txt
+
+# Include base requirements
+-r requirements.txt
+
+# Testing
+pytest>=7.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.0.0  # Coverage reports
+pytest-mock>=3.10.0  # Mocking support
+
+# Code quality
+mypy>=1.0
+types-aiofiles>=23.0.0  # Type stubs for aiofiles
+black>=23.0
+ruff>=0.1.0
+isort>=5.12.0  # Import sorting
+bandit[toml]>=1.7.0  # Security linting
+
+# Pre-commit hooks
+pre-commit>=3.0.0
+
+# Documentation
+sphinx>=6.0.0  # Documentation generator
+sphinx-rtd-theme>=1.2.0  # ReadTheDocs theme
+myst-parser>=1.0.0  # Markdown support in Sphinx
+
+# Jupyter (for interactive development/examples)
+jupyter>=1.0
+ipython>=8.0

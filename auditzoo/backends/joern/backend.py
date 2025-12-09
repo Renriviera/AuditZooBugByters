@@ -3,24 +3,15 @@
 This module implements the IRBackend interface using Joern CPG queries.
 """
 
-from typing import List, Optional, Dict
-from auditzoo.core.ir.backend_api import IRBackend
-from auditzoo.core.ir.model import (
-    ProgramId,
-    FunctionId,
-    NodeId,
-    BasicBlockId,
-    Program,
-    Function,
-    BasicBlock,
-    IRNode,
-    NodeKind,
-)
-from auditzoo.backends.joern.client import JoernClient
+from typing import Any
+
 from auditzoo.backends.base import JoernConfig
+from auditzoo.backends.joern.client import JoernClient
+from auditzoo.core.ir.backend_api import CPGBackend
+from auditzoo.core.ir.model import Function, ProgramId
 
 
-class JoernBackend(IRBackend):
+class JoernBackend(CPGBackend):
     """IR backend using Joern CPG.
 
     This backend queries Joern's Code Property Graph to provide
@@ -39,112 +30,175 @@ class JoernBackend(IRBackend):
         )
         self._connected = False
 
-    async def connect(self):
+    # ===== Connection Management =====
+
+    async def connect(self) -> None:
         """Connect to Joern and load the CPG."""
         await self.client.connect(self.config.db_path)
         self._connected = True
 
-    async def disconnect(self):
+    async def disconnect(self) -> None:
         """Disconnect from Joern."""
         await self.client.disconnect()
         self._connected = False
 
-    async def get_program(self, program_id: ProgramId) -> Optional[Program]:
-        """Get program metadata from Joern."""
-        # In a real implementation, query CPG for program metadata
-        return Program(
-            id=program_id,
-            name=program_id.id,
-            root_path=self.config.db_path or "",
-            language=self.config.language,
-        )
+    def is_connected(self) -> bool:
+        """Check if backend is connected."""
+        return self._connected
 
-    async def get_functions(self, program_id: ProgramId) -> List[Function]:
-        """Get all functions from Joern CPG."""
-        methods = await self.client.get_methods()
+    # ===== Core CPG Query Interface =====
 
-        functions = []
-        for method in methods:
-            func_id = FunctionId(
-                program_id=program_id,
-                name=method.get("name", "unknown"),
-                file=method.get("filename"),
-                line=method.get("lineNumber"),
-            )
+    async def cpg_query(self, query: str) -> Any:
+        """Execute a CPG query and return results.
 
-            function = Function(
-                id=func_id,
-                name=method.get("name", "unknown"),
-                file=method.get("filename"),
-                start_line=method.get("lineNumber"),
-                end_line=method.get("lineNumberEnd"),
-                language=self.config.language,
-            )
-            functions.append(function)
+        Args:
+            query: CPG query string (Scala/Joern syntax)
 
-        return functions
+        Returns:
+            Query results (typically JSON-decoded dict/list)
+        """
+        raise AssertionError("unimplemented")
 
-    async def get_function(self, function_id: FunctionId) -> Optional[Function]:
-        """Get a specific function from Joern."""
-        # In a real implementation, query CPG for this specific method
-        return Function(
-            id=function_id,
-            name=function_id.name,
-            file=function_id.file,
-            start_line=function_id.line,
-            language=self.config.language,
-        )
+    def supports_feature(self, feature: str) -> bool:
+        """Check if backend supports a specific feature.
 
-    async def get_cfg(self, function_id: FunctionId) -> List[BasicBlock]:
-        """Get CFG for a function from Joern."""
-        cfg_data = await self.client.get_cfg(function_id.name)
+        Args:
+            feature: Feature name (e.g., "dataflow", "controlflow", "taint")
 
-        # In a real implementation, parse Joern's CFG representation
-        # and construct BasicBlock objects
-        # For now, return a minimal placeholder
-        blocks = []
+        Returns:
+            True if feature is supported
+        """
+        raise AssertionError("unimplemented")
 
-        # Create a simple single-block CFG as placeholder
-        block_id = BasicBlockId(function_id=function_id, block_index=0)
-        block = BasicBlock(id=block_id, nodes=[])
-        blocks.append(block)
+    # ===== Tag Management =====
 
-        return blocks
+    async def add_tag(self, cpg_node_id: str, tag_name: str, tag_data: dict) -> None:
+        """Add a tag to a CPG node.
 
-    async def get_basic_block(self, block_id: BasicBlockId) -> Optional[BasicBlock]:
-        """Get a specific basic block."""
-        # Placeholder implementation
-        return BasicBlock(id=block_id, nodes=[])
+        Args:
+            cpg_node_id: CPG node ID
+            tag_name: Tag name (typically fact type)
+            tag_data: Tag data (JSON-compatible dict)
+        """
+        raise AssertionError("unimplemented")
 
-    async def get_nodes(self, function_id: FunctionId) -> List[IRNode]:
-        """Get all nodes in a function from Joern."""
-        # In a real implementation, query CPG for AST nodes in the method
-        # For now, return empty list
-        return []
+    async def get_tags(
+        self, cpg_node_id: str, tag_name: str | None = None
+    ) -> list[dict]:
+        """Get tags attached to a CPG node.
 
-    async def get_node(self, node_id: NodeId) -> Optional[IRNode]:
-        """Get a specific node."""
-        # Placeholder implementation
-        return IRNode(id=node_id, kind=NodeKind.UNKNOWN, code="")
+        Args:
+            cpg_node_id: CPG node ID
+            tag_name: Optional tag name filter
 
-    async def get_callers(self, function_id: FunctionId) -> List[FunctionId]:
-        """Get callers of a function from Joern."""
-        # In a real implementation, query CPG for incoming call edges
-        return []
+        Returns:
+            List of tag data dicts
+        """
+        raise AssertionError("unimplemented")
 
-    async def get_callees(self, function_id: FunctionId) -> List[FunctionId]:
-        """Get callees of a function from Joern."""
-        # In a real implementation, query CPG for outgoing call edges
-        return []
+    async def query_by_tag(self, tag_name: str) -> list[str]:
+        """Find CPG node IDs that have a specific tag.
 
-    async def get_call_graph(
-        self, program_id: ProgramId
-    ) -> Dict[FunctionId, List[FunctionId]]:
-        """Get the call graph from Joern."""
-        call_data = await self.client.get_call_graph()
+        Args:
+            tag_name: Tag name to search for
 
-        # In a real implementation, parse Joern's call graph
-        # and construct the mapping
-        call_graph = {}
+        Returns:
+            List of CPG node IDs
+        """
+        raise AssertionError("unimplemented")
 
-        return call_graph
+    async def get_all_tags(self, tag_name: str | None = None) -> dict[str, list[dict]]:
+        """Get all tags in the CPG.
+
+        Args:
+            tag_name: Optional tag name filter
+
+        Returns:
+            Dict mapping CPG node IDs to lists of tag data
+        """
+        raise AssertionError("unimplemented")
+
+    # ===== Convenience Methods =====
+
+    async def get_program_info(self, program_id: ProgramId) -> dict[str, Any]:
+        """Get program metadata.
+
+        Args:
+            program_id: Program identifier
+
+        Returns:
+            Program metadata dict
+        """
+        raise AssertionError("unimplemented")
+
+    async def get_functions(self, program_id: ProgramId) -> list[Function]:
+        """Get all functions/methods in the program.
+
+        Args:
+            program_id: Program identifier
+
+        Returns:
+            List of Function objects with CPG node IDs
+        """
+        raise AssertionError("unimplemented")
+
+    async def get_function_by_name(
+        self, program_id: ProgramId, function_name: str
+    ) -> Function | None:
+        """Get a specific function by name.
+
+        Args:
+            program_id: Program identifier
+            function_name: Function/method name
+
+        Returns:
+            Function object or None if not found
+        """
+        raise AssertionError("unimplemented")
+
+    async def get_cfg_nodes(self, function_cpg_id: str) -> list[dict[str, Any]]:
+        """Get CFG nodes for a function.
+
+        Args:
+            function_cpg_id: CPG node ID of the function
+
+        Returns:
+            List of CFG node dicts with fields:
+                - id: CPG node ID
+                - code: Source code
+                - line: Line number
+                - successors: List of successor node IDs
+        """
+        raise AssertionError("unimplemented")
+
+    async def get_call_graph(self, program_id: ProgramId) -> list[dict[str, Any]]:
+        """Get call graph edges.
+
+        Args:
+            program_id: Program identifier
+
+        Returns:
+            List of call edge dicts with fields:
+                - caller_id: CPG node ID of caller method
+                - callee_id: CPG node ID of callee method
+                - call_site_id: CPG node ID of call site
+        """
+        raise AssertionError("unimplemented")
+
+    async def get_ast_nodes(
+        self, function_cpg_id: str, node_type: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Get AST nodes for a function.
+
+        Args:
+            function_cpg_id: CPG node ID of the function
+            node_type: Optional filter by AST node type
+
+        Returns:
+            List of AST node dicts with fields:
+                - id: CPG node ID
+                - type: AST node type
+                - code: Source code
+                - line: Line number
+        """
+        raise AssertionError("unimplemented")

@@ -4,11 +4,11 @@ This agent maintains a type-level registry of analysis agents and their
 capabilities (task kinds, fact types, languages).
 """
 
-from typing import Dict, List, Optional, Set
-from auditzoo.core.agents.base import BaseZooAgent
+from dataclasses import dataclass
+
 from auditzoo.contracts.capabilities import AgentCapability
 from auditzoo.contracts.facts import FactType
-from dataclasses import dataclass
+from auditzoo.core.agents.base import BaseZooAgent
 
 
 @dataclass
@@ -23,14 +23,14 @@ class QueryAgentsByTaskRequest:
     """Request to find agents that can handle a task kind."""
 
     task_kind: str
-    language: Optional[str] = None
+    language: str | None = None
 
 
 @dataclass
 class QueryAgentsByTaskResponse:
     """Response with agents that can handle a task."""
 
-    agent_type_ids: List[str]
+    agent_type_ids: list[str]
 
 
 @dataclass
@@ -38,14 +38,14 @@ class QueryAgentsByFactRequest:
     """Request to find agents that can produce a fact type."""
 
     fact_type: FactType
-    language: Optional[str] = None
+    language: str | None = None
 
 
 @dataclass
 class QueryAgentsByFactResponse:
     """Response with agents that can produce a fact."""
 
-    agent_type_ids: List[str]
+    agent_type_ids: list[str]
 
 
 @dataclass
@@ -59,7 +59,7 @@ class GetCapabilityRequest:
 class GetCapabilityResponse:
     """Response with capability information."""
 
-    capability: Optional[AgentCapability]
+    capability: AgentCapability | None
 
 
 class PluginRegistryAgent(BaseZooAgent):
@@ -73,7 +73,7 @@ class PluginRegistryAgent(BaseZooAgent):
 
     def __init__(self):
         super().__init__("plugin_registry")
-        self._capabilities: Dict[str, AgentCapability] = {}
+        self._capabilities: dict[str, AgentCapability] = {}
 
     def register_agent_type(self, capability: AgentCapability):
         """Register an agent type with its capabilities."""
@@ -137,6 +137,6 @@ class PluginRegistryAgent(BaseZooAgent):
         capability = self._capabilities.get(request.agent_type_id)
         return GetCapabilityResponse(capability=capability)
 
-    def get_all_capabilities(self) -> Dict[str, AgentCapability]:
+    def get_all_capabilities(self) -> dict[str, AgentCapability]:
         """Get all registered capabilities."""
         return dict(self._capabilities)

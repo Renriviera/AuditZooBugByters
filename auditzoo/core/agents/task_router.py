@@ -5,14 +5,14 @@ using type-id/instance-id naming and relying on AutoGen-Core's dynamic
 agent spawning.
 """
 
-from typing import Optional
 from autogen_core import message_handler
+
 from auditzoo.core.agents.base import BaseZooAgent
-from auditzoo.core.protocol.envelope import TaskEnvelope, ResultEnvelope
 from auditzoo.core.agents.plugin_registry import (
     PluginRegistryAgent,
     QueryAgentsByTaskRequest,
 )
+from auditzoo.core.protocol.envelope import ResultEnvelope, TaskEnvelope
 
 
 class TaskRouterAgent(BaseZooAgent):

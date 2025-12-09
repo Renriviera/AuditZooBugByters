@@ -4,15 +4,10 @@ This module provides utilities for choosing and configuring backends,
 and building IR views during the preprocessing phase.
 """
 
-from typing import Optional
+from auditzoo.backends.base import BackendConfig, JoernConfig, TreeSitterConfig
+from auditzoo.core.ir.backend_api import CPGBackend
+from auditzoo.core.ir.model import ProgramId
 from auditzoo.core.ir.view import IRView
-from auditzoo.core.ir.backend_api import IRBackend
-from auditzoo.backends.base import (
-    BackendConfig,
-    JoernConfig,
-    LspConfig,
-    TreeSitterConfig,
-)
 
 
 async def create_ir_view(config: BackendConfig) -> IRView:
@@ -28,10 +23,10 @@ async def create_ir_view(config: BackendConfig) -> IRView:
         ValueError: If backend type is unknown
     """
     backend = await create_backend(config)
-    return IRView(backend)
+    return IRView(backend, ProgramId("unknown"))
 
 
-async def create_backend(config: BackendConfig) -> IRBackend:
+async def create_backend(config: BackendConfig) -> CPGBackend:
     """Create and initialize a backend.
 
     Args:
@@ -46,17 +41,10 @@ async def create_backend(config: BackendConfig) -> IRBackend:
     if config.backend_type == "joern":
         from auditzoo.backends.joern.backend import JoernBackend
 
+        assert isinstance(config, JoernConfig), "Expected JoernConfig for joern backend"
         backend = JoernBackend(config)
         await backend.connect()
         return backend
-
-    elif config.backend_type == "lsp":
-        # Placeholder for LSP backend
-        # from auditzoo.backends.lsp.backend import LspBackend
-        # backend = LspBackend(config)
-        # await backend.connect()
-        # return backend
-        raise NotImplementedError("LSP backend not yet implemented")
 
     elif config.backend_type == "treesitter":
         # Placeholder for TreeSitter backend
@@ -70,7 +58,7 @@ async def create_backend(config: BackendConfig) -> IRBackend:
 
 
 def auto_detect_backend(
-    project_path: str, language: str, prefer: Optional[str] = None
+    project_path: str, language: str, prefer: str | None = None
 ) -> BackendConfig:
     """Auto-detect the best backend for a project.
 
@@ -94,10 +82,6 @@ def auto_detect_backend(
             language=language,
             joern_path="/usr/local/bin/joern",  # Default path
             db_path=None,
-        )
-    elif prefer == "lsp":
-        return LspConfig(
-            language=language, server_command=f"{language}-language-server"
         )
     else:
         # Default to TreeSitter
