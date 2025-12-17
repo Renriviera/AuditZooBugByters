@@ -2,25 +2,25 @@
 
 **CPG-centered, agent-based program analysis framework built on Joern and AutoGen-Core**
 
-AuditZoo is a unified infrastructure for building and composing program analyses. It uses Joern's Code Property Graph (CPG) as the foundation and stores all analysis results as CPG Tags for persistent, queryable storage.
+AuditZoo is a unified infrastructure for building and composing program analyses. It uses Joern's Code Property Graph (CPG) as the foundation and represents programs as a graph of `CodeUnit` objects with analysis results attached as `Facts`.
 
 ## Key Features
 
-- **CPG-Centered**: Built on Joern's Code Property Graph - no abstraction layers
+- **CPG-Centered**: Built on Joern's Code Property Graph
+- **Graph-Based IR**: NetworkX graph of CodeUnits for flexible queries
+- **Fact System**: Unit facts (per-node) and Relation facts (graph-level) for analysis results
 - **Direct Query Access**: Write CPG queries directly for maximum flexibility
-- **Persistent Facts**: All analysis results stored as CPG Tags
-- **Analysis Agents**: Composable primitives and detectors using AutoGen-Core
+- **Analysis Agents**: Composable analyses using AutoGen-Core
 - **Multi-Language**: Supports all Joern languages (C/C++, Java, JavaScript/TypeScript, Python, Go, Kotlin)
-- **TreeSitter Fallback**: Minimal support for languages not supported by Joern
 
 ## Architecture
 
 AuditZoo has two phases:
 
-1. **Preprocessing**: Generate CPG from source code using Joern (or TreeSitter for unsupported languages)
-2. **Analysis**: Run analysis agents that query CPG and store facts as tags
+1. **Preprocessing**: Generate CPG from source code using Joern
+2. **Analysis**: Run analysis agents that query CPG via IRView (NetworkX graph of CodeUnits)
 
-**Design Philosophy**: The CPG database is the single source of truth for both program structure and analysis results. No separate fact database - everything is CPG tags.
+**Design Philosophy**: The CPG is the source of truth for program structure. Analysis results are stored as Facts (both in-memory on CodeUnits and persisted to CPG tags).
 
 See [docs/auditzoo_spec.md](docs/auditzoo_spec.md) for detailed architecture.
 
@@ -30,7 +30,7 @@ See [docs/auditzoo_spec.md](docs/auditzoo_spec.md) for detailed architecture.
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/auditzoo
+git clone https://github.com/BiScope-AI/auditzoo
 cd auditzoo
 
 # Run automated installation
@@ -46,45 +46,89 @@ conda activate auditzoo
 
 ```python
 import asyncio
-import os
-from auditzoo.core.ir.model import ProgramId
 from auditzoo.backends.base import JoernConfig
 from auditzoo.backends.joern.backend import JoernBackend
 from auditzoo.core.ir.view import IRView
+from auditzoo.core.ir.facts import SummaryFact, CallFact
 
 async def main():
     # Configure Joern backend
     config = JoernConfig(
         language="c",
-        joern_path=os.path.join(os.environ.get('CONDA_PREFIX', '/opt'), 'opt/joern'),
-        db_path="./project.cpg"
+        source_path="./my_project",
+        analysis_path="./analysis",
+        joern_path="/opt/joern"
     )
 
     # Create backend and connect
-    backend = JoernBackend(config)
-    await backend.connect()
+    async with JoernBackend(config) as backend:
+        # Create IR view (graph of CodeUnits)
+        view = IRView(backend)
 
-    # Create IR view
-    program_id = ProgramId("my_project")
-    ir_view = IRView(backend, program_id)
+        # Load functions into graph
+        functions = await view.get_all_functions()
+        print(f"Loaded {len(functions)} functions")
 
-    # Get all functions
-    functions = await ir_view.get_functions()
-    for func in functions:
-        print(f"Function: {func.name} at {func.file}:{func.start_line}")
+        # Load call graph
+        await view.load_call_graph()
 
-    # Direct CPG query
-    result = await ir_view.cpg_query("""
-        cpg.method.name("main").callOut.map { call =>
-            Map("name" -> call.name, "location" -> call.location)
-        }.toJson
-    """)
-    print(f"Calls from main: {result}")
+        # Query the graph
+        foo = view.get_function_by_signature("foo()")
+        if foo:
+            callers = view.get_callers(foo)
+            callees = view.get_callees(foo)
+            print(f"foo() has {len(callers)} callers and {len(callees)} callees")
 
-    await backend.disconnect()
+        # Add analysis results as facts
+        view.add_unit_fact(foo, SummaryFact(
+            name="vulnerability",
+            summary="Buffer overflow detected",
+            details={"severity": "high", "cwe": "CWE-120"}
+        ))
+
+        # Add additional call edges
+        view.add_relation_fact(CallFact(
+            source_node_id="caller_id",
+            target_node_id="callee_id",
+            call_context="dynamic dispatch",
+            confidence=0.8
+        ))
+
+        # Find all vulnerable units
+        vulnerable = view.find_units_with_unit_fact("vulnerability")
+        print(f"Found {len(vulnerable)} vulnerable functions")
 
 asyncio.run(main())
 ```
+
+## Core Concepts
+
+### CodeUnit
+A flexible unit of code at any granularity (file, class, function, statement). Each has:
+- `id`: Unique identifier
+- `unit_type`: Kind (FUNCTION, CLASS, FILE, etc.)
+- `code`: Source code text
+- `signature`: Human-readable name
+- `location`: Source file and line numbers
+- `cpg_node_id`: Link to CPG node (optional)
+
+### IRView
+NetworkX graph of CodeUnits with:
+- **Nodes**: CodeUnits
+- **Edges**: Relations (calls, data flow, inheritance)
+- **Unit Facts**: Attached to individual nodes
+- **Relation Facts**: Stored globally, connect two nodes
+
+### Facts
+Two types of facts for analysis results:
+
+**Unit Facts** (attached to single CodeUnit):
+- `SummaryFact`: General analysis results
+- `CustomUnitFact`: Domain-specific annotations
+
+**Relation Facts** (connect two CodeUnits):
+- `CallFact`: Function call relationships
+- `CustomRelationFact`: Custom relationships (dataflow, inheritance)
 
 ## Language Support
 
@@ -96,26 +140,19 @@ asyncio.run(main())
 | Python | Joern | ✅ Full |
 | Go | Joern | ✅ Full |
 | Kotlin | Joern | ✅ Full |
-| Rust | TreeSitter | ⚠️ Limited (AST, basic call graph only) |
-| Ruby | TreeSitter | ⚠️ Limited |
-| Others | TreeSitter | ⚠️ Limited (if grammar available) |
 
 ## Project Structure
 
 ```
 auditzoo/
 ├── core/
-│   ├── ir/              # CPG wrapper (model, backend API, view)
+│   ├── ir/              # IR model, view, backend API, facts
 │   ├── agents/          # Core infrastructure agents
 │   ├── protocol/        # Message types and envelopes
 │   └── runtime/         # AutoGen-Core runtime integration
 ├── backends/
-│   ├── joern/           # Joern CPG backend (primary)
-│   ├── treesitter/      # TreeSitter fallback backend
-│   └── ingestion.py     # Backend selection and CPG creation
-├── contracts/
-│   ├── facts.py         # Fact types (serialize to CPG tags)
-│   └── capabilities.py  # Agent capability schemas
+│   ├── joern/           # Joern CPG backend
+│   └── ingestion.py     # Backend setup
 ├── sdk/
 │   ├── base_agent.py    # Base class for analysis agents
 │   ├── context.py       # Analysis context helper
@@ -127,35 +164,28 @@ auditzoo/
 
 ## Documentation
 
-- **[INSTALL.md](INSTALL.md)** - Installation guide for users
-- **[DEVELOP.md](DEVELOP.md)** - Development setup and contributing
-- **[docs/auditzoo_spec.md](docs/auditzoo_spec.md)** - Complete architecture specification
+- **[INSTALL.md](INSTALL.md)** - Installation guide
+- **[DEVELOP.md](DEVELOP.md)** - Development setup
+- **[docs/auditzoo_spec.md](docs/auditzoo_spec.md)** - Architecture specification
 
 ## Development Status
 
 **Current Status:**
-- ✅ CPG-centered architecture designed
-- ✅ Core IR components (CPGBackend, IRView, tag management)
-- ✅ Fact serialization framework
-- ✅ AutoGen-Core integration (agents, runtime)
-- ⚠️ Joern backend (partial - needs full implementation)
-- ❌ TreeSitter backend (not started)
-- ✅ Example analysis structure
-
-**Next Steps:**
-1. Complete Joern backend with full CPG query support
-2. Implement TreeSitter CPG emulator
-3. Update core agents for new IR
-4. Add more example analyses
-5. Write comprehensive documentation
+- ✅ CodeUnit model with mandatory IDs
+- ✅ IRView with NetworkX graph
+- ✅ Unit facts and Relation facts system
+- ✅ Serializable graph updaters
+- ✅ AutoGen-Core integration
+- ⚠️ Joern backend (partial implementation)
+- ⚠️ Analysis agents (under development)
 
 ## Contributing
 
-We welcome contributions! See [DEVELOP.md](DEVELOP.md) for development setup and guidelines.
+We welcome contributions! See [DEVELOP.md](DEVELOP.md) for development setup.
 
 Quick development setup:
 ```bash
-git clone https://github.com/your-username/auditzoo
+git clone https://github.com/BiScope-AI/auditzoo
 cd auditzoo
 ./install-dev.sh
 conda activate auditzoo-dev
@@ -169,4 +199,4 @@ conda activate auditzoo-dev
 
 - **Joern**: https://joern.io - Code Property Graph framework
 - **AutoGen-Core**: https://github.com/microsoft/autogen - Multi-agent framework
-- **TreeSitter**: https://tree-sitter.github.io - Parsing library
+- **NetworkX**: https://networkx.org - Graph library

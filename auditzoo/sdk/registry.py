@@ -1,62 +1,51 @@
 """Registry helpers for analysis agents.
 
-This module provides utilities for registering analysis agent types and
-their capabilities with the plugin registry.
+This module provides utilities for registering analysis agent types.
+Agents are called directly by ID (no capabilities-based routing).
 """
 
 from collections.abc import Callable
 
-from auditzoo.contracts.capabilities import AgentCapability
-
 # Global registry of agent types
 _agent_registry: dict[str, type] = {}
-_capability_registry: dict[str, AgentCapability] = {}
 
 
 def register_analysis_agent(
-    agent_type_id: str, agent_class: type, capability: AgentCapability
+    agent_type_id: str, agent_class: type, description: str = ""
 ):
     """Register an analysis agent type.
 
     Args:
-        agent_type_id: Unique identifier for this agent type
+        agent_type_id: Unique identifier for this agent type (e.g., "slicing")
         agent_class: The agent class
-        capability: Capability description
+        description: Optional human-readable description
     """
     _agent_registry[agent_type_id] = agent_class
-    _capability_registry[agent_type_id] = capability
 
 
-def analysis_agent(capability: AgentCapability) -> Callable:
+def analysis_agent(agent_type_id: str, description: str = "") -> Callable:
     """Decorator to register an analysis agent.
 
     Usage:
-        @analysis_agent(AgentCapability(
-            agent_type_id="slicing",
-            task_kinds={"slicing.request"},
-            produces={FactType.SLICE}
-        ))
+        @analysis_agent("slicing", "Performs program slicing analysis")
         class SlicingAgent(BaseAnalysisAgent):
             ...
     """
 
     def decorator(cls: type) -> type:
-        # Extract agent_type_id from capability
-        agent_type_id = capability.agent_type_id
-        register_analysis_agent(agent_type_id, cls, capability)
+        register_analysis_agent(agent_type_id, cls, description)
         return cls
 
     return decorator
 
 
 def get_registered_agents() -> dict[str, type]:
-    """Get all registered agent types."""
+    """Get all registered agent types.
+
+    Returns:
+        Dictionary mapping agent_type_id to agent class
+    """
     return dict(_agent_registry)
-
-
-def get_registered_capabilities() -> dict[str, AgentCapability]:
-    """Get all registered capabilities."""
-    return dict(_capability_registry)
 
 
 def get_agent_factory(agent_type_id: str) -> Callable:
@@ -67,6 +56,9 @@ def get_agent_factory(agent_type_id: str) -> Callable:
 
     Returns:
         A factory function that takes instance_id and returns an agent instance
+
+    Raises:
+        ValueError: If agent_type_id is not registered
     """
     agent_class = _agent_registry.get(agent_type_id)
     if not agent_class:

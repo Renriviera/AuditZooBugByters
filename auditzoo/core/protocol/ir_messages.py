@@ -6,7 +6,7 @@ This module defines the messages used to interact with IRStoreAgent.
 from dataclasses import dataclass, field
 from typing import Any
 
-from auditzoo.contracts.facts import Fact, FactType
+from auditzoo.core.ir.facts import RelationFact, UnitFact
 
 
 @dataclass
@@ -15,12 +15,12 @@ class GetFactsRequest:
 
     Attributes:
         program_id: Program to get facts for
-        fact_types: Optional filter by fact types (None = all types)
+        fact_types: Optional filter by fact names (None = all types)
         filters: Additional filters (fact-type specific)
     """
 
     program_id: str
-    fact_types: list[FactType] | None = None
+    fact_types: list[str] | None = None
     filters: dict[str, Any] = field(default_factory=dict)
 
 
@@ -35,7 +35,7 @@ class GetFactsResponse:
     """
 
     program_id: str
-    facts: list[Fact]
+    facts: list[UnitFact | RelationFact]
     version: int
 
 
@@ -46,11 +46,11 @@ class UpdateFactsRequest:
     Attributes:
         program_id: Program to update facts for
         facts: Facts to add or update
-        replace: If True, replace existing facts of same type; if False, append
+        replace: If True, replace existing facts of same name; if False, append
     """
 
     program_id: str
-    facts: list[Fact]
+    facts: list[UnitFact | RelationFact]
     replace: bool = False
 
 
@@ -92,11 +92,11 @@ class CheckFactsExistRequest:
 
     Attributes:
         program_id: Program to check
-        fact_types: Fact types to check for
+        fact_types: Fact names to check for
     """
 
     program_id: str
-    fact_types: list[FactType]
+    fact_types: list[str]
 
 
 @dataclass
@@ -105,10 +105,10 @@ class CheckFactsExistResponse:
 
     Attributes:
         program_id: Program that was checked
-        existing: Fact types that exist
-        missing: Fact types that don't exist
+        existing: Fact names that exist
+        missing: Fact names that don't exist
     """
 
     program_id: str
-    existing: list[FactType]
-    missing: list[FactType]
+    existing: list[str]
+    missing: list[str]

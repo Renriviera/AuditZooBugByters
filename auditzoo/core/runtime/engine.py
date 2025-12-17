@@ -6,18 +6,16 @@ the core agents and analysis agents.
 
 import logging
 
-from autogen_core import AgentId, SingleThreadedAgentRuntime
+from autogen_core import SingleThreadedAgentRuntime
 
-from auditzoo.core.agents.dependency_mgr import DependencyManagerAgent
 from auditzoo.core.agents.ir_store import IRStoreAgent
 from auditzoo.core.agents.plugin_registry import (
     PluginRegistryAgent,
     RegisterAgentRequest,
 )
-from auditzoo.core.agents.task_router import TaskRouterAgent
 from auditzoo.core.ir.view import IRView
 from auditzoo.sdk.context import AnalysisContext
-from auditzoo.sdk.registry import get_agent_factory, get_registered_capabilities
+from auditzoo.sdk.registry import get_agent_factory, get_registered_agents
 
 logger = logging.getLogger("auditzoo.runtime")
 
@@ -26,18 +24,19 @@ class AuditZooRuntime:
     """Main runtime for auditzoo.
 
     This class:
-    - Bootstraps the core infrastructure agents
+    - Bootstraps the core infrastructure agents (IRStore, PluginRegistry)
     - Registers analysis agent types
     - Wires in IR views from preprocessing
     - Provides the main interface for starting/stopping the analysis runtime
+
+    Agents communicate directly via AutoGen-Core message passing by agent ID.
+    No task routing or dependency management - users orchestrate analyses manually.
     """
 
     def __init__(self):
         """Initialize the runtime."""
         self.ir_store: IRStoreAgent | None = None
         self.plugin_registry: PluginRegistryAgent | None = None
-        self.task_router: TaskRouterAgent | None = None
-        self.dependency_manager: DependencyManagerAgent | None = None
         self.analysis_context: AnalysisContext | None = None
         self._runtime: SingleThreadedAgentRuntime | None = None
         self._initialized = False
@@ -60,23 +59,13 @@ class AuditZooRuntime:
         # Create core infrastructure agents
         self.ir_store = IRStoreAgent()
         self.plugin_registry = PluginRegistryAgent()
-        self.task_router = TaskRouterAgent(self.plugin_registry)
-        self.dependency_manager = DependencyManagerAgent(
-            self.ir_store, self.plugin_registry, self.task_router
-        )
 
-        # Create analysis context
-        self.analysis_context = AnalysisContext(
-            self.ir_store, self.dependency_manager, self.task_router
-        )
+        # Create analysis context (only needs ir_store now)
+        self.analysis_context = AnalysisContext(self.ir_store)
 
         # Register core agents with AutoGen-Core runtime
         await self._runtime.register("ir_store", lambda: self.ir_store)  # type: ignore[attr-defined]
         await self._runtime.register("plugin_registry", lambda: self.plugin_registry)  # type: ignore[attr-defined]
-        await self._runtime.register("task_router", lambda: self.task_router)  # type: ignore[attr-defined]
-        await self._runtime.register(  # type: ignore[attr-defined]
-            "dependency_manager", lambda: self.dependency_manager
-        )
 
         logger.info("Core agents created and registered")
 
@@ -101,10 +90,14 @@ class AuditZooRuntime:
         #     logger.warning(f"Could not import some analysis modules: {e}")
 
         # Register agent types with plugin registry and AutoGen-Core runtime
-        capabilities = get_registered_capabilities()
-        for agent_type_id, capability in capabilities.items():
-            # Register with plugin registry
-            request = RegisterAgentRequest(capability=capability)
+        registered_agents = get_registered_agents()
+        for agent_type_id, _agent_class in registered_agents.items():
+            # Register with plugin registry (simple metadata tracking)
+            request = RegisterAgentRequest(
+                agent_id=f"{agent_type_id}/default",
+                agent_type_id=agent_type_id,
+                description=f"{agent_type_id} analysis agent",
+            )
             await self.plugin_registry.handle_message(request)  # type: ignore[union-attr]
 
             # Register agent factory with AutoGen-Core runtime
@@ -144,7 +137,7 @@ class AuditZooRuntime:
     async def start(self):
         """Start the runtime.
 
-        After this, agents can process tasks.
+        After this, agents can process messages.
         """
         if not self._initialized:
             raise RuntimeError("Runtime not initialized")
@@ -176,23 +169,6 @@ class AuditZooRuntime:
 
         self._running = False
         logger.info("Runtime stopped")
-
-    async def submit_task(self, task):
-        """Submit a task to the runtime for processing.
-
-        Args:
-            task: TaskEnvelope to process
-
-        Returns:
-            Task ID for tracking
-        """
-        if not self._running:
-            raise RuntimeError("Runtime not running")
-
-        # Send task to task router via AutoGen-Core runtime
-        await self._runtime.send_message(task, AgentId("task_router", "default"))  # type: ignore[union-attr]
-
-        return task.task_id
 
     def is_running(self) -> bool:
         """Check if the runtime is running."""

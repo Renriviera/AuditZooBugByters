@@ -6,6 +6,7 @@ program analyses using AutoGen-Core agents.
 
 __version__ = "0.1.0"
 
+import auditzoo.backends as backends
 from auditzoo.core.runtime.engine import (
     AuditZooRuntime,
     create_runtime,
@@ -13,4 +14,10 @@ from auditzoo.core.runtime.engine import (
     shutdown_runtime,
 )
 
-__all__ = ["create_runtime", "get_runtime", "shutdown_runtime", "AuditZooRuntime"]
+__all__ = [
+    "create_runtime",
+    "get_runtime",
+    "shutdown_runtime",
+    "AuditZooRuntime",
+    "backends",
+]

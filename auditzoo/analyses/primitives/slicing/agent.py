@@ -5,23 +5,12 @@ Implements program slicing (backward and forward).
 
 from typing import Any
 
-from auditzoo.contracts.capabilities import AgentCapability
-from auditzoo.contracts.facts import FactType
 from auditzoo.core.protocol.envelope import ResultEnvelope, TaskEnvelope
 from auditzoo.sdk.base_agent import AnalysisContext, BaseAnalysisAgent
 from auditzoo.sdk.registry import analysis_agent
 
 
-@analysis_agent(
-    AgentCapability(
-        agent_type_id="slicing",
-        task_kinds={"slicing.request"},
-        produces={FactType.SLICE},
-        requires=set(),
-        languages=set(),  # All languages
-        description="Program slicing analysis (backward and forward)",
-    )
-)
+@analysis_agent("slicing", "Program slicing analysis (backward and forward)")
 class SlicingAnalysisAgent(BaseAnalysisAgent):
     """Agent that performs program slicing.
 
@@ -30,17 +19,6 @@ class SlicingAnalysisAgent(BaseAnalysisAgent):
     - Compute backward or forward slices
     - Handle interprocedural slicing
     """
-
-    @property
-    def capabilities(self) -> AgentCapability:
-        """Return agent capabilities."""
-        return AgentCapability(
-            agent_type_id="slicing",
-            task_kinds={"slicing.request"},
-            produces={FactType.SLICE},
-            requires=set(),
-            languages=set(),
-        )
 
     async def handle_task(
         self, task: TaskEnvelope, context: AnalysisContext

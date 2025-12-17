@@ -7,18 +7,18 @@ This guide covers installation for **users** who want to use AuditZoo for progra
 ## Prerequisites
 
 - **Conda** (Miniconda or Anaconda) - [Install here](https://docs.conda.io/en/latest/miniconda.html)
-- **Java 11+** (required by Joern)
+- **Java 17+** (required by Joern)
 - **Git**
 
 Check your Java version:
 ```bash
-java -version  # Should be 11 or higher
+java -version  # Should be 17 or higher
 ```
 
 If Java is not installed:
 ```bash
 # Install via conda (recommended)
-conda install -c conda-forge openjdk=11
+conda install -c conda-forge openjdk=17
 ```
 
 ## Quick Installation (Recommended)
@@ -183,11 +183,11 @@ export PATH="$CONDA_PREFIX/opt/joern/joern-cli:$PATH"
 ### Java version issues
 
 ```bash
-# Check Java version (must be 11+)
+# Check Java version (must be 17+)
 java -version
 
 # If version is too old, install via conda
-conda install -c conda-forge openjdk=11
+conda install -c conda-forge openjdk=17
 
 # Verify again
 java -version

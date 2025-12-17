@@ -1,6 +1,6 @@
 """Base class for core infrastructure agents.
 
-This module provides a base class for core agents (IRStore, TaskRouter, etc.)
+This module provides a base class for core agents (IRStore, PluginRegistry, etc.)
 with common utilities for messaging and logging.
 """
 

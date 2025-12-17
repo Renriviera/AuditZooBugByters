@@ -5,23 +5,12 @@ Detects potential access control vulnerabilities.
 
 from typing import Any
 
-from auditzoo.contracts.capabilities import AgentCapability
-from auditzoo.contracts.facts import FactType
 from auditzoo.core.protocol.envelope import ResultEnvelope, TaskEnvelope
 from auditzoo.sdk.base_agent import AnalysisContext, BaseAnalysisAgent
 from auditzoo.sdk.registry import analysis_agent
 
 
-@analysis_agent(
-    AgentCapability(
-        agent_type_id="access_control_detector",
-        task_kinds={"analysis.access_control"},
-        produces={FactType.ISSUE},
-        requires={FactType.CALL_GRAPH, FactType.TAINT},
-        languages=set(),  # All languages
-        description="Detects access control vulnerabilities",
-    )
-)
+@analysis_agent("access_control_detector", "Detects access control vulnerabilities")
 class AccessControlDetectorAgent(BaseAnalysisAgent):
     """Agent that detects access control issues.
 
@@ -29,18 +18,13 @@ class AccessControlDetectorAgent(BaseAnalysisAgent):
     - Identify security-sensitive functions
     - Check for proper authentication/authorization checks
     - Detect missing or bypassed access controls
-    """
 
-    @property
-    def capabilities(self) -> AgentCapability:
-        """Return agent capabilities."""
-        return AgentCapability(
-            agent_type_id="access_control_detector",
-            task_kinds={"analysis.access_control"},
-            produces={FactType.ISSUE},
-            requires={FactType.CALL_GRAPH, FactType.TAINT},
-            languages=set(),
-        )
+    This agent would typically require:
+    - Call graph facts
+    - Taint analysis facts
+    And produces:
+    - Issue facts with access control vulnerability details
+    """
 
     async def handle_task(
         self, task: TaskEnvelope, context: AnalysisContext

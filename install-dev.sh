@@ -22,16 +22,26 @@ if ! command -v conda &> /dev/null; then
     exit 1
 fi
 
-# Check if Java is installed
+# Check if Java is installed and version is 17+
 if ! command -v java &> /dev/null; then
-    echo -e "${YELLOW}Warning: Java is not installed${NC}"
-    echo "Joern requires Java 11+. Please install Java before continuing."
-    read -p "Continue anyway? (y/n) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        exit 1
-    fi
+    echo -e "${RED}Error: Java is not installed${NC}"
+    echo "Joern requires Java 17+. Please install Java:"
+    echo "  conda install -c conda-forge openjdk=17"
+    exit 1
 fi
+
+# Check Java version
+JAVA_VERSION=$(java -version 2>&1 | head -n 1 | awk -F '"' '{print $2}')
+JAVA_MAJOR=$(echo "$JAVA_VERSION" | awk -F '.' '{print $1}')
+
+if [ "$JAVA_MAJOR" -lt 17 ]; then
+    echo -e "${RED}Error: Java version $JAVA_VERSION is too old${NC}"
+    echo "Joern requires Java 17+. Please upgrade Java:"
+    echo "  conda install -c conda-forge openjdk=17"
+    exit 1
+fi
+
+echo -e "${GREEN}✓ Java version $JAVA_VERSION detected${NC}"
 
 # Check if git is configured
 if ! git config user.name &> /dev/null || ! git config user.email &> /dev/null; then

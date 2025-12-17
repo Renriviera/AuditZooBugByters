@@ -1,142 +1,102 @@
-"""PluginRegistryAgent: Registry of agent types and capabilities.
+"""PluginRegistryAgent: Simple registry of analysis agents.
 
-This agent maintains a type-level registry of analysis agents and their
-capabilities (task kinds, fact types, languages).
+This agent maintains a registry of analysis agents by their agent_id.
+Agents are called directly by ID (no capabilities-based routing).
 """
 
 from dataclasses import dataclass
 
-from auditzoo.contracts.capabilities import AgentCapability
-from auditzoo.contracts.facts import FactType
 from auditzoo.core.agents.base import BaseZooAgent
 
 
 @dataclass
 class RegisterAgentRequest:
-    """Request to register an agent type."""
+    """Request to register an agent."""
 
-    capability: AgentCapability
-
-
-@dataclass
-class QueryAgentsByTaskRequest:
-    """Request to find agents that can handle a task kind."""
-
-    task_kind: str
-    language: str | None = None
-
-
-@dataclass
-class QueryAgentsByTaskResponse:
-    """Response with agents that can handle a task."""
-
-    agent_type_ids: list[str]
-
-
-@dataclass
-class QueryAgentsByFactRequest:
-    """Request to find agents that can produce a fact type."""
-
-    fact_type: FactType
-    language: str | None = None
-
-
-@dataclass
-class QueryAgentsByFactResponse:
-    """Response with agents that can produce a fact."""
-
-    agent_type_ids: list[str]
-
-
-@dataclass
-class GetCapabilityRequest:
-    """Request to get capability info for an agent type."""
-
+    agent_id: str
     agent_type_id: str
+    description: str = ""
 
 
 @dataclass
-class GetCapabilityResponse:
-    """Response with capability information."""
+class GetAgentRequest:
+    """Request to get agent info."""
 
-    capability: AgentCapability | None
+    agent_id: str
+
+
+@dataclass
+class GetAgentResponse:
+    """Response with agent information."""
+
+    agent_id: str | None
+    agent_type_id: str | None
+    description: str | None
 
 
 class PluginRegistryAgent(BaseZooAgent):
-    """Registry of agent types and their capabilities.
+    """Simple registry of analysis agents.
 
-    This agent maintains a type-level registry (not instance-level).
-    It answers queries like:
-    - Which agent types can handle task kind X?
-    - Which agent types can produce fact type Y?
+    This agent maintains a registry of agent IDs and basic metadata.
+    Agents are called directly by their agent_id.
+
+    No capabilities-based routing - users must know which agent to call.
     """
 
     def __init__(self):
         super().__init__("plugin_registry")
-        self._capabilities: dict[str, AgentCapability] = {}
+        # Map: agent_id -> (agent_type_id, description)
+        self._agents: dict[str, tuple[str, str]] = {}
 
-    def register_agent_type(self, capability: AgentCapability):
-        """Register an agent type with its capabilities."""
-        self._capabilities[capability.agent_type_id] = capability
-        self.log_info(
-            f"Registered agent type: {capability.agent_type_id}, "
-            f"tasks={capability.task_kinds}, produces={capability.produces}"
-        )
+    def register_agent(self, agent_id: str, agent_type_id: str, description: str = ""):
+        """Register an agent with its ID and metadata.
+
+        Args:
+            agent_id: Unique agent ID (e.g., "slicing/default")
+            agent_type_id: Agent type (e.g., "slicing")
+            description: Optional human-readable description
+        """
+        self._agents[agent_id] = (agent_type_id, description)
+        self.log_info(f"Registered agent: {agent_id} (type: {agent_type_id})")
 
     async def handle_message(self, message):
         """Handle incoming messages."""
         if isinstance(message, RegisterAgentRequest):
-            self.register_agent_type(message.capability)
+            self.register_agent(
+                message.agent_id, message.agent_type_id, message.description
+            )
             return True
-        elif isinstance(message, QueryAgentsByTaskRequest):
-            return self._query_by_task(message)
-        elif isinstance(message, QueryAgentsByFactRequest):
-            return self._query_by_fact(message)
-        elif isinstance(message, GetCapabilityRequest):
-            return self._get_capability(message)
+        elif isinstance(message, GetAgentRequest):
+            return self._get_agent(message)
         else:
             self.log_warning(f"Unknown message type: {type(message)}")
             return None
 
-    def _query_by_task(
-        self, request: QueryAgentsByTaskRequest
-    ) -> QueryAgentsByTaskResponse:
-        """Find agent types that can handle a task kind."""
-        matching = []
-        for agent_id, capability in self._capabilities.items():
-            if capability.can_handle_task(request.task_kind):
-                if request.language is None or capability.supports_language(
-                    request.language
-                ):
-                    matching.append(agent_id)
+    def _get_agent(self, request: GetAgentRequest) -> GetAgentResponse:
+        """Get agent info by ID."""
+        agent_info = self._agents.get(request.agent_id)
+        if agent_info:
+            agent_type_id, description = agent_info
+            return GetAgentResponse(
+                agent_id=request.agent_id,
+                agent_type_id=agent_type_id,
+                description=description,
+            )
+        else:
+            return GetAgentResponse(agent_id=None, agent_type_id=None, description=None)
 
-        self.log_debug(
-            f"Found {len(matching)} agents for task {request.task_kind}: {matching}"
-        )
-        return QueryAgentsByTaskResponse(agent_type_ids=matching)
+    def get_all_agents(self) -> dict[str, tuple[str, str]]:
+        """Get all registered agents.
 
-    def _query_by_fact(
-        self, request: QueryAgentsByFactRequest
-    ) -> QueryAgentsByFactResponse:
-        """Find agent types that can produce a fact type."""
-        matching = []
-        for agent_id, capability in self._capabilities.items():
-            if capability.can_produce_fact(request.fact_type):
-                if request.language is None or capability.supports_language(
-                    request.language
-                ):
-                    matching.append(agent_id)
+        Returns:
+            Dictionary mapping agent_id to (agent_type_id, description)
+        """
+        return dict(self._agents)
 
-        self.log_debug(
-            f"Found {len(matching)} agents for fact {request.fact_type}: {matching}"
-        )
-        return QueryAgentsByFactResponse(agent_type_ids=matching)
+    def list_agent_ids(self) -> list[str]:
+        """Get list of all registered agent IDs.
 
-    def _get_capability(self, request: GetCapabilityRequest) -> GetCapabilityResponse:
-        """Get capability info for a specific agent type."""
-        capability = self._capabilities.get(request.agent_type_id)
-        return GetCapabilityResponse(capability=capability)
-
-    def get_all_capabilities(self) -> dict[str, AgentCapability]:
-        """Get all registered capabilities."""
-        return dict(self._capabilities)
+        Returns:
+            List of agent IDs
+        """
+        return list(self._agents.keys())

@@ -3,15 +3,57 @@
 Common configuration, error handling, and utilities shared by all backends.
 """
 
+import os
 from dataclasses import dataclass
+
+from faker import Faker
+
+from auditzoo.core.ir.backend_api import BackendConfigError
+
+_faker = Faker()
 
 
 @dataclass
 class BackendConfig:
     """Base configuration for backends."""
 
-    backend_type: str  # "lsp", "joern", "treesitter"
-    language: str
+    backend_type: str  # "joern" or "treesitter"
+    language: str  # language for the project of interest
+    source_path: str  # Path to source code to parse
+    analysis_path: str  # Path to store analysis artifacts
+
+    def __init__(
+        self,
+        backend_type: str,
+        source_path: str,
+        language: str,
+        analysis_path: str | None = None,
+    ):
+        self.backend_type = backend_type
+        self.source_path = os.path.abspath(os.path.expanduser(source_path))
+        self.language = language
+        self.analysis_path = self._get_analysis_path(self.source_path, analysis_path)
+
+    @staticmethod
+    def _get_analysis_path(source_path: str, analysis_path: str | None = None) -> str:
+        """Get the path for storing analysis artifacts.
+
+        Args:
+            source_path: Path to the source code
+            analysis_path: Optional custom analysis path
+        Returns:
+            Path to store analysis artifacts
+        """
+        if analysis_path:
+            return os.path.abspath(os.path.expanduser(analysis_path))
+
+        # If source_path is a file, use its parent directory, else use source_path
+        if os.path.isfile(source_path):
+            return os.path.abspath(
+                os.path.join(os.path.dirname(source_path), ".auditzoo")
+            )
+        else:
+            return os.path.abspath(os.path.join(source_path, ".auditzoo"))
 
 
 @dataclass
@@ -19,13 +61,34 @@ class JoernConfig(BackendConfig):
     """Configuration for Joern backend."""
 
     joern_path: str  # Path to Joern installation
-    db_path: str | None = None  # Path to CPG database
+    db_path: str | None = None  # Path to existing CPG database
     host: str = "localhost"
     port: int = 8080
 
-    def __init__(self, language: str, joern_path: str, **kwargs):
-        super().__init__(backend_type="joern", language=language)
+    def __init__(
+        self,
+        source_path: str,
+        language: str | None = None,
+        analysis_path: str | None = None,
+        joern_path: str | None = None,
+        **kwargs,
+    ):
+        super().__init__(
+            backend_type="joern",
+            source_path=source_path,
+            language=language if language is not None else "auto",
+            analysis_path=analysis_path,
+        )
+        if self.language is None:
+            raise BackendConfigError("Language must be specified for Joern backend")
+
+        joern_path = kwargs.get("joern_path")
+        if joern_path is None:
+            joern_path = os.path.join(
+                os.environ.get("CONDA_PREFIX", "/opt"), "opt/joern"
+            )
         self.joern_path = joern_path
+
         self.db_path = kwargs.get("db_path")
         self.host = kwargs.get("host", "localhost")
         self.port = kwargs.get("port", 8080)
@@ -37,24 +100,17 @@ class TreeSitterConfig(BackendConfig):
 
     grammar_path: str | None = None
 
-    def __init__(self, language: str, **kwargs):
-        super().__init__(backend_type="treesitter", language=language)
+    def __init__(
+        self,
+        source_path: str,
+        language: str,
+        analysis_path: str | None = None,
+        **kwargs,
+    ):
+        super().__init__(
+            backend_type="treesitter",
+            source_path=source_path,
+            language=language,
+            analysis_path=analysis_path,
+        )
         self.grammar_path = kwargs.get("grammar_path")
-
-
-class BackendError(Exception):
-    """Base exception for backend errors."""
-
-    pass
-
-
-class BackendConnectionError(BackendError):
-    """Error connecting to backend."""
-
-    pass
-
-
-class BackendQueryError(BackendError):
-    """Error executing a query."""
-
-    pass

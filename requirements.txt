@@ -8,6 +8,10 @@ autogen-ext>=0.7
 # TreeSitter (optional - for unsupported languages)
 tree-sitter>=0.20.0
 
+# CPG Query Language client library
+cpgqls-client>=0.0.9
+
 # Utility libraries
 dataclasses-json>=0.6.0  # JSON serialization of dataclasses
 aiofiles>=23.0.0  # Async file I/O
+Faker>=38.2.0  # Random text generation

@@ -3,12 +3,15 @@
 This module implements the IRBackend interface using Joern CPG queries.
 """
 
+from pathlib import Path
 from typing import Any
 
 from auditzoo.backends.base import JoernConfig
 from auditzoo.backends.joern.client import JoernClient
 from auditzoo.core.ir.backend_api import CPGBackend
-from auditzoo.core.ir.model import Function, ProgramId
+from auditzoo.core.ir.facts.base import RelationFact, UnitFact
+from auditzoo.core.ir.model import CodeUnit, CodeUnitKind, CodeUnitRelation
+from auditzoo.core.ir.model.base import RelationDirection, RelationKind
 
 
 class JoernBackend(CPGBackend):
@@ -34,7 +37,11 @@ class JoernBackend(CPGBackend):
 
     async def connect(self) -> None:
         """Connect to Joern and load the CPG."""
-        await self.client.connect(self.config.db_path)
+        await self.client.connect(
+            language=self.config.language,
+            source_path=self.config.source_path,
+            analysis_path=self.config.analysis_path,
+        )
         self._connected = True
 
     async def disconnect(self) -> None:
@@ -57,148 +64,96 @@ class JoernBackend(CPGBackend):
         Returns:
             Query results (typically JSON-decoded dict/list)
         """
-        raise AssertionError("unimplemented")
-
-    def supports_feature(self, feature: str) -> bool:
-        """Check if backend supports a specific feature.
-
-        Args:
-            feature: Feature name (e.g., "dataflow", "controlflow", "taint")
-
-        Returns:
-            True if feature is supported
-        """
-        raise AssertionError("unimplemented")
+        raise NotImplementedError()
 
     # ===== Tag Management =====
 
-    async def add_tag(self, cpg_node_id: str, tag_name: str, tag_data: dict) -> None:
-        """Add a tag to a CPG node.
-
-        Args:
-            cpg_node_id: CPG node ID
-            tag_name: Tag name (typically fact type)
-            tag_data: Tag data (JSON-compatible dict)
-        """
-        raise AssertionError("unimplemented")
-
-    async def get_tags(
-        self, cpg_node_id: str, tag_name: str | None = None
-    ) -> list[dict]:
-        """Get tags attached to a CPG node.
-
-        Args:
-            cpg_node_id: CPG node ID
-            tag_name: Optional tag name filter
+    def get_relation_tags(self) -> list[RelationFact]:
+        """Get relation facts attached to the CPG.
 
         Returns:
-            List of tag data dicts
+            List of RelationFact objects
         """
-        raise AssertionError("unimplemented")
+        raise NotImplementedError()
 
-    async def query_by_tag(self, tag_name: str) -> list[str]:
-        """Find CPG node IDs that have a specific tag.
+    def get_unit_tags(self, unit: CodeUnit) -> list[UnitFact]:
+        """Get tags attached to a code unit.
 
         Args:
-            tag_name: Tag name to search for
+            unit: CodeUnit to get tags for
 
         Returns:
-            List of CPG node IDs
+            List of UnitFact objects
         """
-        raise AssertionError("unimplemented")
+        raise NotImplementedError()
 
-    async def get_all_tags(self, tag_name: str | None = None) -> dict[str, list[dict]]:
-        """Get all tags in the CPG.
+    def set_unit_tag(self, unit: CodeUnit, fact: UnitFact) -> None:
+        """Add a tag to a code unit.
 
         Args:
-            tag_name: Optional tag name filter
-
-        Returns:
-            Dict mapping CPG node IDs to lists of tag data
+            unit: CodeUnit to add tag to
+            fact: UnitFact object representing the tag
         """
-        raise AssertionError("unimplemented")
+        raise NotImplementedError()
 
-    # ===== Convenience Methods =====
-
-    async def get_program_info(self, program_id: ProgramId) -> dict[str, Any]:
-        """Get program metadata.
+    def set_relation_tag(self, fact: RelationFact) -> None:
+        """Add a tag to a relation.
 
         Args:
-            program_id: Program identifier
-
-        Returns:
-            Program metadata dict
+            fact: RelationFact object representing the tag
         """
-        raise AssertionError("unimplemented")
+        raise NotImplementedError()
 
-    async def get_functions(self, program_id: ProgramId) -> list[Function]:
-        """Get all functions/methods in the program.
+    # ===== Code Unit and Relation Management =====
+
+    def get_code_unit_by_location(
+        self, path: Path, start_line: int, end_line: int
+    ) -> CodeUnit | None:
+        """Get a code unit by its source location.
 
         Args:
-            program_id: Program identifier
+            path: Source file path
+            start_line: Starting line number
+            end_line: Ending line number
 
         Returns:
-            List of Function objects with CPG node IDs
+            CodeUnit object or None if not found
         """
-        raise AssertionError("unimplemented")
+        raise NotImplementedError()
 
-    async def get_function_by_name(
-        self, program_id: ProgramId, function_name: str
-    ) -> Function | None:
-        """Get a specific function by name.
+    def get_code_unit(self, cpg_node_id: str) -> CodeUnit | None:
+        """Get a specific code unit by its CPG node ID.
 
         Args:
-            program_id: Program identifier
-            function_name: Function/method name
+            cpg_node_id: CPG node ID of the code unit
 
         Returns:
-            Function object or None if not found
+            CodeUnit object or None if not found
         """
-        raise AssertionError("unimplemented")
+        raise NotImplementedError()
 
-    async def get_cfg_nodes(self, function_cpg_id: str) -> list[dict[str, Any]]:
-        """Get CFG nodes for a function.
+    def get_code_units(self, kind: CodeUnitKind) -> list[CodeUnit]:
+        """Get all code units of a specific type.
 
         Args:
-            function_cpg_id: CPG node ID of the function
+            kind: Type/kind of code unit (e.g., function, class)
 
         Returns:
-            List of CFG node dicts with fields:
-                - id: CPG node ID
-                - code: Source code
-                - line: Line number
-                - successors: List of successor node IDs
+            List of CodeUnit objects
         """
-        raise AssertionError("unimplemented")
+        raise NotImplementedError()
 
-    async def get_call_graph(self, program_id: ProgramId) -> list[dict[str, Any]]:
-        """Get call graph edges.
+    def get_relations(
+        self, source_unit: CodeUnit, kind: RelationKind, direction: RelationDirection
+    ) -> list[tuple[CodeUnit, CodeUnitRelation, dict[str, Any]]]:
+        """Get all relations of a specific kind from a source code unit.
 
         Args:
-            program_id: Program identifier
+            source_unit: Source CodeUnit
+            kind: Kind of relation to retrieve (e.g., CALLS, INHERITS)
+            direction: Direction of the relation (OUTGOING or INCOMING)
 
         Returns:
-            List of call edge dicts with fields:
-                - caller_id: CPG node ID of caller method
-                - callee_id: CPG node ID of callee method
-                - call_site_id: CPG node ID of call site
+            List of (target_unit, relation, metadata) tuples
         """
-        raise AssertionError("unimplemented")
-
-    async def get_ast_nodes(
-        self, function_cpg_id: str, node_type: str | None = None
-    ) -> list[dict[str, Any]]:
-        """Get AST nodes for a function.
-
-        Args:
-            function_cpg_id: CPG node ID of the function
-            node_type: Optional filter by AST node type
-
-        Returns:
-            List of AST node dicts with fields:
-                - id: CPG node ID
-                - type: AST node type
-                - code: Source code
-                - line: Line number
-        """
-        raise AssertionError("unimplemented")
+        raise NotImplementedError()

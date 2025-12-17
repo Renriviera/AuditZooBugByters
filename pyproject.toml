@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "TBD"}
 authors = [
-    {name = "Zhuo Zhang (BiScope.AI)", email = "zz3474@columbia.edu"}
+    {name = "Zhuo Zhang", email = "zz3474@columbia.edu"}
 ]
 keywords = ["program-analysis", "security", "cpg", "joern", "static-analysis", "agent"]
 classifiers = [
@@ -31,8 +31,10 @@ dependencies = [
     "autogen-core>=0.7",
     "autogen-ext>=0.7",
     "tree-sitter>=0.20.0",
+    "cpgqls-client>=0.0.9",
     "dataclasses-json>=0.6.0",
     "aiofiles>=23.0.0",
+    "Faker>=38.2.0",
 ]
 
 [project.optional-dependencies]
@@ -57,10 +59,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/your-org/auditzoo"
-Documentation = "https://github.com/your-org/auditzoo/blob/main/README.md"
-Repository = "https://github.com/your-org/auditzoo"
-Issues = "https://github.com/your-org/auditzoo/issues"
+Homepage = "https://github.com/Biscope-AI/auditzoo"
+Documentation = "https://github.com/Biscope-AI/auditzoo/blob/main/README.md"
+Repository = "https://github.com/Biscope-AI/auditzoo"
+Issues = "https://github.com/Biscope-AI/auditzoo/issues"
 
 [tool.setuptools]
 packages = ["auditzoo"]

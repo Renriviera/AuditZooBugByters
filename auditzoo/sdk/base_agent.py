@@ -8,7 +8,6 @@ from abc import ABC, abstractmethod
 
 from autogen_core import MessageContext, RoutedAgent, message_handler
 
-from auditzoo.contracts.capabilities import AgentCapability
 from auditzoo.core.protocol.envelope import ResultEnvelope, TaskEnvelope
 
 
@@ -27,13 +26,15 @@ class BaseAnalysisAgent(RoutedAgent, ABC):
 
     Analysis authors should:
     1. Inherit from this class
-    2. Define their capabilities
+    2. Register their agent with a unique ID
     3. Implement the handle_task method
 
     The framework handles:
-    - Message routing
-    - Agent registration
+    - Message routing via AutoGen-Core
+    - Agent registration via PluginRegistryAgent
     - Context setup
+
+    Agents are called directly by their agent_id (no capabilities routing).
     """
 
     def __init__(self, agent_type_id: str, instance_id: str):
@@ -55,16 +56,6 @@ class BaseAnalysisAgent(RoutedAgent, ABC):
         This is called by the runtime during initialization.
         """
         self._context = context
-
-    @property
-    @abstractmethod
-    def capabilities(self) -> AgentCapability:
-        """Return the capabilities of this agent type.
-
-        This should be implemented as a property that returns an
-        AgentCapability object describing what this agent can do.
-        """
-        pass
 
     @abstractmethod
     async def handle_task(

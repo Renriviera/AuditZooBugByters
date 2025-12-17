@@ -6,9 +6,12 @@ alongside convenience methods.
 """
 
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Any
 
-from auditzoo.core.ir.model import Function, ProgramId
+from auditzoo.core.ir.facts.base import RelationFact, UnitFact
+from auditzoo.core.ir.model import CodeUnit, CodeUnitKind, CodeUnitRelation
+from auditzoo.core.ir.model.base import RelationDirection, RelationKind
 
 
 class CPGBackend(ABC):
@@ -22,7 +25,7 @@ class CPGBackend(ABC):
     # ===== Core CPG Query Interface =====
 
     @abstractmethod
-    async def cpg_query(self, query: str) -> Any:
+    def cpg_query(self, query: str) -> Any:
         """Execute a CPG query and return results.
 
         Args:
@@ -37,46 +40,14 @@ class CPGBackend(ABC):
         """
         pass
 
-    @abstractmethod
-    def supports_feature(self, feature: str) -> bool:
-        """Check if backend supports a specific feature.
-
-        Args:
-            feature: Feature name (e.g., "dataflow", "controlflow", "taint")
-
-        Returns:
-            True if feature is supported
-        """
-        pass
-
     # ===== Tag Management =====
 
     @abstractmethod
-    async def add_tag(self, cpg_node_id: str, tag_name: str, tag_data: dict) -> None:
-        """Add a tag to a CPG node.
-
-        Args:
-            cpg_node_id: CPG node ID
-            tag_name: Tag name (typically fact type)
-            tag_data: Tag data (JSON-compatible dict)
-
-        Raises:
-            BackendError: If tag addition fails
-        """
-        pass
-
-    @abstractmethod
-    async def get_tags(
-        self, cpg_node_id: str, tag_name: str | None = None
-    ) -> list[dict]:
-        """Get tags attached to a CPG node.
-
-        Args:
-            cpg_node_id: CPG node ID
-            tag_name: Optional tag name filter
+    def get_relation_tags(self) -> list[RelationFact]:
+        """Get relation facts attached to the CPG.
 
         Returns:
-            List of tag data dicts
+            List of RelationFact objects
 
         Raises:
             BackendError: If tag retrieval fails
@@ -84,124 +55,112 @@ class CPGBackend(ABC):
         pass
 
     @abstractmethod
-    async def query_by_tag(self, tag_name: str) -> list[str]:
-        """Find CPG node IDs that have a specific tag.
+    def get_unit_tags(self, unit: CodeUnit) -> list[UnitFact]:
+        """Get tags attached to a code unit.
 
         Args:
-            tag_name: Tag name to search for
+            unit: CodeUnit to get tags for
 
         Returns:
-            List of CPG node IDs
+            List of UnitFact objects
 
         Raises:
-            BackendError: If query fails
+            BackendError: If tag retrieval fails
         """
         pass
 
     @abstractmethod
-    async def get_all_tags(self, tag_name: str | None = None) -> dict[str, list[dict]]:
-        """Get all tags in the CPG.
+    def set_unit_tag(self, unit: CodeUnit, fact: UnitFact) -> None:
+        """Add a tag to a code unit.
 
         Args:
-            tag_name: Optional tag name filter
+            unit: CodeUnit to add tag to
+            fact: UnitFact object representing the tag
+
+        Raises:
+            BackendError: If tag addition fails
+        """
+        pass
+
+    @abstractmethod
+    def set_relation_tag(self, fact: RelationFact) -> None:
+        """Add a tag to a relation.
+
+        Args:
+            fact: RelationFact object representing the tag
+
+        Raises:
+            BackendError: If tag addition fails
+        """
+        pass
+
+    # ===== Code Unit and Relation Management =====
+
+    @abstractmethod
+    def get_code_unit_by_location(
+        self, path: Path, start_line: int, end_line: int
+    ) -> CodeUnit | None:
+        """Get a code unit by its source location.
+
+        Args:
+            path: Source file path
+            start_line: Starting line number
+            end_line: Ending line number
 
         Returns:
-            Dict mapping CPG node IDs to lists of tag data
+            CodeUnit object or None if not found
 
         Raises:
             BackendError: If retrieval fails
         """
         pass
 
-    # ===== Convenience Methods =====
-    # These are built on top of cpg_query() but provide simpler interfaces
-
     @abstractmethod
-    async def get_program_info(self, program_id: ProgramId) -> dict[str, Any]:
-        """Get program metadata.
+    def get_code_unit(self, cpg_node_id: str) -> CodeUnit | None:
+        """Get a specific code unit by its CPG node ID.
 
         Args:
-            program_id: Program identifier
+            cpg_node_id: CPG node ID of the code unit
 
         Returns:
-            Program metadata dict
+            CodeUnit object or None if not found
+
+        Raises:
+            BackendError: If retrieval fails
         """
         pass
 
     @abstractmethod
-    async def get_functions(self, program_id: ProgramId) -> list[Function]:
-        """Get all functions/methods in the program.
+    def get_code_units(self, kind: CodeUnitKind) -> list[CodeUnit]:
+        """Get all code units of a specific type.
 
         Args:
-            program_id: Program identifier
+            kind: Type/kind of code unit (e.g., function, class)
 
         Returns:
-            List of Function objects with CPG node IDs
+            List of CodeUnit objects
+
+        Raises:
+            BackendError: If retrieval fails
         """
         pass
 
     @abstractmethod
-    async def get_function_by_name(
-        self, program_id: ProgramId, function_name: str
-    ) -> Function | None:
-        """Get a specific function by name.
+    def get_relations(
+        self, source_unit: CodeUnit, kind: RelationKind, direction: RelationDirection
+    ) -> list[tuple[CodeUnit, CodeUnitRelation, dict[str, Any]]]:
+        """Get all relations of a specific kind from a source code unit.
 
         Args:
-            program_id: Program identifier
-            function_name: Function/method name
+            source_unit: Source CodeUnit
+            kind: Kind of relation to retrieve (e.g., CALLS, INHERITS)
+            direction: Direction of the relation (OUTGOING or INCOMING)
 
         Returns:
-            Function object or None if not found
-        """
-        pass
+            List of (target_unit, relation, metadata) tuples
 
-    @abstractmethod
-    async def get_cfg_nodes(self, function_cpg_id: str) -> list[dict[str, Any]]:
-        """Get CFG nodes for a function.
-
-        Args:
-            function_cpg_id: CPG node ID of the function
-
-        Returns:
-            List of CFG node dicts with fields:
-                - id: CPG node ID
-                - code: Source code
-                - line: Line number
-                - successors: List of successor node IDs
-        """
-        pass
-
-    @abstractmethod
-    async def get_call_graph(self, program_id: ProgramId) -> list[dict[str, Any]]:
-        """Get call graph edges.
-
-        Args:
-            program_id: Program identifier
-
-        Returns:
-            List of call edge dicts with fields:
-                - caller_id: CPG node ID of caller method
-                - callee_id: CPG node ID of callee method
-                - call_site_id: CPG node ID of call site
-        """
-        pass
-
-    @abstractmethod
-    async def get_ast_nodes(
-        self, function_cpg_id: str, node_type: str | None = None
-    ) -> list[dict[str, Any]]:
-        """Get AST nodes for a function.
-
-        Args:
-            function_cpg_id: CPG node ID of the function
-            node_type: Optional filter by AST node type
-
-        Returns:
-            List of AST node dicts with fields:
-                - id: CPG node ID
-                - type: AST node type
-                - code: Source code
-                - line: Line number
+        Raises:
+            BackendError: If retrieval fails
         """
         pass
 
@@ -234,14 +193,68 @@ class CPGBackend(ABC):
         """
         pass
 
+    # ===== Async Context Manager Support =====
+
+    async def __aenter__(self):
+        """Async context manager entry.
+
+        Automatically connects to the backend when entering the context.
+
+        Returns:
+            Self for use in async with statement
+
+        Example:
+            async with backend:
+                results = await backend.cpg_query("cpg.method.name.l")
+        """
+        await self.connect()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit.
+
+        Automatically disconnects when exiting the context.
+        Ensures cleanup even if an exception occurs.
+
+        Args:
+            exc_type: Exception type if an exception occurred
+            exc_val: Exception value if an exception occurred
+            exc_tb: Exception traceback if an exception occurred
+        """
+        await self.disconnect()
+
 
 class BackendError(Exception):
-    """General backend error."""
+    """Base exception for backend errors."""
 
     pass
 
 
-class UnsupportedOperationError(BackendError):
-    """Operation not supported by this backend."""
+class BackendConfigError(BackendError):
+    """Error in backend configuration."""
+
+    pass
+
+
+class BackendConnectionError(BackendError):
+    """Error connecting to backend."""
+
+    pass
+
+
+class BackendQueryError(BackendError):
+    """Error executing a query."""
+
+    pass
+
+
+class BackendUnsupportedLanguageError(BackendError):
+    """Error for unsupported programming languages."""
+
+    pass
+
+
+class BackendUnimplementedError(BackendError):
+    """Error for unimplemented backend features."""
 
     pass

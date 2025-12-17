@@ -1,316 +1,845 @@
-"""CPG IR View - Cached wrapper around CPG backends.
+"""CPG IR View - Graph-based view over CPG backends using NetworkX.
 
-This module provides IRView, which wraps a CPGBackend and adds caching
-and convenience methods. IRView is what analysis agents interact with.
+This module provides IRView, which maintains an in-memory graph of CodeUnits
+with relations between them. It provides efficient querying, relation traversal,
+and tag management.
+
+For the graph representation, we use NetworkX's MultiDiGraph to represent
+directed relations (e.g., function calls, inheritance, data flow) between CodeUnits.
+Nodes represent CPG-backed CodeUnits, and edges represent relations with
+associated metadata (like call sites, confidence scores, etc.). The key of each
+edge is the CodeUnitRelation type.
+
+Note that IRView provides low-level graph operations (e.g., get the neighbors of a node).
+Higher-level analyses (e.g., caller/callee analysis, data flow analysis, taint analysis)
+are built on top of this core graph abstraction and provided in a separate agent layer.
 """
 
-from typing import Any
+from collections import defaultdict
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any, Literal
 
-from auditzoo.contracts.facts import Fact
+import networkx as nx
+
 from auditzoo.core.ir.backend_api import CPGBackend
-from auditzoo.core.ir.model import Function, ProgramId
+from auditzoo.core.ir.facts import (
+    RelationFact,
+    UnitFact,
+)
+from auditzoo.core.ir.model import (
+    CodeUnit,
+    CodeUnitKind,
+    CodeUnitRelation,
+    IRBackendError,
+    IRValueError,
+    RelationDirection,
+    RelationKind,
+    RKRegistry,
+    UKRegistry,
+)
 
 
 class IRView:
-    """Cached view over a CPG backend.
+    """Graph-based view over a CPG backend using NetworkX.
 
-    Provides:
-    - Direct CPG query access
-    - Convenience methods for common operations
-    - Tag management for facts
-    - Caching to reduce backend calls
+    IRView maintains an in-memory directed graph where:
+    - Nodes: CodeUnit objects (identified by their `id`)
+    - Edges: Relations between CodeUnits (with CodeUnitRelation attributes)
+    - Node attributes: CodeUnit object and Facts
+    - Edge attributes: CodeUnitRelation and metadata
+
+    This provides:
+    - Efficient graph traversal
+    - Fact management on CodeUnits (annotations from analyses)
+    - Lazy loading from backend
+    - Built-in graph algorithms via NetworkX
+
+    Lifecycle Management:
+        IRView manages backend lifecycle by default. Use async context manager pattern.
     """
 
-    def __init__(self, backend: CPGBackend, program_id: ProgramId):
+    def __init__(self, backend: CPGBackend, owns_backend: bool = True):
         """Initialize IR view.
 
         Args:
-            backend: CPG backend instance
-            program_id: Program this view represents
+            backend: CPG backend instance (should already be connected)
+            owns_backend: If True, IRView will manage backend lifecycle (connect/disconnect).
+                         Set to False if you want to manage backend lifecycle manually.
         """
         self.backend = backend
-        self.program_id = program_id
-        self._cache: dict[str, Any] = {}
+        self._owns_backend = owns_backend
 
-    # ===== Direct CPG Query Access =====
+        # === Core Graph ===
+        # MultiDiGraph for directed relations (calls, references, inheritance, etc.)
+        self._graph = nx.MultiDiGraph()
 
-    async def cpg_query(self, query: str, cache_key: str | None = None) -> Any:
-        """Execute a CPG query.
+        # Group CodeUnit IDs by kind for O(1) "get all functions"-like queries
+        self._type_index: dict[CodeUnitKind, set[str]] = defaultdict(set)
+
+        # === Fact Storage ===
+        self._relation_facts: list[RelationFact] = []
+
+        # === Loading State ===
+        # Track which units have been loaded from backend
+        self._loaded_units: set[str] = set()
+        # Track which (unit_id, direction, relation) tuples have been loaded
+        self._loaded_relations: set[tuple[str, RelationDirection, RelationKind]] = set()
+        # Track which unit kinds have been loaded (entirely) from backend
+        self._loaded_unit_kinds: set[CodeUnitKind] = set()
+        # Track which relation kinds have been loaded (entirely) from backend
+        self._loaded_relation_kinds: set[RelationKind] = set()
+
+        # Check whether backend is connected
+        if not self.backend.is_connected():
+            raise IRBackendError("Backend must be connected before initializing IRView")
+
+        # Preload code units from backend
+        self.preload_from_backend()
+
+    @classmethod
+    async def create(cls, backend: CPGBackend) -> "IRView":
+        """Async factory method to create and initialize an IRView.
+
+        This handles connecting the backend before creating the view.
 
         Args:
-            query: CPG query string
-            cache_key: Optional cache key for result caching
+            backend: CPG backend instance
 
         Returns:
-            Query results
+            Initialized IRView instance
         """
-        if cache_key and cache_key in self._cache:
-            return self._cache[cache_key]
+        if not backend.is_connected():
+            await backend.connect()
 
-        result = await self.backend.cpg_query(query)
+        return cls(backend, owns_backend=True)
 
-        if cache_key:
-            self._cache[cache_key] = result
+    async def __aenter__(self) -> "IRView":
+        """Async context manager entry.
+
+        Returns:
+            Self for use in async with statement
+
+        Note:
+            If you used IRView.create(), the backend is already connected.
+            If you passed a backend to __init__(), ensure it's connected before entering.
+        """
+        # Backend should already be connected (either by create() or by user)
+        # We just return self for the context
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Async context manager exit.
+
+        Performs cleanup:
+        - Syncs facts to backend
+        - Clears graph and indexes
+        - Disconnects backend if owned by IRView
+
+        Args:
+            exc_type: Exception type if an exception occurred
+            exc_val: Exception value if an exception occurred
+            exc_tb: Exception traceback if an exception occurred
+        """
+        # Always cleanup the view
+        self.cleanup(sync_to_backend=True)
+
+        # Disconnect backend if we own it
+        if self._owns_backend:
+            await self.backend.disconnect()
+
+    # ============================================
+    # Backend Queries
+    # ============================================
+    def query_backend(self, query: str) -> Any:
+        """Execute a raw query against the backend.
+
+        Args:
+            query: Query string (CPG query language)
+
+        Returns:
+            Backend-specific query results
+        """
+        return self.backend.cpg_query(query)
+
+    # ============================================
+    # UNIT MANAGEMENT
+    # ============================================
+
+    def _add_unit(self, unit: CodeUnit) -> None:
+        """Add a CodeUnit to the graph as a node.
+
+        Args:
+            unit: CodeUnit to add
+
+        Raises:
+            IRValueError: If unit is not CPG-backed
+        """
+        if unit.is_synthetic:
+            raise IRValueError("CodeUnit must be backend-backed to add to IRView")
+
+        # Add node with unit and empty unit facts storage
+        self._graph.add_node(
+            unit.id,
+            unit=unit,
+            unit_facts=[],  # List of UnitFact objects attached to this unit
+        )
+
+        # Update kind index for fast lookup
+        self._type_index[unit.kind].add(unit.id)
+
+    def fetch_unit(self, path: Path, start_line: int, end_line: int) -> CodeUnit | None:
+        """Fetch a CodeUnit by its source location.
+
+        Args:
+            path: Source file path
+            start_line: Starting line number
+            end_line: Ending line number
+
+        Returns:
+            The minimal CodeUnit covering the specified location, or None if not found
+        """
+        unit = self.backend.get_code_unit_by_location(path, start_line, end_line)
+        if unit and unit.id not in self._graph:
+            self._add_unit(unit)
+        return unit
+
+    def get_unit(self, unit_id: str, fetch_backend: bool = True) -> CodeUnit | None:
+        """Get CodeUnit by ID.
+
+        Args:
+            unit_id: CodeUnit ID to look up
+            fetch_backend: If True, attempt to load from backend if not in graph
+
+        Returns:
+            CodeUnit if found, None otherwise
+        """
+        if unit_id in self._graph:
+            unit = self._graph.nodes[unit_id]["unit"]
+            assert isinstance(unit, CodeUnit)
+            return unit
+
+        if fetch_backend and unit_id not in self._loaded_units:
+            unit = self.backend.get_code_unit(unit_id)
+            self._loaded_units.add(unit_id)
+            if unit:
+                self._add_unit(unit)
+                return unit
+
+        return None
+
+    def has_unit(self, unit_id: str, fetch_backend: bool = True) -> bool:
+        """Check if a CodeUnit exists in the graph.
+
+        Args:
+            unit_id: CodeUnit ID to check
+            fetch_backend: If True, attempt to load from backend if not in graph
+
+        Returns:
+            True if unit exists in graph
+        """
+        return self.get_unit(unit_id, fetch_backend) is not None
+
+    def get_all_units_by_kind(
+        self, kind: CodeUnitKind, fetch_backend: bool = True
+    ) -> list[CodeUnit]:
+        """Get all CodeUnits of a specific type.
+
+        Args:
+            kind: CodeUnitKind to filter by
+            fetch_backend: If True, attempt to load from backend if not in graph
+
+        Returns:
+            List of matching CodeUnits
+        """
+        if fetch_backend and kind not in self._loaded_unit_kinds:
+            # Load from backend if not already loaded
+            units = self.backend.get_code_units(kind)
+            for unit in units:
+                self._add_unit(unit)
+            self._loaded_unit_kinds.add(kind)
+
+        return [
+            self._graph.nodes[node_id]["unit"] for node_id in self._type_index[kind]
+        ]
+
+    def get_all_units(self) -> list[CodeUnit]:
+        """Get all CodeUnits in the graph. Note that this does NOT fetch from backend.
+
+        Returns:
+            List of all CodeUnits
+        """
+        return [self._graph.nodes[node_id]["unit"] for node_id in self._graph.nodes]
+
+    # ============================================
+    # RELATION MANAGEMENT
+    # ============================================
+
+    def _add_relation(
+        self,
+        source_id: str,
+        target_id: str,
+        relation: CodeUnitRelation,
+        **metadata: Any,
+    ) -> None:
+        """Add a relation (edge) between two CodeUnits.
+
+        Args:
+            source_id: Source CodeUnit ID
+            target_id: Target CodeUnit ID
+            relation: Type of relation (CALLS, INHERITS, etc.) - the key
+            **metadata: Additional edge attributes (e.g., confidence)
+
+        Note:
+            For MultiDiGraph, we will use relation_type as the key, which means
+            we need to ensure uniqueness if multiple edges of the same type exist,
+            e.g., multiple calls from one function to another at different call sites.
+            This can be done by setting a different description for the CodeUnitRelation.
+
+        Example:
+            view.add_relation(
+                "func_123",
+                "func_456",
+                CodeUnitRelation(RelationKind.CALLS),
+                call_site_id="call_789"
+            )
+        """
+        if not self.has_unit(source_id):
+            raise IRValueError(f"Source unit {source_id} not found in graph")
+
+        if not self.has_unit(target_id):
+            raise IRValueError(f"Target unit {target_id} not found in graph")
+
+        self._graph.add_edge(source_id, target_id, key=relation, **metadata)
+
+    def get_all_relations_by_kind(
+        self,
+        kind: RelationKind,
+        fetch_backend: bool = True,
+    ) -> list[tuple[CodeUnit, CodeUnit, CodeUnitRelation, dict[str, Any]]]:
+        """Get all relations of a specific type.
+
+        Args:
+            kind: RelationKind to filter by
+            fetch_backend: If True, attempt to load from backend if not in graph
+
+        Returns:
+            List of (source_unit, target_unit, metadata) tuples
+        """
+        if fetch_backend and kind not in self._loaded_relation_kinds:
+            # Load all relations of this type from backend
+            for source_id in self._graph.nodes:
+                source_unit = self._graph.nodes[source_id]["unit"]
+
+                # We only need to do one direction, since we track all nodes
+                relations = self.backend.get_relations(source_unit, kind, "out")
+
+                for target_unit, relation, metadata in relations:
+                    if not self.has_unit(target_unit.id, fetch_backend=True):
+                        raise IRValueError(
+                            f"Related unit {target_unit.id} not found in backend"
+                        )
+                    self._add_relation(source_id, target_unit.id, relation, **metadata)
+
+            self._loaded_relation_kinds.add(kind)
+
+        # Collect results - MultiDiGraph returns (source, target, key, data)
+        result = []
+        for source_id, target_id, key, data in self._graph.edges(data=True, keys=True):
+            if key.kind == kind:
+                source_unit = self._graph.nodes[source_id]["unit"]
+                target_unit = self._graph.nodes[target_id]["unit"]
+                metadata = data
+                result.append((source_unit, target_unit, key, metadata))
 
         return result
 
-    def supports_feature(self, feature: str) -> bool:
-        """Check if backend supports a feature.
+    def get_related_units(
+        self,
+        unit: CodeUnit,
+        kind: RelationKind,
+        direction: Literal["both"] | RelationDirection,
+        fetch_backend: bool = True,
+    ) -> list[tuple[CodeUnit, str, dict[str, Any]]]:
+        """Get units related to this unit by a specific relation.
 
         Args:
-            feature: Feature name (e.g., "dataflow", "controlflow")
+            unit: Source CodeUnit
+            kind: Type of relation to follow
+            direction: "out" (successors), "in" (predecessors), or "both"
+            fetch_backend: If True, attempt to load from backend if not in graph
 
         Returns:
-            True if supported
+            List of (related_unit, relation, direction, metadata) tuples where metadata contains
+            edge attributes like call_site_id, confidence, etc.
+
+        Raises:
+            IRValueError: If direction is invalid or related unit not found
+
+        Example:
+            # Get all functions called by foo
+            callees = view.get_related_units(foo, CodeUnitRelation(RelationKind.CALLS), "out")
+
+            # Get all functions that call foo
+            callers = view.get_related_units(foo, RelationKind.CALLS, "in")
         """
-        return self.backend.supports_feature(feature)
+        if unit.is_synthetic:
+            raise IRValueError("CodeUnit must be backend-backed to get related units")
 
-    # ===== Tag/Fact Management =====
+        if not self.has_unit(unit.id, fetch_backend):
+            raise IRValueError(f"CodeUnit {unit.id} not found in graph")
 
-    async def add_fact(self, fact: Fact, cpg_node_id: str | None = None) -> None:
-        """Add a fact as a CPG tag.
+        # Check valid direction
+        if direction not in ("in", "out", "both"):
+            raise IRValueError("direction must be 'in', 'out', or 'both'")
+        if direction == "both":
+            # Combine results from both directions
+            out_related = self.get_related_units(unit, kind, "out", fetch_backend)
+            in_related = self.get_related_units(unit, kind, "in", fetch_backend)
+            return out_related + in_related
 
-        Args:
-            fact: Fact to store
-            cpg_node_id: Optional specific CPG node to attach to
-                        (if None, uses first node referenced in fact)
-        """
-        tag_data = fact.to_tag()
-        tag_name = fact.fact_type.value
+        if (
+            fetch_backend
+            and kind not in self._loaded_relation_kinds
+            and (unit.id, direction, kind) not in self._loaded_relations
+        ):
+            # Load relations from backend
+            relations = self.backend.get_relations(unit, kind, direction)
+            for target_unit, relation, metadata in relations:
+                # Ensure target unit exists
+                if not self.has_unit(target_unit.id, fetch_backend=True):
+                    raise IRValueError(
+                        f"Related unit {target_unit.id} not found in backend"
+                    )
 
-        # If no specific node ID, try to extract from fact
-        if cpg_node_id is None:
-            cpg_node_id = self._extract_primary_node_id(fact)
+                # Add relation with metadata
+                if direction == "out":
+                    self._add_relation(unit.id, target_unit.id, relation, **metadata)
+                else:
+                    self._add_relation(target_unit.id, unit.id, relation, **metadata)
 
-        if cpg_node_id:
-            await self.backend.add_tag(cpg_node_id, tag_name, tag_data)
+            self._loaded_relations.add((unit.id, direction, kind))
+
+        related = []
+        if direction == "out":
+            # Outgoing edges (e.g., who this calls) - MultiDiGraph returns (source, target, key, data)
+            for _, target, key, data in self._graph.out_edges(
+                unit.id, data=True, keys=True
+            ):
+                if key.kind == kind:
+                    related.append((self._graph.nodes[target]["unit"], "out", data))
         else:
-            # Store as global tag (implementation-dependent)
-            await self.backend.add_tag("_global", tag_name, tag_data)
+            # Incoming edges (e.g., who calls this) - MultiDiGraph returns (source, target, key, data)
+            for source, _, key, data in self._graph.in_edges(
+                unit.id, data=True, keys=True
+            ):  # pyright: ignore[reportCallIssue]
+                if key.kind == kind:
+                    related.append((self._graph.nodes[source]["unit"], "in", data))
 
-    async def get_facts(
-        self, fact_type: str | None = None, cpg_node_id: str | None = None
-    ) -> list[Fact]:
-        """Get facts from CPG tags.
+        return related
 
-        Args:
-            fact_type: Optional filter by fact type
-            cpg_node_id: Optional filter by CPG node
+    def get_all_relations(
+        self,
+    ) -> list[tuple[CodeUnit, CodeUnit, CodeUnitRelation, dict[str, Any]]]:
+        """Get all relations in the graph. Note that this does NOT fetch from backend.
 
         Returns:
-            List of deserialized facts
+            List of (source_unit, target_unit, relation, metadata) tuples
         """
-        if cpg_node_id:
-            # Get tags from specific node
-            tags = await self.backend.get_tags(cpg_node_id, fact_type)
+        result = []
+        for source_id, target_id, key, data in self._graph.edges(data=True, keys=True):
+            source_unit = self._graph.nodes[source_id]["unit"]
+            target_unit = self._graph.nodes[target_id]["unit"]
+            metadata = data
+            result.append((source_unit, target_unit, key, metadata))
+
+        return result
+
+    # ============================================
+    # GRAPH QUERIES (No BACKEND FETCH)
+    # ============================================
+
+    def filter_graph(
+        self,
+        filter: Callable[[CodeUnit, CodeUnit, CodeUnitRelation, dict[str, Any]], bool],
+    ) -> nx.MultiDiGraph:
+        """Create a subgraph containing only edges of the specified relation type.
+        Note that this function will *NOT* fetch from backend.
+
+        Args:
+            relation_type: Type of relation to filter by
+
+        Returns:
+            NetworkX MultiDiGraph containing only edges matching the relation type
+        """
+        # For MultiDiGraph, edges() returns (u, v, key, data) when keys=True
+        edges = [
+            (u, v, key)
+            for u, v, key, d in self._graph.edges(data=True, keys=True)
+            if filter(
+                self._graph.nodes[u]["unit"], self._graph.nodes[v]["unit"], key, d
+            )
+        ]
+        return self._graph.edge_subgraph(edges)  # pyright: ignore
+
+    def get_reachable_units(
+        self,
+        unit: CodeUnit,
+        filter: Callable[[CodeUnit, CodeUnit, CodeUnitRelation, dict[str, Any]], bool],
+        max_depth: int | None = None,
+    ) -> set[CodeUnit]:
+        """Get all transitively reachable units using NetworkX graph traversal.
+        Note that this function will *NOT* fetch from backend.
+
+        Args:
+            unit: Starting unit
+            filter: Callable to determine which relations to follow
+            max_depth: Maximum depth to traverse (None for unlimited)
+
+        Returns:
+            Set of all reachable CodeUnits following the specified relation type
+        """
+        if not unit.id or unit.id not in self._graph:
+            return set()
+
+        # Create subgraph with only the specified relation type
+        subgraph = self.filter_graph(filter)
+
+        # Use NetworkX to get all reachable nodes
+        if max_depth is None:
+            # All reachable descendants
+            reachable_ids = nx.descendants(subgraph, unit.id)
         else:
-            # Get all tags
-            all_tags = await self.backend.get_all_tags(fact_type)
-            tags = []
-            for node_tags in all_tags.values():
-                tags.extend(node_tags)
+            # Limited depth traversal
+            reachable_ids = set()
+            nodes_at_depth = nx.single_source_shortest_path_length(
+                subgraph, unit.id, cutoff=max_depth
+            )
+            reachable_ids.update(nodes_at_depth.keys())
+            reachable_ids.discard(unit.id)  # Remove the starting node
 
-        # Deserialize tags to facts
-        facts = []
-        for tag_data in tags:
-            fact = self._deserialize_fact(tag_data)
-            if fact:
-                facts.append(fact)
+        # Convert IDs to CodeUnits
+        result = set()
+        for node_id in reachable_ids:
+            if node_id in self._graph:
+                result.add(self._graph.nodes[node_id]["unit"])
 
-        return facts
+        return result
 
-    async def query_nodes_by_fact(self, fact_type: str) -> list[str]:
-        """Find CPG nodes that have facts of a specific type.
-
-        Args:
-            fact_type: Fact type to search for
-
-        Returns:
-            List of CPG node IDs
-        """
-        return await self.backend.query_by_tag(fact_type)
-
-    # ===== Convenience Methods =====
-
-    async def get_program_info(self) -> dict[str, Any]:
-        """Get program metadata.
-
-        Returns:
-            Program info dict
-        """
-        cache_key = "program_info"
-        if cache_key in self._cache:
-            return self._cache[cache_key]  # type: ignore[no-any-return]
-
-        info = await self.backend.get_program_info(self.program_id)
-        self._cache[cache_key] = info
-        return info
-
-    async def get_functions(self) -> list[Function]:
-        """Get all functions in the program.
-
-        Returns:
-            List of Function objects
-        """
-        cache_key = "functions"
-        if cache_key in self._cache:
-            return self._cache[cache_key]  # type: ignore[no-any-return]
-
-        functions = await self.backend.get_functions(self.program_id)
-        self._cache[cache_key] = functions
-        return functions
-
-    async def get_function_by_name(self, function_name: str) -> Function | None:
-        """Get a specific function by name.
+    def find_shortest_path(
+        self,
+        from_unit: CodeUnit,
+        to_unit: CodeUnit,
+        filter: Callable[[CodeUnit, CodeUnit, CodeUnitRelation, dict[str, Any]], bool],
+    ) -> list[CodeUnit] | None:
+        """Find shortest path from one unit to another following a specific relation type.
+        Note that this function will *NOT* fetch from backend.
 
         Args:
-            function_name: Function name
+            from_unit: Starting unit
+            to_unit: Target unit
+            filter: Callable to determine which relations to follow
 
         Returns:
-            Function object or None
+            List of CodeUnits representing the path, or None if no path exists
         """
-        # Check cache first
-        functions = await self.get_functions()
-        for func in functions:
-            if func.name == function_name:
-                return func
-
-        # Fallback to backend query
-        return await self.backend.get_function_by_name(self.program_id, function_name)
-
-    async def get_cfg_nodes(self, function: Function) -> list[dict[str, Any]]:
-        """Get CFG nodes for a function.
-
-        Args:
-            function: Function object
-
-        Returns:
-            List of CFG node dicts
-        """
-        cache_key = f"cfg_{function.cpg_id}"
-        if cache_key in self._cache:
-            return self._cache[cache_key]  # type: ignore[no-any-return]
-
-        cfg_nodes = await self.backend.get_cfg_nodes(function.cpg_id)
-        self._cache[cache_key] = cfg_nodes
-        return cfg_nodes
-
-    async def get_call_graph(self) -> list[dict[str, Any]]:
-        """Get call graph for the program.
-
-        Returns:
-            List of call edge dicts
-        """
-        cache_key = "call_graph"
-        if cache_key in self._cache:
-            return self._cache[cache_key]  # type: ignore[no-any-return]
-
-        call_graph = await self.backend.get_call_graph(self.program_id)
-        self._cache[cache_key] = call_graph
-        return call_graph
-
-    async def get_ast_nodes(
-        self, function: Function, node_type: str | None = None
-    ) -> list[dict[str, Any]]:
-        """Get AST nodes for a function.
-
-        Args:
-            function: Function object
-            node_type: Optional filter by node type
-
-        Returns:
-            List of AST node dicts
-        """
-        cache_key = f"ast_{function.cpg_id}"
-        if node_type:
-            cache_key += f"_{node_type}"
-
-        if cache_key in self._cache:
-            return self._cache[cache_key]  # type: ignore[no-any-return]
-
-        ast_nodes = await self.backend.get_ast_nodes(function.cpg_id, node_type)
-        self._cache[cache_key] = ast_nodes
-        return ast_nodes
-
-    # ===== Cache Management =====
-
-    def clear_cache(self, key: str | None = None) -> None:
-        """Clear cache.
-
-        Args:
-            key: Optional specific key to clear (clears all if None)
-        """
-        if key:
-            self._cache.pop(key, None)
-        else:
-            self._cache.clear()
-
-    def invalidate_cache(self):
-        """Clear all caches (legacy compatibility)."""
-        self.clear_cache()
-
-    def invalidate_on_update(self) -> None:
-        """Invalidate cache after program updates."""
-        # Keep program info, clear derived data
-        self._cache = {k: v for k, v in self._cache.items() if k == "program_info"}
-
-    # ===== Helper Methods =====
-
-    def _extract_primary_node_id(self, fact: Fact) -> str | None:
-        """Extract primary CPG node ID from a fact.
-
-        Args:
-            fact: Fact object
-
-        Returns:
-            CPG node ID or None
-        """
-        # Try to find a CPG node ID field in the fact
-        for attr_name in dir(fact):
-            if attr_name.startswith("cpg_") and attr_name.endswith("_id"):
-                node_id = getattr(fact, attr_name, None)
-                if node_id and isinstance(node_id, str):
-                    return node_id  # type: ignore[no-any-return]
-        return None
-
-    def _deserialize_fact(self, tag_data: dict) -> Fact | None:
-        """Deserialize a fact from tag data.
-
-        Args:
-            tag_data: Tag data dict
-
-        Returns:
-            Fact object or None if deserialization fails
-        """
-        from auditzoo.contracts.facts import (
-            CallGraphFact,
-            IssueFact,
-            PointsToFact,
-            RangeFact,
-            SliceFact,
-            TaintFact,
-        )
-
-        fact_type = tag_data.get("type")
-        if fact_type is None:
-            # Log error in production
+        if not from_unit.id or not to_unit.id:
             return None
 
-        fact_class_map = {
-            "points_to": PointsToFact,
-            "range": RangeFact,
-            "taint": TaintFact,
-            "slice": SliceFact,
-            "issue": IssueFact,
-            "call_graph": CallGraphFact,
+        # Create subgraph with only the specified relation type
+        subgraph = self.filter_graph(filter)
+        try:
+            path_ids = nx.shortest_path(subgraph, from_unit.id, to_unit.id)
+            return [self._graph.nodes[nid]["unit"] for nid in path_ids]
+        except nx.NetworkXNoPath:
+            return None
+
+    # ============================================
+    # FACT MANAGEMENT
+    # ============================================
+
+    def add_unit_fact(
+        self, unit: CodeUnit, fact: UnitFact, fetch_backend: bool = True
+    ) -> None:
+        """Add a unit fact to a CodeUnit.
+
+        Unit facts are stored as node attributes in the graph.
+        For persistence to backend, call sync_unit_facts_to_backend().
+
+        Args:
+            unit: CodeUnit to attach fact to
+            fact: UnitFact instance to add
+            fetch_backend: If True, attempt to load unit from backend if not in graph
+
+        Raises:
+            ValueError: If unit not in graph
+
+        Example:
+            from auditzoo.core.ir.facts import SummaryFact
+
+            unit = view.get_function_by_signature("foo()")
+            fact = SummaryFact(
+                name="vulnerability",
+                summary="Potential SQL injection",
+                details={"severity": "high", "confidence": 0.85}
+            )
+            view.add_unit_fact(unit, fact)
+        """
+        if unit.is_synthetic:
+            raise IRValueError("CodeUnit must be CPG-backed to add unit facts")
+
+        if not self.has_unit(unit.id, fetch_backend):
+            raise IRValueError(f"CodeUnit {unit.id} not found in graph")
+
+        # Unit facts stored in node attributes
+        self._graph.nodes[unit.id]["unit_facts"].append(fact)
+
+    def add_relation_fact(self, fact: RelationFact, fetch_backend: bool = True) -> None:
+        """Add a relation fact connecting two CodeUnits.
+
+        Relation facts are stored at the graph level (global).
+        The fact's graph_updater function is called to update the NetworkX graph.
+        For persistence to backend, call sync_relation_facts_to_backend().
+
+        Args:
+            fact: RelationFact instance to add
+            fetch_backend: If True, attempt to load units from backend if not in graph
+
+        Example:
+            from auditzoo.core.ir.facts import CallFact
+
+            fact = CallFact(
+                source_node_id="caller_func_id",
+                target_node_id="callee_func_id",
+                call_site_node_id="call_site_id",
+                call_context="dynamic dispatch",
+            )
+            view.add_relation_fact(fact)
+            # This automatically creates an edge in the graph!
+        """
+        if not self.has_unit(fact.source_node_id, fetch_backend):
+            raise IRValueError(
+                f"Source CodeUnit {fact.source_node_id} not found in graph"
+            )
+
+        if not self.has_unit(fact.target_node_id, fetch_backend):
+            raise IRValueError(
+                f"Target CodeUnit {fact.target_node_id} not found in graph"
+            )
+
+        # Store relation fact globally
+        self._relation_facts.append(fact)
+
+        # Update graph using the fact's graph updater
+        fact.apply_graph_update(self._graph)
+
+    def get_unit_facts(
+        self,
+        unit: CodeUnit,
+        fact_cls: type[UnitFact] | None = None,
+        fetch_backend: bool = True,
+    ) -> list[UnitFact]:
+        """Get unit facts attached to a CodeUnit.
+
+        Args:
+            unit: CodeUnit to get facts for
+            fact_cls: If provided, filter to only this UnitFact subclass
+
+        Returns:
+            List of UnitFact objects
+
+        Example:
+            # Get all unit facts
+            all_facts = view.get_unit_facts(unit)
+        """
+        if unit.is_synthetic:
+            raise IRValueError("CodeUnit must be CPG-backed to get unit facts")
+
+        if not self.has_unit(unit.id, fetch_backend):
+            raise IRValueError(f"CodeUnit {unit.id} not found in graph")
+
+        unit_facts = self._graph.nodes[unit.id]["unit_facts"]
+        if fact_cls:
+            unit_facts = [fact for fact in unit_facts if isinstance(fact, fact_cls)]
+
+        return list(unit_facts)
+
+    def get_relation_facts(
+        self, fact_cls: type[RelationFact] | None = None
+    ) -> list[RelationFact]:
+        """Get relation facts from the graph.
+
+        Args:
+            fact_cls: If provided, filter to only this RelationFact subclass
+
+        Returns:
+            List of RelationFact objects
+
+        Example:
+            # Get all relation facts
+            all_relations = view.get_relation_facts()
+        """
+        if fact_cls:
+            return [fact for fact in self._relation_facts if isinstance(fact, fact_cls)]
+        else:
+            return list(self._relation_facts)
+
+    # ============================================
+    # SYNC BACKEND
+    # ============================================
+
+    def preload_from_backend(self) -> None:
+        """Preload common units and relations from the backend into the IRView.
+        This can be used to eagerly load frequently accessed data.
+        """
+
+        self.get_all_units_by_kind(UKRegistry.Function(), fetch_backend=True)
+        self.get_all_relations_by_kind(RKRegistry.Calls(), fetch_backend=True)
+        self.get_all_relations_by_kind(RKRegistry.AnnotatedBy(), fetch_backend=True)
+
+        for unit in self.get_all_units():
+            self.load_unit_facts_from_backend(unit)
+        self.load_relation_facts_from_backend()
+
+    def load_unit_facts_from_backend(self, unit: CodeUnit) -> None:
+        """Load unit facts for a CodeUnit from the backend.
+
+        This queries the backend for tags and deserializes them into UnitFact objects.
+
+        Args:
+            unit: CodeUnit to load facts for
+        """
+        if unit.is_synthetic:
+            return
+
+        # Get all tags from backend for this CPG node
+        facts = self.backend.get_unit_tags(unit)
+
+        for fact in facts:
+            self.add_unit_fact(unit, fact)
+
+    def load_relation_facts_from_backend(self) -> None:
+        """Load all relation facts from the backend.
+
+        This queries the backend for global tags and deserializes them into RelationFact objects.
+        """
+        # Get all global tags from backend
+        facts = self.backend.get_relation_tags()
+
+        for fact in facts:
+            self.add_relation_fact(fact)
+
+    def sync_backend(self) -> None:
+        """Sync all facts in the IRView down to the CPG backend for persistence."""
+        # Sync unit facts
+        for node_id in self._graph.nodes:
+            unit = self._graph.nodes[node_id]["unit"]
+            self.store_unit_facts_to_backend(unit)
+
+        # Sync relation facts
+        self.store_relation_facts_to_backend()
+
+    def store_unit_facts_to_backend(self, unit: CodeUnit) -> None:
+        """Sync all unit facts for a CodeUnit to the CPG backend for persistence.
+
+        Unit facts are stored as per-node tags in the backend.
+
+        Args:
+            unit: CodeUnit whose unit facts to sync
+        """
+        if unit.is_synthetic:
+            return
+
+        facts = self.get_unit_facts(unit, fetch_backend=False)
+        for fact in facts:
+            # Serialize fact and store as backend tag
+            self.backend.set_unit_tag(unit, fact)
+
+    def store_relation_facts_to_backend(self) -> None:
+        """Sync all relation facts to the CPG backend for persistence.
+
+        Relation facts are stored as global tags (on a special "_global" node)
+        because they reference two node_ids and aren't specific to one unit.
+        """
+        for fact in self._relation_facts:
+            # Serialize fact and store as global backend tag
+            self.backend.set_relation_tag(fact)
+
+    # ============================================
+    # CACHE MANAGEMENT
+    # ============================================
+
+    def get_graph_stats(self) -> dict[str, Any]:
+        """Get statistics about the graph.
+
+        Returns:
+            Dictionary with graph statistics including:
+            - num_nodes: Total number of CodeUnits
+            - num_edges: Total number of relations
+            - num_unit_facts: Total number of unit facts attached
+            - num_relation_facts: Total number of relation facts
+            - nodes_by_kind: Count of nodes per CodeUnitKind
+            - edges_by_kind: Count of edges per RelationKind
+            - loaded_unit_kinds: Set of loaded unit kinds
+            - loaded_relation_kinds: Set of loaded relation kinds
+        """
+        # Count nodes by kind
+        nodes_by_kind = {
+            str(kind): len(node_ids) for kind, node_ids in self._type_index.items()
         }
 
-        fact_class = fact_class_map.get(fact_type)
-        if fact_class:
-            try:
-                return fact_class.from_tag(tag_data)  # type: ignore[no-any-return,attr-defined]
-            except Exception:
-                # Log error in production
-                return None
+        # Count edges by relation kind
+        edges_by_kind: dict[str, int] = defaultdict(int)
+        for _, _, key, _ in self._graph.edges(data=True, keys=True):
+            edges_by_kind[str(key.kind)] += 1
 
-        return None
+        # Count total unit facts
+        total_unit_facts = sum(
+            len(data["unit_facts"]) for _, data in self._graph.nodes(data=True)
+        )
+
+        return {
+            "num_nodes": self._graph.number_of_nodes(),
+            "num_edges": self._graph.number_of_edges(),
+            "num_unit_facts": total_unit_facts,
+            "num_relation_facts": len(self._relation_facts),
+            "nodes_by_kind": nodes_by_kind,
+            "edges_by_kind": dict(edges_by_kind),
+            "loaded_unit_kinds": [str(kind) for kind in self._loaded_unit_kinds],
+            "loaded_relation_kinds": [
+                str(kind) for kind in self._loaded_relation_kinds
+            ],
+        }
+
+    def cleanup(self, sync_to_backend: bool = False) -> None:
+        """Explicit cleanup method for IRView.
+
+        This provides more control than relying on __del__().
+        Use this when you want deterministic cleanup.
+
+        Note: This does NOT disconnect the backend. Use the async context manager
+        or manually call backend.disconnect() if needed.
+
+        Args:
+            sync_to_backend: If True, sync all facts to backend before cleanup
+
+        Example:
+            # Manual cleanup (not recommended, use async context manager instead)
+            view = IRView(backend, owns_backend=False)
+            try:
+                # ... use view ...
+            finally:
+                view.cleanup(sync_to_backend=True)
+                # Backend is still connected, disconnect manually if needed
+        """
+        if sync_to_backend:
+            self.sync_backend()
+
+        # Clear all data structures
+        self._graph.clear()
+        self._type_index.clear()
+        self._relation_facts.clear()
+        self._loaded_units.clear()
+        self._loaded_relations.clear()
+        self._loaded_unit_kinds.clear()
+        self._loaded_relation_kinds.clear()

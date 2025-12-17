@@ -3,10 +3,16 @@
 Low-level wrapper for interacting with Joern and querying the CPG.
 """
 
+import asyncio
+import os
+import socket
 import subprocess  # nosec B404 - subprocess needed for Joern interaction
-from typing import Any
+import time
+from pathlib import Path
 
-from auditzoo.backends.base import BackendConnectionError
+from cpgqls_client import CPGQLSClient
+
+from auditzoo.core.ir.backend_api import BackendConnectionError
 
 
 class JoernClient:
@@ -22,110 +28,344 @@ class JoernClient:
         """Initialize Joern client.
 
         Args:
-            joern_path: Path to Joern installation
+            joern_path: Path to Joern installation (e.g., /path/to/joern)
             host: Joern server host
             port: Joern server port
         """
-        self.joern_path = joern_path
+        self.joern_path = Path(joern_path)
+
+        if self._is_port_in_use(host, port):
+            raise BackendConnectionError(
+                f"Port {host}:{port} is already in use. Cannot connect to Joern."
+            )
         self.host = host
         self.port = port
-        self._process: subprocess.Popen | None = None
-        self._connected = False
 
-    async def connect(self, cpg_path: str | None = None):
-        """Connect to Joern server or start a new one.
+        # Determine Joern executable path
+        self.joern_bin = self.joern_path / "joern-cli" / "joern"
+        if not self.joern_bin.exists():
+            raise BackendConnectionError(
+                f"Joern executable not found at {self.joern_bin}"
+            )
+
+        self.joern_parse = self.joern_path / "joern-cli" / "joern-parse"
+        if not self.joern_parse.exists():
+            raise BackendConnectionError(
+                f"Joern parse executable not found at {self.joern_parse}"
+            )
+
+        self._process: subprocess.Popen | None = None
+        self._connected_core: CPGQLSClient | None = None
+        self._workspace_dir: Path | None = None
+        self._cpg_path: Path | None = None
+
+    @property
+    def core(self) -> CPGQLSClient:
+        """Get the connected CPGQLSClient core.
+
+        Raises:
+            BackendConnectionError: If not connected
+
+        Returns:
+            CPGQLSClient instance
+        """
+        if not self._connected_core:
+            raise BackendConnectionError("Not connected to Joern")
+
+        return self._connected_core
+
+    @staticmethod
+    def _is_port_in_use(host: str, port: int) -> bool:
+        """Check if a port is already in use.
 
         Args:
-            cpg_path: Path to existing CPG database
+            port: Port number to check
+
+        Returns:
+            True if port is in use
         """
-        # In a real implementation, this would:
-        # 1. Check if a Joern server is already running
-        # 2. If not, start one with the given CPG
-        # 3. Wait for it to be ready
-        # For now, this is a placeholder
-        self._connected = True
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            return s.connect_ex((host, port)) == 0
+
+    async def _execute_joern_cli_command(self, cmd: list[str]) -> tuple[bytes, bytes]:
+        """Execute a Joern cli command asynchronously.
+
+        Args:
+            cmd: Command and arguments as list of strings
+
+        Returns:
+            Tuple of (stdout, stderr) from the command execution
+        """
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )  # nosec B603 - Joern binary path controlled by config
+
+            stdout, stderr = await process.communicate()
+
+            if process.returncode != 0:
+                error_msg = stderr.decode() if stderr else "Unknown error"
+                raise BackendConnectionError(f"Joern CPG creation failed: {error_msg}")
+
+            return stdout, stderr
+        except FileNotFoundError as e:
+            raise BackendConnectionError(f"Joern binary not found: {cmd[0]}") from e
+
+        except Exception as e:
+            raise BackendConnectionError(
+                f"Failed to execute Joern command: {cmd} - {e}"
+            ) from e
+
+    async def get_supported_languages(self) -> list[str]:
+        """Get list of programming languages supported by Joern.
+
+        Returns:
+            List of supported language names
+        """
+        cmd = [str(self.joern_parse), "--list-languages"]
+        try:
+            stdout, _ = await self._execute_joern_cli_command(cmd)
+            languages = stdout.decode().splitlines()
+            return [
+                lang.strip().split()[-1]
+                for lang in languages
+                if lang.strip().startswith("-")
+            ]
+        except BackendConnectionError as e:
+            raise BackendConnectionError(
+                f"Failed to get supported languages: {e}"
+            ) from e
+
+    async def connect(
+        self,
+        language: str,
+        source_path: str,
+        analysis_path: str,
+    ) -> None:
+        """Connect to Joern and create/load CPG.
+
+        If needed, Joern AUTOMATICALLY detects all languages in a project by file extensions:
+        - C/C++ (.c, .cc, .cpp, .h, .hpp)
+        - Java (.java, .jar, .class)
+        - JavaScript/TypeScript (.js, .ts, .jsx, .tsx)
+        - Python (.py)
+        - Go (.go)
+        - Kotlin (.kt)
+        - And more...
+
+        For C/C++, Joern uses compile_commands.json if present for accurate
+        preprocessing. Otherwise, it parses source directly.
+
+        Args:
+            language: The programming language of the project, "auto" to let Joern detect
+            source_path: Path to source code directory
+            analysis_path: Path to store analysis artifacts
+
+        Raises:
+            BackendConnectionError: If connection fails
+
+        Example:
+            # Single language project
+            await client.connect(language="c", source_path="/path/to/c_project")
+        """
+        if self._connected_core is not None:
+            raise BackendConnectionError("Already connected to Joern")
+
+        # Check whether the language is supported
+        if language != "auto":
+            supported_languages = await self.get_supported_languages()
+            if language.lower() not in [lang.lower() for lang in supported_languages]:
+                raise BackendConnectionError(
+                    f"Language '{language}' is not supported by Joern. Supported languages: {supported_languages}"
+                )
+
+        # Update workspace directory
+        self._workspace_dir = Path(analysis_path)
+        if not self._workspace_dir.exists():
+            self._workspace_dir.mkdir(parents=True, exist_ok=True)
+
+        self._cpg_path = self._workspace_dir / "cpg.bin"
+        if not self._cpg_path.exists():
+            # Parse source code and create new CPG
+            await self._create_cpg(source_path, language=language)
+
+        # Start Joern server
+        try:
+            self._start_joern_server()
+        except BackendConnectionError as e:
+            self._cpg_path = None
+            self._workspace_dir = None
+            raise BackendConnectionError(f"Failed to start Joern server: {e}") from e
+
+        self._connected_core = CPGQLSClient(f"{self.host}:{self.port}")
+
+    def _start_joern_server(self) -> None:
+        """Start Joern server process."""
+        if self._process is not None:
+            return  # Already started
+
+        cmd = [
+            str(self.joern_bin),
+            "--server",
+            "--server-host",
+            self.host,
+            "--server-port",
+            str(self.port),
+            str(self._cpg_path),
+        ]
+
+        self._process = (
+            subprocess.Popen(  # nosec B603 - Joern binary path controlled by config
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=os.environ.copy(),
+            )
+        )
+
+        # Wait for the server to be ready
+        try:
+            self._wait_for_port()
+        except Exception as e:
+            logs: bytes | None = None
+            if self._process.poll() is not None:
+                stdout, stderr = self._process.communicate()
+                logs = stdout + b"\n" + stderr
+
+            self._process.terminate()
+            self._process = None
+            raise BackendConnectionError(
+                f"Failed to start Joern server: {e}\nLogs:\n{logs.decode() if logs else 'No logs available.'}"
+            ) from e
+
+    def _wait_for_port(self, timeout_s: float = 60.0) -> None:
+        """Wait for Joern server port to be available.
+
+        Args:
+            timeout_s: Maximum time to wait in seconds
+
+        Raises:
+            BackendConnectionError: If port is not available within timeout
+        """
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            try:
+                if self._is_port_in_use(self.host, self.port):
+                    return
+            except Exception as e:
+                raise BackendConnectionError(
+                    f"Error checking Joern port {self.host}:{self.port}: {e}"
+                ) from e
+
+            time.sleep(1.0)
+
+        raise BackendConnectionError(
+            f"Joern server port {self.host}:{self.port} not available after {timeout_s} seconds"
+        )
+
+    async def _create_cpg(self, source_path: str, language: str = "auto"):
+        """Create a new CPG from source code.
+
+        Joern automatically detects build configuration:
+           - For C/C++: Uses compile_commands.json if present
+           - For Java: Handles .java, .class, .jar, Maven/Gradle
+           - For others: Directly parses source files
+
+        Args:
+            source_path: Path to source code (directory or file)
+
+        Raises:
+            BackendConnectionError: If CPG creation fails
+        """
+        source = Path(source_path)
+        if not source.exists():
+            raise BackendConnectionError(f"Source path does not exist: {source_path}")
+
+        if self._workspace_dir is None or not self._workspace_dir.exists():
+            raise BackendConnectionError("Workspace directory is not initialized")
+
+        if self._cpg_path is None or self._cpg_path.exists():
+            raise BackendConnectionError("CPG path is already set or exists")
+
+        # Build Joern parse command
+        # Joern CLI: joern-parse --language <value> --output <cpg.bin> <source_path>
+        cpg_output = self._cpg_path
+
+        cmd = [str(self.joern_parse), "--output", str(cpg_output)]
+        if language != "auto":
+            cmd.extend(["--language", language])
+        cmd.append(str(source))
+
+        try:
+            await self._execute_joern_cli_command(cmd)
+        except BackendConnectionError as e:
+            raise BackendConnectionError(f"Failed to create CPG: {e}") from e
 
     async def disconnect(self):
-        """Disconnect from Joern server."""
+        """Disconnect from Joern and cleanup resources."""
         if self._process:
-            self._process.terminate()
-            self._process.wait()
-            self._process = None
-        self._connected = False
+            await asyncio.wait_for(self.core.execute("exit"), timeout=5.0)
 
-    async def query(self, query_str: str) -> list[dict[str, Any]]:
-        """Execute a CPG query.
+            self._process.terminate()
+            try:
+                # Wait for process to terminate
+                self._process.wait(timeout=5)
+            except (asyncio.TimeoutError, subprocess.TimeoutExpired):
+                # Force kill if graceful termination fails
+                self._process.kill()
+                self._process.wait()
+            finally:
+                self._process = None
+
+        self._connected_core = None
+        self._workspace_dir = None
+        self._cpg_path = None
+
+    async def query(self, query_str: str) -> str:
+        """Execute a CPG query using Joern CLI.
+
+        This executes queries by invoking joern with a script.
+        For production, consider using Joern's HTTP server mode instead.
 
         Args:
             query_str: Joern query string (e.g., "cpg.method.name.l")
 
         Returns:
-            List of query results as dictionaries
-
-        Raises:
-            BackendConnectionError: If not connected
-            BackendQueryError: If query fails
+            Query results as string (typically JSON)
         """
-        if not self._connected:
-            raise BackendConnectionError("Not connected to Joern")
+        return self.core.execute(query_str)  # type: ignore
 
-        # In a real implementation, this would:
-        # 1. Send the query to the Joern server via HTTP/REST API
-        # 2. Parse the JSON response
-        # 3. Return the results
-        # For now, return a placeholder
-        return []
+    async def __aenter__(self):
+        """Async context manager entry.
 
-    async def get_methods(self) -> list[dict[str, Any]]:
-        """Get all methods in the CPG.
+        Note: You must call connect() before using the client.
+        This method just returns self for use in 'async with' statements.
 
         Returns:
-            List of method dictionaries with name, signature, file, line, etc.
+            Self for use in async with statement
+
+        Example:
+            async with JoernClient(joern_path="/path/to/joern") as client:
+                await client.connect(
+                    language="c",
+                    source_path="/path/to/source",
+                    analysis_path="/path/to/analysis"
+                )
+                results = await client.query("cpg.method.name.l")
         """
-        return await self.query("cpg.method.toJson")
-
-    async def get_cfg(self, method_name: str) -> dict[str, Any]:
-        """Get CFG for a specific method.
-
-        Args:
-            method_name: Name of the method
-
-        Returns:
-            CFG structure as a dictionary
-        """
-        query = f'cpg.method.name("{method_name}").controlStructure.toJson'
-        return await self.query(query)  # type: ignore[return-value]
-
-    async def get_call_graph(self) -> list[dict[str, Any]]:
-        """Get the call graph.
-
-        Returns:
-            List of caller-callee relationships
-        """
-        return await self.query("cpg.call.toJson")
-
-    async def get_data_flow(
-        self, source: str, sink: str | None = None
-    ) -> list[dict[str, Any]]:
-        """Get data flow from source to sink.
-
-        Args:
-            source: Source location or variable
-            sink: Optional sink location
-
-        Returns:
-            Data flow paths
-        """
-        # Placeholder for data flow query
-        return []
-
-    def __enter__(self):
-        """Context manager entry."""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit."""
-        if self._connected:
-            # In async context, we can't await here
-            # In a real implementation, use async context manager
-            pass
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit.
+
+        Automatically disconnects and cleans up resources when exiting the context.
+        This ensures proper cleanup even if an exception occurs.
+
+        Args:
+            exc_type: Exception type if an exception occurred
+            exc_val: Exception value if an exception occurred
+            exc_tb: Exception traceback if an exception occurred
+        """
+        await self.disconnect()
