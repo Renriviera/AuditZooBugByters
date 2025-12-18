@@ -14,4 +14,4 @@ cpgqls-client>=0.0.9
 # Utility libraries
 dataclasses-json>=0.6.0  # JSON serialization of dataclasses
 aiofiles>=23.0.0  # Async file I/O
-Faker>=38.2.0  # Random text generation
+rich>=14.2.0  # ANSI parsing

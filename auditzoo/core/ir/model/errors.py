@@ -13,12 +13,6 @@ class IRInvalidFactError(IRError):
     pass
 
 
-class IRUnknownFactError(IRError):
-    """Raised when a fact type is unknown during deserialization."""
-
-    pass
-
-
 class IRValueError(IRError):
     """Raised when an invalid value is provided in IR operations."""
 
@@ -39,5 +33,17 @@ class IRUnimplementedError(IRError):
 
 class IRBackendError(IRError):
     """Raised when there is a backend-related error in IR operations."""
+
+    pass
+
+
+class IRInvalidResponseError(IRError):
+    """Raised when a backend response is invalid or cannot be processed."""
+
+    pass
+
+
+class IRUnitKindError(IRError):
+    """Raised when an unknown CodeUnitKind is encountered."""
 
     pass

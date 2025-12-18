@@ -34,7 +34,7 @@ dependencies = [
     "cpgqls-client>=0.0.9",
     "dataclasses-json>=0.6.0",
     "aiofiles>=23.0.0",
-    "Faker>=38.2.0",
+    "rich>=ANSI",
 ]
 
 [project.optional-dependencies]

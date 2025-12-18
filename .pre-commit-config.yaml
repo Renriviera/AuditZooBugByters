@@ -2,6 +2,8 @@
 # Install: pre-commit install
 # Run manually: pre-commit run --all-files
 
+exclude: ^benchmark/
+
 repos:
   # Python code formatting
   - repo: https://github.com/psf/black

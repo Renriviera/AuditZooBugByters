@@ -94,9 +94,6 @@ class IRView:
         if not self.backend.is_connected():
             raise IRBackendError("Backend must be connected before initializing IRView")
 
-        # Preload code units from backend
-        self.preload_from_backend()
-
     @classmethod
     async def create(cls, backend: CPGBackend) -> "IRView":
         """Async factory method to create and initialize an IRView.
@@ -112,10 +109,12 @@ class IRView:
         if not backend.is_connected():
             await backend.connect()
 
-        return cls(backend, owns_backend=True)
+        view = cls(backend, owns_backend=True)
+        await view.preload_from_backend()
+        return view
 
     async def __aenter__(self) -> "IRView":
-        """Async context manager entry.
+        """Context manager entry.
 
         Returns:
             Self for use in async with statement
@@ -129,7 +128,7 @@ class IRView:
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Async context manager exit.
+        """Context manager exit.
 
         Performs cleanup:
         - Syncs facts to backend
@@ -142,7 +141,7 @@ class IRView:
             exc_tb: Exception traceback if an exception occurred
         """
         # Always cleanup the view
-        self.cleanup(sync_to_backend=True)
+        await self.cleanup(sync_to_backend=True)
 
         # Disconnect backend if we own it
         if self._owns_backend:
@@ -151,16 +150,17 @@ class IRView:
     # ============================================
     # Backend Queries
     # ============================================
-    def query_backend(self, query: str) -> Any:
+    async def query(self, query: str, response_ty: str = "json") -> Any:
         """Execute a raw query against the backend.
 
         Args:
             query: Query string (CPG query language)
+            response_ty: Expected response type ("json", "str", etc.)
 
         Returns:
             Backend-specific query results
         """
-        return self.backend.cpg_query(query)
+        return await self.backend.query(query, response_ty=response_ty)
 
     # ============================================
     # UNIT MANAGEMENT
@@ -188,7 +188,9 @@ class IRView:
         # Update kind index for fast lookup
         self._type_index[unit.kind].add(unit.id)
 
-    def fetch_unit(self, path: Path, start_line: int, end_line: int) -> CodeUnit | None:
+    async def fetch_unit(
+        self, path: Path, start_line: int, end_line: int
+    ) -> CodeUnit | None:
         """Fetch a CodeUnit by its source location.
 
         Args:
@@ -199,12 +201,14 @@ class IRView:
         Returns:
             The minimal CodeUnit covering the specified location, or None if not found
         """
-        unit = self.backend.get_code_unit_by_location(path, start_line, end_line)
+        unit = await self.backend.get_code_unit_by_location(path, start_line, end_line)
         if unit and unit.id not in self._graph:
             self._add_unit(unit)
         return unit
 
-    def get_unit(self, unit_id: str, fetch_backend: bool = True) -> CodeUnit | None:
+    async def get_unit(
+        self, unit_id: str, fetch_backend: bool = True
+    ) -> CodeUnit | None:
         """Get CodeUnit by ID.
 
         Args:
@@ -220,7 +224,7 @@ class IRView:
             return unit
 
         if fetch_backend and unit_id not in self._loaded_units:
-            unit = self.backend.get_code_unit(unit_id)
+            unit = await self.backend.get_code_unit(unit_id)
             self._loaded_units.add(unit_id)
             if unit:
                 self._add_unit(unit)
@@ -228,7 +232,7 @@ class IRView:
 
         return None
 
-    def has_unit(self, unit_id: str, fetch_backend: bool = True) -> bool:
+    async def has_unit(self, unit_id: str, fetch_backend: bool = True) -> bool:
         """Check if a CodeUnit exists in the graph.
 
         Args:
@@ -238,9 +242,9 @@ class IRView:
         Returns:
             True if unit exists in graph
         """
-        return self.get_unit(unit_id, fetch_backend) is not None
+        return await self.get_unit(unit_id, fetch_backend) is not None
 
-    def get_all_units_by_kind(
+    async def get_all_units_by_kind(
         self, kind: CodeUnitKind, fetch_backend: bool = True
     ) -> list[CodeUnit]:
         """Get all CodeUnits of a specific type.
@@ -254,7 +258,7 @@ class IRView:
         """
         if fetch_backend and kind not in self._loaded_unit_kinds:
             # Load from backend if not already loaded
-            units = self.backend.get_code_units(kind)
+            units = await self.backend.get_code_units(kind)
             for unit in units:
                 self._add_unit(unit)
             self._loaded_unit_kinds.add(kind)
@@ -275,7 +279,7 @@ class IRView:
     # RELATION MANAGEMENT
     # ============================================
 
-    def _add_relation(
+    async def _add_relation(
         self,
         source_id: str,
         target_id: str,
@@ -304,15 +308,15 @@ class IRView:
                 call_site_id="call_789"
             )
         """
-        if not self.has_unit(source_id):
+        if not await self.has_unit(source_id):
             raise IRValueError(f"Source unit {source_id} not found in graph")
 
-        if not self.has_unit(target_id):
+        if not await self.has_unit(target_id):
             raise IRValueError(f"Target unit {target_id} not found in graph")
 
         self._graph.add_edge(source_id, target_id, key=relation, **metadata)
 
-    def get_all_relations_by_kind(
+    async def get_all_relations_by_kind(
         self,
         kind: RelationKind,
         fetch_backend: bool = True,
@@ -332,14 +336,16 @@ class IRView:
                 source_unit = self._graph.nodes[source_id]["unit"]
 
                 # We only need to do one direction, since we track all nodes
-                relations = self.backend.get_relations(source_unit, kind, "out")
+                relations = await self.backend.get_relations(source_unit, kind, "out")
 
                 for target_unit, relation, metadata in relations:
-                    if not self.has_unit(target_unit.id, fetch_backend=True):
+                    if not await self.has_unit(target_unit.id, fetch_backend=True):
                         raise IRValueError(
                             f"Related unit {target_unit.id} not found in backend"
                         )
-                    self._add_relation(source_id, target_unit.id, relation, **metadata)
+                    await self._add_relation(
+                        source_id, target_unit.id, relation, **metadata
+                    )
 
             self._loaded_relation_kinds.add(kind)
 
@@ -354,7 +360,7 @@ class IRView:
 
         return result
 
-    def get_related_units(
+    async def get_related_units(
         self,
         unit: CodeUnit,
         kind: RelationKind,
@@ -386,7 +392,7 @@ class IRView:
         if unit.is_synthetic:
             raise IRValueError("CodeUnit must be backend-backed to get related units")
 
-        if not self.has_unit(unit.id, fetch_backend):
+        if not await self.has_unit(unit.id, fetch_backend):
             raise IRValueError(f"CodeUnit {unit.id} not found in graph")
 
         # Check valid direction
@@ -394,8 +400,8 @@ class IRView:
             raise IRValueError("direction must be 'in', 'out', or 'both'")
         if direction == "both":
             # Combine results from both directions
-            out_related = self.get_related_units(unit, kind, "out", fetch_backend)
-            in_related = self.get_related_units(unit, kind, "in", fetch_backend)
+            out_related = await self.get_related_units(unit, kind, "out", fetch_backend)
+            in_related = await self.get_related_units(unit, kind, "in", fetch_backend)
             return out_related + in_related
 
         if (
@@ -404,19 +410,23 @@ class IRView:
             and (unit.id, direction, kind) not in self._loaded_relations
         ):
             # Load relations from backend
-            relations = self.backend.get_relations(unit, kind, direction)
+            relations = await self.backend.get_relations(unit, kind, direction)
             for target_unit, relation, metadata in relations:
                 # Ensure target unit exists
-                if not self.has_unit(target_unit.id, fetch_backend=True):
+                if not await self.has_unit(target_unit.id, fetch_backend=True):
                     raise IRValueError(
                         f"Related unit {target_unit.id} not found in backend"
                     )
 
                 # Add relation with metadata
                 if direction == "out":
-                    self._add_relation(unit.id, target_unit.id, relation, **metadata)
+                    await self._add_relation(
+                        unit.id, target_unit.id, relation, **metadata
+                    )
                 else:
-                    self._add_relation(target_unit.id, unit.id, relation, **metadata)
+                    await self._add_relation(
+                        target_unit.id, unit.id, relation, **metadata
+                    )
 
             self._loaded_relations.add((unit.id, direction, kind))
 
@@ -558,7 +568,7 @@ class IRView:
     # FACT MANAGEMENT
     # ============================================
 
-    def add_unit_fact(
+    async def add_unit_fact(
         self, unit: CodeUnit, fact: UnitFact, fetch_backend: bool = True
     ) -> None:
         """Add a unit fact to a CodeUnit.
@@ -588,13 +598,15 @@ class IRView:
         if unit.is_synthetic:
             raise IRValueError("CodeUnit must be CPG-backed to add unit facts")
 
-        if not self.has_unit(unit.id, fetch_backend):
+        if not await self.has_unit(unit.id, fetch_backend):
             raise IRValueError(f"CodeUnit {unit.id} not found in graph")
 
         # Unit facts stored in node attributes
         self._graph.nodes[unit.id]["unit_facts"].append(fact)
 
-    def add_relation_fact(self, fact: RelationFact, fetch_backend: bool = True) -> None:
+    async def add_relation_fact(
+        self, fact: RelationFact, fetch_backend: bool = True
+    ) -> None:
         """Add a relation fact connecting two CodeUnits.
 
         Relation facts are stored at the graph level (global).
@@ -617,12 +629,12 @@ class IRView:
             view.add_relation_fact(fact)
             # This automatically creates an edge in the graph!
         """
-        if not self.has_unit(fact.source_node_id, fetch_backend):
+        if not await self.has_unit(fact.source_node_id, fetch_backend):
             raise IRValueError(
                 f"Source CodeUnit {fact.source_node_id} not found in graph"
             )
 
-        if not self.has_unit(fact.target_node_id, fetch_backend):
+        if not await self.has_unit(fact.target_node_id, fetch_backend):
             raise IRValueError(
                 f"Target CodeUnit {fact.target_node_id} not found in graph"
             )
@@ -633,7 +645,7 @@ class IRView:
         # Update graph using the fact's graph updater
         fact.apply_graph_update(self._graph)
 
-    def get_unit_facts(
+    async def get_unit_facts(
         self,
         unit: CodeUnit,
         fact_cls: type[UnitFact] | None = None,
@@ -655,7 +667,7 @@ class IRView:
         if unit.is_synthetic:
             raise IRValueError("CodeUnit must be CPG-backed to get unit facts")
 
-        if not self.has_unit(unit.id, fetch_backend):
+        if not await self.has_unit(unit.id, fetch_backend):
             raise IRValueError(f"CodeUnit {unit.id} not found in graph")
 
         unit_facts = self._graph.nodes[unit.id]["unit_facts"]
@@ -688,20 +700,22 @@ class IRView:
     # SYNC BACKEND
     # ============================================
 
-    def preload_from_backend(self) -> None:
+    async def preload_from_backend(self) -> None:
         """Preload common units and relations from the backend into the IRView.
         This can be used to eagerly load frequently accessed data.
         """
 
-        self.get_all_units_by_kind(UKRegistry.Function(), fetch_backend=True)
-        self.get_all_relations_by_kind(RKRegistry.Calls(), fetch_backend=True)
-        self.get_all_relations_by_kind(RKRegistry.AnnotatedBy(), fetch_backend=True)
+        await self.get_all_units_by_kind(UKRegistry.Function(), fetch_backend=True)
+        await self.get_all_relations_by_kind(RKRegistry.Calls(), fetch_backend=True)
+        await self.get_all_relations_by_kind(
+            RKRegistry.AnnotatedBy(), fetch_backend=True
+        )
 
         for unit in self.get_all_units():
-            self.load_unit_facts_from_backend(unit)
-        self.load_relation_facts_from_backend()
+            await self.load_unit_facts_from_backend(unit)
+        await self.load_relation_facts_from_backend()
 
-    def load_unit_facts_from_backend(self, unit: CodeUnit) -> None:
+    async def load_unit_facts_from_backend(self, unit: CodeUnit) -> None:
         """Load unit facts for a CodeUnit from the backend.
 
         This queries the backend for tags and deserializes them into UnitFact objects.
@@ -713,33 +727,33 @@ class IRView:
             return
 
         # Get all tags from backend for this CPG node
-        facts = self.backend.get_unit_tags(unit)
+        facts = await self.backend.get_unit_tags(unit)
 
         for fact in facts:
-            self.add_unit_fact(unit, fact)
+            await self.add_unit_fact(unit, fact)
 
-    def load_relation_facts_from_backend(self) -> None:
+    async def load_relation_facts_from_backend(self) -> None:
         """Load all relation facts from the backend.
 
         This queries the backend for global tags and deserializes them into RelationFact objects.
         """
         # Get all global tags from backend
-        facts = self.backend.get_relation_tags()
+        facts = await self.backend.get_relation_tags()
 
         for fact in facts:
-            self.add_relation_fact(fact)
+            await self.add_relation_fact(fact)
 
-    def sync_backend(self) -> None:
+    async def sync_backend(self) -> None:
         """Sync all facts in the IRView down to the CPG backend for persistence."""
         # Sync unit facts
         for node_id in self._graph.nodes:
             unit = self._graph.nodes[node_id]["unit"]
-            self.store_unit_facts_to_backend(unit)
+            await self.store_unit_facts_to_backend(unit)
 
         # Sync relation facts
-        self.store_relation_facts_to_backend()
+        await self.store_relation_facts_to_backend()
 
-    def store_unit_facts_to_backend(self, unit: CodeUnit) -> None:
+    async def store_unit_facts_to_backend(self, unit: CodeUnit) -> None:
         """Sync all unit facts for a CodeUnit to the CPG backend for persistence.
 
         Unit facts are stored as per-node tags in the backend.
@@ -750,12 +764,12 @@ class IRView:
         if unit.is_synthetic:
             return
 
-        facts = self.get_unit_facts(unit, fetch_backend=False)
+        facts = await self.get_unit_facts(unit, fetch_backend=False)
         for fact in facts:
             # Serialize fact and store as backend tag
-            self.backend.set_unit_tag(unit, fact)
+            await self.backend.set_unit_tag(unit, fact)
 
-    def store_relation_facts_to_backend(self) -> None:
+    async def store_relation_facts_to_backend(self) -> None:
         """Sync all relation facts to the CPG backend for persistence.
 
         Relation facts are stored as global tags (on a special "_global" node)
@@ -763,7 +777,7 @@ class IRView:
         """
         for fact in self._relation_facts:
             # Serialize fact and store as global backend tag
-            self.backend.set_relation_tag(fact)
+            await self.backend.set_relation_tag(fact)
 
     # ============================================
     # CACHE MANAGEMENT
@@ -811,7 +825,7 @@ class IRView:
             ],
         }
 
-    def cleanup(self, sync_to_backend: bool = False) -> None:
+    async def cleanup(self, sync_to_backend: bool = False) -> None:
         """Explicit cleanup method for IRView.
 
         This provides more control than relying on __del__().
@@ -829,11 +843,11 @@ class IRView:
             try:
                 # ... use view ...
             finally:
-                view.cleanup(sync_to_backend=True)
+                await view.cleanup(sync_to_backend=True)
                 # Backend is still connected, disconnect manually if needed
         """
         if sync_to_backend:
-            self.sync_backend()
+            await self.sync_backend()
 
         # Clear all data structures
         self._graph.clear()

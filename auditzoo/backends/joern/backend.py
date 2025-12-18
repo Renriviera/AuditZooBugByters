@@ -3,12 +3,15 @@
 This module implements the IRBackend interface using Joern CPG queries.
 """
 
+import os
+import shutil
 from pathlib import Path
 from typing import Any
 
 from auditzoo.backends.base import JoernConfig
 from auditzoo.backends.joern.client import JoernClient
-from auditzoo.core.ir.backend_api import CPGBackend
+from auditzoo.backends.joern.utils import parse_joern_response
+from auditzoo.core.ir.backend_api import BackendResponseError, CPGBackend
 from auditzoo.core.ir.facts.base import RelationFact, UnitFact
 from auditzoo.core.ir.model import CodeUnit, CodeUnitKind, CodeUnitRelation
 from auditzoo.core.ir.model.base import RelationDirection, RelationKind
@@ -20,6 +23,8 @@ class JoernBackend(CPGBackend):
     This backend queries Joern's Code Property Graph to provide
     IR-level information about programs.
     """
+
+    _language: str | None = None
 
     def __init__(self, config: JoernConfig):
         """Initialize Joern backend.
@@ -46,6 +51,24 @@ class JoernBackend(CPGBackend):
 
     async def disconnect(self) -> None:
         """Disconnect from Joern."""
+        # Clean cache and close connection
+        self._language = None
+
+        # Commit any pending changes and save the CPG
+        await self.query_raw("run.commit")
+        await self.query_raw("save")
+
+        # Move the CPG from the *actual* Joern workspace back to the desired location
+        joern_workspace = Path(await self.query("project.path", "str"))
+        if self.client.cpg_path is not None:
+            joern_cpg_path = joern_workspace / os.path.basename(self.client.cpg_path)
+            if joern_cpg_path.exists():
+                joern_cpg_path.replace(self.client.cpg_path)
+
+        # Delete the workspace directory
+        if joern_workspace.exists():
+            shutil.rmtree(joern_workspace)
+
         await self.client.disconnect()
         self._connected = False
 
@@ -55,7 +78,7 @@ class JoernBackend(CPGBackend):
 
     # ===== Core CPG Query Interface =====
 
-    async def cpg_query(self, query: str) -> Any:
+    async def query_raw(self, query: str) -> str:
         """Execute a CPG query and return results.
 
         Args:
@@ -64,11 +87,43 @@ class JoernBackend(CPGBackend):
         Returns:
             Query results (typically JSON-decoded dict/list)
         """
-        raise NotImplementedError()
+        return await self.client.query(query)
+
+    async def query(self, query: str, response_ty: str = "json") -> Any:
+        """Execute a CPG query and return results as a dict.
+
+        Args:
+            query: CPG query string (Scala/Joern syntax)
+
+        Returns:
+            Query results as a dictionary
+        """
+        result = await self.query_raw(query)
+        return parse_joern_response(result, response_ty=response_ty)
+
+    # ===== Metadata Management =====
+
+    async def get_language(self) -> str | None:
+        """Get the programming language of the loaded CPG.
+
+        Returns:
+            Programming language as a string, or None if unknown
+        """
+        if self._language is None:
+            query = "cpg.metaData.language.toJson"
+            result = await self.query(query)
+            if not result or not isinstance(result, list) or len(result) == 0:
+                raise BackendResponseError(
+                    "Failed to retrieve language from Joern CPG metadata."
+                )
+
+            self._language = result[0]
+
+        return self._language
 
     # ===== Tag Management =====
 
-    def get_relation_tags(self) -> list[RelationFact]:
+    async def get_relation_tags(self) -> list[RelationFact]:
         """Get relation facts attached to the CPG.
 
         Returns:
@@ -76,7 +131,7 @@ class JoernBackend(CPGBackend):
         """
         raise NotImplementedError()
 
-    def get_unit_tags(self, unit: CodeUnit) -> list[UnitFact]:
+    async def get_unit_tags(self, unit: CodeUnit) -> list[UnitFact]:
         """Get tags attached to a code unit.
 
         Args:
@@ -87,7 +142,7 @@ class JoernBackend(CPGBackend):
         """
         raise NotImplementedError()
 
-    def set_unit_tag(self, unit: CodeUnit, fact: UnitFact) -> None:
+    async def set_unit_tag(self, unit: CodeUnit, fact: UnitFact) -> None:
         """Add a tag to a code unit.
 
         Args:
@@ -96,7 +151,7 @@ class JoernBackend(CPGBackend):
         """
         raise NotImplementedError()
 
-    def set_relation_tag(self, fact: RelationFact) -> None:
+    async def set_relation_tag(self, fact: RelationFact) -> None:
         """Add a tag to a relation.
 
         Args:
@@ -106,7 +161,7 @@ class JoernBackend(CPGBackend):
 
     # ===== Code Unit and Relation Management =====
 
-    def get_code_unit_by_location(
+    async def get_code_unit_by_location(
         self, path: Path, start_line: int, end_line: int
     ) -> CodeUnit | None:
         """Get a code unit by its source location.
@@ -121,7 +176,7 @@ class JoernBackend(CPGBackend):
         """
         raise NotImplementedError()
 
-    def get_code_unit(self, cpg_node_id: str) -> CodeUnit | None:
+    async def get_code_unit(self, cpg_node_id: str) -> CodeUnit | None:
         """Get a specific code unit by its CPG node ID.
 
         Args:
@@ -130,9 +185,20 @@ class JoernBackend(CPGBackend):
         Returns:
             CodeUnit object or None if not found
         """
-        raise NotImplementedError()
+        query = f"cpg.all.id({cpg_node_id}L).toJson"
+        response = await self.query(query)
+        units = CodeUnitKind.create_from_response(
+            response=response,
+            backend_type="joern",
+            language=await self.get_language(),
+        )
 
-    def get_code_units(self, kind: CodeUnitKind) -> list[CodeUnit]:
+        if not units or not isinstance(units, list) or len(units) == 0:
+            return None
+
+        return units[0]
+
+    async def get_code_units(self, kind: CodeUnitKind) -> list[CodeUnit]:
         """Get all code units of a specific type.
 
         Args:
@@ -141,9 +207,17 @@ class JoernBackend(CPGBackend):
         Returns:
             List of CodeUnit objects
         """
-        raise NotImplementedError()
+        query = kind.to_query(backend_type="joern", language=await self.get_language())
+        response = await self.query(query)
+        units = kind.from_response(
+            response=response,
+            backend_type="joern",
+            language=await self.get_language(),
+        )
 
-    def get_relations(
+        return units
+
+    async def get_relations(
         self, source_unit: CodeUnit, kind: RelationKind, direction: RelationDirection
     ) -> list[tuple[CodeUnit, CodeUnitRelation, dict[str, Any]]]:
         """Get all relations of a specific kind from a source code unit.

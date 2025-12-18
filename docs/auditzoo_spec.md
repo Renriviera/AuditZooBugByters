@@ -153,7 +153,7 @@ class CPGBackend(ABC):
     async def disconnect() -> None
 
     # Core query
-    async def cpg_query(query: str) -> Any
+    async def cpg(query: str) -> Any
 
     # Tag management
     async def add_tag(cpg_node_id: str, tag_name: str, tag_data: dict)

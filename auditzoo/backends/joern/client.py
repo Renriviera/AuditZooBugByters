@@ -3,16 +3,17 @@
 Low-level wrapper for interacting with Joern and querying the CPG.
 """
 
-import asyncio
 import os
 import socket
 import subprocess  # nosec B404 - subprocess needed for Joern interaction
 import time
 from pathlib import Path
 
+import psutil
 from cpgqls_client import CPGQLSClient
+from rich.text import Text
 
-from auditzoo.core.ir.backend_api import BackendConnectionError
+from auditzoo.core.ir.backend_api import BackendConnectionError, BackendQueryError
 
 
 class JoernClient:
@@ -58,6 +59,16 @@ class JoernClient:
         self._connected_core: CPGQLSClient | None = None
         self._workspace_dir: Path | None = None
         self._cpg_path: Path | None = None
+        self._first_query_executed: bool = False
+
+    @property
+    def cpg_path(self) -> Path | None:
+        """Get the current CPG path.
+
+        Returns:
+            Path to the CPG file or None if not set
+        """
+        return self._cpg_path
 
     @property
     def core(self) -> CPGQLSClient:
@@ -87,8 +98,8 @@ class JoernClient:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             return s.connect_ex((host, port)) == 0
 
-    async def _execute_joern_cli_command(self, cmd: list[str]) -> tuple[bytes, bytes]:
-        """Execute a Joern cli command asynchronously.
+    def _execute_joern_cli_command(self, cmd: list[str]) -> tuple[bytes, bytes]:
+        """Execute a Joern cli command.
 
         Args:
             cmd: Command and arguments as list of strings
@@ -97,28 +108,26 @@ class JoernClient:
             Tuple of (stdout, stderr) from the command execution
         """
         try:
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                check=False,
             )  # nosec B603 - Joern binary path controlled by config
 
-            stdout, stderr = await process.communicate()
-
-            if process.returncode != 0:
-                error_msg = stderr.decode() if stderr else "Unknown error"
+            if result.returncode != 0:
+                error_msg = result.stderr.decode() if result.stderr else "Unknown error"
                 raise BackendConnectionError(f"Joern CPG creation failed: {error_msg}")
 
-            return stdout, stderr
+            return result.stdout, result.stderr
+
         except FileNotFoundError as e:
             raise BackendConnectionError(f"Joern binary not found: {cmd[0]}") from e
-
         except Exception as e:
             raise BackendConnectionError(
                 f"Failed to execute Joern command: {cmd} - {e}"
             ) from e
 
-    async def get_supported_languages(self) -> list[str]:
+    def get_supported_languages(self) -> list[str]:
         """Get list of programming languages supported by Joern.
 
         Returns:
@@ -126,7 +135,7 @@ class JoernClient:
         """
         cmd = [str(self.joern_parse), "--list-languages"]
         try:
-            stdout, _ = await self._execute_joern_cli_command(cmd)
+            stdout, _ = self._execute_joern_cli_command(cmd)
             languages = stdout.decode().splitlines()
             return [
                 lang.strip().split()[-1]
@@ -171,11 +180,11 @@ class JoernClient:
             await client.connect(language="c", source_path="/path/to/c_project")
         """
         if self._connected_core is not None:
-            raise BackendConnectionError("Already connected to Joern")
+            return
 
         # Check whether the language is supported
         if language != "auto":
-            supported_languages = await self.get_supported_languages()
+            supported_languages = self.get_supported_languages()
             if language.lower() not in [lang.lower() for lang in supported_languages]:
                 raise BackendConnectionError(
                     f"Language '{language}' is not supported by Joern. Supported languages: {supported_languages}"
@@ -189,7 +198,7 @@ class JoernClient:
         self._cpg_path = self._workspace_dir / "cpg.bin"
         if not self._cpg_path.exists():
             # Parse source code and create new CPG
-            await self._create_cpg(source_path, language=language)
+            self._create_cpg(source_path, language=language)
 
         # Start Joern server
         try:
@@ -208,6 +217,7 @@ class JoernClient:
 
         cmd = [
             str(self.joern_bin),
+            "--nocolors",
             "--server",
             "--server-host",
             self.host,
@@ -265,7 +275,7 @@ class JoernClient:
             f"Joern server port {self.host}:{self.port} not available after {timeout_s} seconds"
         )
 
-    async def _create_cpg(self, source_path: str, language: str = "auto"):
+    def _create_cpg(self, source_path: str, language: str = "auto"):
         """Create a new CPG from source code.
 
         Joern automatically detects build configuration:
@@ -299,29 +309,46 @@ class JoernClient:
         cmd.append(str(source))
 
         try:
-            await self._execute_joern_cli_command(cmd)
+            self._execute_joern_cli_command(cmd)
         except BackendConnectionError as e:
             raise BackendConnectionError(f"Failed to create CPG: {e}") from e
 
     async def disconnect(self):
         """Disconnect from Joern and cleanup resources."""
         if self._process:
-            await asyncio.wait_for(self.core.execute("exit"), timeout=5.0)
-
-            self._process.terminate()
             try:
-                # Wait for process to terminate
-                self._process.wait(timeout=5)
-            except (asyncio.TimeoutError, subprocess.TimeoutExpired):
-                # Force kill if graceful termination fails
-                self._process.kill()
-                self._process.wait()
+                # Get parent process and all children
+                parent = psutil.Process(self._process.pid)
+                children = parent.children(recursive=True)
+
+                # Terminate all children and parent
+                for child in children:
+                    try:
+                        child.terminate()
+                    except psutil.NoSuchProcess:
+                        pass
+                parent.terminate()
+
+                # Wait for processes to terminate gracefully
+                _, alive = psutil.wait_procs(children + [parent], timeout=5)
+
+                # Force kill any remaining processes
+                for p in alive:
+                    try:
+                        p.kill()
+                    except psutil.NoSuchProcess:
+                        pass
+
+            except psutil.NoSuchProcess:
+                # Process already terminated
+                pass
             finally:
                 self._process = None
 
         self._connected_core = None
         self._workspace_dir = None
         self._cpg_path = None
+        self._first_query_executed = False
 
     async def query(self, query_str: str) -> str:
         """Execute a CPG query using Joern CLI.
@@ -335,16 +362,27 @@ class JoernClient:
         Returns:
             Query results as string (typically JSON)
         """
-        return self.core.execute(query_str)  # type: ignore
+        if not self.core:
+            raise BackendConnectionError("Not connected to Joern")
+
+        if not self._first_query_executed:
+            # flush buffer from the initial connection
+            await self.core._send_query("cpg")
+            self._first_query_executed = True
+
+        response = await self.core._send_query(query_str)
+        if not response["success"]:
+            raise BackendQueryError(
+                f"Joern query failed: {response.get('error', 'Unknown error')}"
+            )
+
+        return Text.from_ansi(response["stdout"]).plain  # type: ignore
 
     async def __aenter__(self):
-        """Async context manager entry.
-
-        Note: You must call connect() before using the client.
-        This method just returns self for use in 'async with' statements.
+        """Context manager entry.
 
         Returns:
-            Self for use in async with statement
+            Self for use in with statement
 
         Example:
             async with JoernClient(joern_path="/path/to/joern") as client:
@@ -353,12 +391,12 @@ class JoernClient:
                     source_path="/path/to/source",
                     analysis_path="/path/to/analysis"
                 )
-                results = await client.query("cpg.method.name.l")
+                results = client.query("cpg.method.name.l")
         """
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit.
+        """Context manager exit.
 
         Automatically disconnects and cleans up resources when exiting the context.
         This ensures proper cleanup even if an exception occurs.

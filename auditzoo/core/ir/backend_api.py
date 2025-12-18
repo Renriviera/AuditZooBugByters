@@ -25,11 +25,12 @@ class CPGBackend(ABC):
     # ===== Core CPG Query Interface =====
 
     @abstractmethod
-    def cpg_query(self, query: str) -> Any:
-        """Execute a CPG query and return results.
+    async def query(self, query: str, response_ty: str = "json") -> Any:
+        """Execute a backend query and return results.
 
         Args:
             query: CPG query string (Scala/Joern syntax)
+            response_ty: Expected response type ("json", "str", etc.)
 
         Returns:
             Query results (typically JSON-decoded dict/list)
@@ -43,7 +44,7 @@ class CPGBackend(ABC):
     # ===== Tag Management =====
 
     @abstractmethod
-    def get_relation_tags(self) -> list[RelationFact]:
+    async def get_relation_tags(self) -> list[RelationFact]:
         """Get relation facts attached to the CPG.
 
         Returns:
@@ -55,7 +56,7 @@ class CPGBackend(ABC):
         pass
 
     @abstractmethod
-    def get_unit_tags(self, unit: CodeUnit) -> list[UnitFact]:
+    async def get_unit_tags(self, unit: CodeUnit) -> list[UnitFact]:
         """Get tags attached to a code unit.
 
         Args:
@@ -70,7 +71,7 @@ class CPGBackend(ABC):
         pass
 
     @abstractmethod
-    def set_unit_tag(self, unit: CodeUnit, fact: UnitFact) -> None:
+    async def set_unit_tag(self, unit: CodeUnit, fact: UnitFact) -> None:
         """Add a tag to a code unit.
 
         Args:
@@ -83,7 +84,7 @@ class CPGBackend(ABC):
         pass
 
     @abstractmethod
-    def set_relation_tag(self, fact: RelationFact) -> None:
+    async def set_relation_tag(self, fact: RelationFact) -> None:
         """Add a tag to a relation.
 
         Args:
@@ -97,7 +98,7 @@ class CPGBackend(ABC):
     # ===== Code Unit and Relation Management =====
 
     @abstractmethod
-    def get_code_unit_by_location(
+    async def get_code_unit_by_location(
         self, path: Path, start_line: int, end_line: int
     ) -> CodeUnit | None:
         """Get a code unit by its source location.
@@ -116,7 +117,7 @@ class CPGBackend(ABC):
         pass
 
     @abstractmethod
-    def get_code_unit(self, cpg_node_id: str) -> CodeUnit | None:
+    async def get_code_unit(self, cpg_node_id: str) -> CodeUnit | None:
         """Get a specific code unit by its CPG node ID.
 
         Args:
@@ -131,7 +132,7 @@ class CPGBackend(ABC):
         pass
 
     @abstractmethod
-    def get_code_units(self, kind: CodeUnitKind) -> list[CodeUnit]:
+    async def get_code_units(self, kind: CodeUnitKind) -> list[CodeUnit]:
         """Get all code units of a specific type.
 
         Args:
@@ -146,7 +147,7 @@ class CPGBackend(ABC):
         pass
 
     @abstractmethod
-    def get_relations(
+    async def get_relations(
         self, source_unit: CodeUnit, kind: RelationKind, direction: RelationDirection
     ) -> list[tuple[CodeUnit, CodeUnitRelation, dict[str, Any]]]:
         """Get all relations of a specific kind from a source code unit.
@@ -196,7 +197,7 @@ class CPGBackend(ABC):
     # ===== Async Context Manager Support =====
 
     async def __aenter__(self):
-        """Async context manager entry.
+        """Context manager entry.
 
         Automatically connects to the backend when entering the context.
 
@@ -205,13 +206,13 @@ class CPGBackend(ABC):
 
         Example:
             async with backend:
-                results = await backend.cpg_query("cpg.method.name.l")
+                results = await backend.query("cpg.method.name.l")
         """
         await self.connect()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit.
+        """Context manager exit.
 
         Automatically disconnects when exiting the context.
         Ensures cleanup even if an exception occurs.
@@ -256,5 +257,11 @@ class BackendUnsupportedLanguageError(BackendError):
 
 class BackendUnimplementedError(BackendError):
     """Error for unimplemented backend features."""
+
+    pass
+
+
+class BackendResponseError(BackendError):
+    """Error for invalid or unexpected backend responses."""
 
     pass

@@ -18,8 +18,8 @@ class LocalVariable(CodeUnitKind):
         )
 
     def from_response(
-        self, response: dict[str, Any], backend_type: str, language: str | None = None
-    ) -> CodeUnit | None:
+        self, response: Any, backend_type: str, language: str | None = None
+    ) -> list[CodeUnit]:
         raise IRUnimplementedError(
             f"LocalVariableKind.to_code_unit() not implemented for backend '{backend_type}'"
         )
@@ -38,8 +38,8 @@ class GlobalVariable(CodeUnitKind):
         )
 
     def from_response(
-        self, response: dict[str, Any], backend_type: str, language: str | None = None
-    ) -> CodeUnit | None:
+        self, response: Any, backend_type: str, language: str | None = None
+    ) -> list[CodeUnit]:
         raise IRUnimplementedError(
             f"GlobalVariableKind.to_code_unit() not implemented for backend '{backend_type}'"
         )
@@ -58,8 +58,8 @@ class Parameter(CodeUnitKind):
         )
 
     def from_response(
-        self, response: dict[str, Any], backend_type: str, language: str | None = None
-    ) -> CodeUnit | None:
+        self, response: Any, backend_type: str, language: str | None = None
+    ) -> list[CodeUnit]:
         raise IRUnimplementedError(
             f"ParameterKind.to_code_unit() not implemented for backend '{backend_type}'"
         )

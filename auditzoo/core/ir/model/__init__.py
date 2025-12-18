@@ -24,7 +24,7 @@ from .errors import (
     IRInvalidFactError,
     IRRelationKindError,
     IRUnimplementedError,
-    IRUnknownFactError,
+    IRUnitKindError,
     IRValueError,
 )
 
@@ -42,9 +42,9 @@ __all__ = [
     # Errors
     "IRError",
     "IRInvalidFactError",
-    "IRUnknownFactError",
     "IRValueError",
     "IRRelationKindError",
     "IRUnimplementedError",
     "IRBackendError",
+    "IRUnitKindError",
 ]

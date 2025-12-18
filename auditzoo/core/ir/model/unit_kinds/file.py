@@ -18,8 +18,8 @@ class File(CodeUnitKind):
         )
 
     def from_response(
-        self, response: dict[str, Any], backend_type: str, language: str | None = None
-    ) -> CodeUnit | None:
+        self, response: Any, backend_type: str, language: str | None = None
+    ) -> list[CodeUnit]:
         raise IRUnimplementedError(
             f"FileKind.to_code_unit() not implemented for backend '{backend_type}'"
         )

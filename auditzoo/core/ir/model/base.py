@@ -62,10 +62,9 @@ Philosophy:
 import inspect
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, ClassVar, Literal, Optional
+from typing import Any, ClassVar, Literal
 
-from auditzoo.core.ir.model.errors import IRRelationKindError
+from auditzoo.core.ir.model.errors import IRRelationKindError, IRUnitKindError
 
 RelationDirection = Literal["in", "out"]
 
@@ -81,7 +80,7 @@ class CodeLocation:
         column_start: Optional starting column (1-indexed)
     """
 
-    file_path: Path
+    file_path: str
     line_start: int
     line_end: int
     column_start: int | None = None
@@ -145,8 +144,8 @@ class CodeUnitKind(ABC):
 
     @abstractmethod
     def from_response(
-        self, response: dict[str, Any], backend_type: str, language: str | None = None
-    ) -> Optional["CodeUnit"]:
+        self, response: Any, backend_type: str, language: str | None = None
+    ) -> list["CodeUnit"]:
         """Convert a backend query response to a CodeUnit of this kind.
 
         Args:
@@ -155,14 +154,30 @@ class CodeUnitKind(ABC):
             language: Programming language (optional, may affect query)
 
         Returns:
-            CodeUnit instance representing the code unit, or None if not applicable
+            List of CodeUnit instances representing the code units of this kind
         """
         pass
 
     @classmethod
-    def parse_response(
-        cls, response: dict[str, Any], backend_type: str, language: str | None = None
-    ) -> Optional["CodeUnit"]:
+    def create(cls, kind_name: str, **kwargs) -> "CodeUnitKind":
+        """Create a CodeUnitKind instance by name.
+
+        Args:
+            kind_name: Name of the CodeUnitKind subclass
+            kwargs: Additional arguments for the subclass constructor
+
+        Returns:
+            Instance of the specified CodeUnitKind subclass
+        """
+        kind_cls = cls._registry.get(kind_name)
+        if not kind_cls:
+            raise IRUnitKindError(f"Unknown CodeUnitKind: {kind_name}")
+        return kind_cls(**kwargs)
+
+    @classmethod
+    def create_from_response(
+        cls, response: Any, backend_type: str, language: str | None = None
+    ) -> list["CodeUnit"]:
         """Convert a backend query response to a CodeUnit by trying all registered kinds. It will return the first matching kind.
 
         Args:
@@ -171,14 +186,17 @@ class CodeUnitKind(ABC):
             language: Programming language (optional, may affect query)
 
         Returns:
-            CodeUnit instance representing the code unit, or None if not applicable
+            List of CodeUnit instances representing the code units found
         """
         for kind_cls in cls._registry.values():
-            unit = kind_cls().from_response(response, backend_type, language)
-            if unit is not None:
-                return unit
+            try:
+                unit = kind_cls().from_response(response, backend_type, language)
+                if len(unit) > 0:
+                    return unit
+            except Exception:
+                continue
 
-        return None
+        return []
 
 
 @dataclass(frozen=True)
@@ -214,8 +232,8 @@ class RelationKind(ABC):
 
     @abstractmethod
     def from_response(
-        self, response: dict[str, Any], backend_type: str, language: str | None = None
-    ) -> tuple["CodeUnit", "CodeUnitRelation"] | None:
+        self, response: Any, backend_type: str, language: str | None = None
+    ) -> list[tuple["CodeUnit", "CodeUnitRelation"]]:
         """Convert a backend query response to a related CodeUnit and relation.
 
         Args:
@@ -224,7 +242,7 @@ class RelationKind(ABC):
             language: Programming language (optional, may affect query)
 
         Returns:
-            Tuple of related CodeUnit and CodeUnitRelation, or None if no relation found
+            List of (target CodeUnit, CodeUnitRelation) tuples representing the related units
         """
         pass
 
@@ -259,6 +277,22 @@ class RelationKind(ABC):
 
         kwargs = data.get("kwargs", {})
         return kind_cls._from_kwargs(**kwargs)
+
+    @classmethod
+    def create(cls, kind_name: str, **kwargs) -> "RelationKind":
+        """Create a RelationKind instance by name.
+
+        Args:
+            kind_name: Name of the RelationKind subclass
+            kwargs: Additional arguments for the subclass constructor
+
+        Returns:
+            Instance of the specified RelationKind subclass
+        """
+        kind_cls = cls._registry.get(kind_name)
+        if not kind_cls:
+            raise IRRelationKindError(f"Unknown RelationKind: {kind_name}")
+        return kind_cls(**kwargs)
 
 
 @dataclass(frozen=True)
@@ -314,7 +348,7 @@ class CodeUnit:
         is_synthetic: True if this unit is synthetic (not backend-backed)
         kind: The kind of this code unit
         code: The actual source code text for this unit
-        signature: Human-readable identifier (e.g., "int foo(char* str)" for functions,
+        name: Human-readable identifier (e.g., "foo" for functions,
                   "MyClass" for classes, file path for files)
         location: Source code location of this unit
         metadata: Optional additional metadata about this unit
@@ -344,11 +378,14 @@ class CodeUnit:
     # === Structure ===
     kind: CodeUnitKind
     code: str
-    signature: str
+    name: str
     location: CodeLocation
 
     # === Backend Reference ===
     is_synthetic: bool  # True if synthetic (not backend-backed)
+
+    # === Additional Metadata ===
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __hash__(self) -> int:
         """Hash based on unique ID.
@@ -380,8 +417,9 @@ class CodeUnit:
         cpg_node_id: str,
         kind: CodeUnitKind,
         code: str,
-        signature: str,
+        name: str,
         location: CodeLocation,
+        **kwargs,
     ) -> "CodeUnit":
         """Create a CodeUnit backed by a CPG node.
 
@@ -389,7 +427,7 @@ class CodeUnit:
             cpg_node_id: CPG node identifier from backend
             unit_type: Type/kind of code unit
             code: Source code text
-            signature: Human-readable signature
+            name: Human-readable identifier
             location: Source code location
 
         Returns:
@@ -399,9 +437,10 @@ class CodeUnit:
             id=cpg_node_id,
             kind=kind,
             code=code,
-            signature=signature,
+            name=name,
             location=location,
             is_synthetic=False,
+            metadata=kwargs,
         )
 
     @classmethod
@@ -409,16 +448,17 @@ class CodeUnit:
         cls,
         kind: CodeUnitKind,
         code: str,
-        signature: str,
+        name: str,
         location: CodeLocation,
         id_prefix: str = "synthetic",
+        **kwargs,
     ) -> "CodeUnit":
         """Create a synthetic CodeUnit (not backed by CPG).
 
         Args:
             kind: Type/kind of code unit
             code: Source code text
-            signature: Human-readable signature
+            name: Human-readable identifier
             location: Source code location
             id_prefix: Prefix for generated ID (default: "synthetic")
 
@@ -433,7 +473,8 @@ class CodeUnit:
             id=synthetic_id,
             kind=kind,
             code=code,
-            signature=signature,
+            name=name,
             location=location,
             is_synthetic=True,
+            metadata=kwargs,
         )

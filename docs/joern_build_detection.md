@@ -159,7 +159,7 @@ backend = JoernBackend(config)
 await backend.connect()
 
 # Now you can query the CPG
-results = await backend.cpg_query("cpg.method.name.l")
+results = await backend.query("cpg.method.name.l")
 ```
 
 ### Example 2: Analyze Java JAR file

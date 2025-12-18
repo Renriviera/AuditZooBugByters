@@ -27,8 +27,8 @@ class Calls(RelationKind):
         )
 
     def from_response(
-        self, response: dict[str, Any], backend_type: str, language: str | None = None
-    ) -> tuple[CodeUnit, CodeUnitRelation] | None:
+        self, response: Any, backend_type: str, language: str | None = None
+    ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
         raise IRUnimplementedError(
             f"CallRelationKind.from_response() not implemented for backend '{backend_type}'"
         )

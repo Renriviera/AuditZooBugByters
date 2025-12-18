@@ -6,11 +6,7 @@ Common configuration, error handling, and utilities shared by all backends.
 import os
 from dataclasses import dataclass
 
-from faker import Faker
-
 from auditzoo.core.ir.backend_api import BackendConfigError
-
-_faker = Faker()
 
 
 @dataclass

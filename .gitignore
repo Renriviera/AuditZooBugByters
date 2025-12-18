@@ -44,6 +44,7 @@ htmlcov/
 # Joern
 *.cpg
 cpg_output/
+workspace/
 
 # OS
 .DS_Store
