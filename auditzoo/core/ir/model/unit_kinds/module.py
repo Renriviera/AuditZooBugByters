@@ -16,12 +16,14 @@ class Module(CodeUnitKind):
     C++ namespaces, etc.
     """
 
-    async def to_query(self, backend: CPGBackend) -> str:
+    async def to_query(self, backend: "CPGBackend") -> str:
         raise IRUnimplementedError(
             f"ModuleKind.to_query() not implemented for backend '{backend.backend_type}'"
         )
 
-    async def from_response(self, response: Any, backend: CPGBackend) -> list[CodeUnit]:
+    async def from_response(
+        self, response: Any, backend: "CPGBackend"
+    ) -> list[CodeUnit]:
         raise IRUnimplementedError(
             f"ModuleKind.to_code_unit() not implemented for backend '{backend.backend_type}'"
         )

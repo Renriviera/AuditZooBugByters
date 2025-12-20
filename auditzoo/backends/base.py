@@ -17,6 +17,7 @@ class BackendConfig:
     language: str  # language for the project of interest
     source_path: str  # Path to source code to parse
     analysis_path: str  # Path to store analysis artifacts
+    project_name: str  # Name of the project
 
     def __init__(
         self,
@@ -24,11 +25,17 @@ class BackendConfig:
         source_path: str,
         language: str,
         analysis_path: str | None = None,
+        project_name: str | None = None,
     ):
         self.backend_type = backend_type
         self.source_path = os.path.abspath(os.path.expanduser(source_path))
         self.language = language
         self.analysis_path = self._get_analysis_path(self.source_path, analysis_path)
+        self.project_name = (
+            project_name
+            if project_name is not None
+            else os.path.basename(self.source_path.rstrip("/"))
+        )
 
     @staticmethod
     def _get_analysis_path(source_path: str, analysis_path: str | None = None) -> str:
@@ -57,7 +64,6 @@ class JoernConfig(BackendConfig):
     """Configuration for Joern backend."""
 
     joern_path: str  # Path to Joern installation
-    db_path: str | None = None  # Path to existing CPG database
     host: str = "localhost"
     port: int = 8080
 
@@ -66,6 +72,7 @@ class JoernConfig(BackendConfig):
         source_path: str,
         language: str | None = None,
         analysis_path: str | None = None,
+        project_name: str | None = None,
         joern_path: str | None = None,
         **kwargs,
     ):
@@ -74,6 +81,7 @@ class JoernConfig(BackendConfig):
             source_path=source_path,
             language=language if language is not None else "auto",
             analysis_path=analysis_path,
+            project_name=project_name,
         )
         if self.language is None:
             raise BackendConfigError("Language must be specified for Joern backend")
@@ -85,7 +93,6 @@ class JoernConfig(BackendConfig):
             )
         self.joern_path = joern_path
 
-        self.db_path = kwargs.get("db_path")
         self.host = kwargs.get("host", "localhost")
         self.port = kwargs.get("port", 8080)
 
@@ -101,6 +108,7 @@ class TreeSitterConfig(BackendConfig):
         source_path: str,
         language: str,
         analysis_path: str | None = None,
+        project_name: str | None = None,
         **kwargs,
     ):
         super().__init__(
@@ -108,5 +116,6 @@ class TreeSitterConfig(BackendConfig):
             source_path=source_path,
             language=language,
             analysis_path=analysis_path,
+            project_name=project_name,
         )
         self.grammar_path = kwargs.get("grammar_path")

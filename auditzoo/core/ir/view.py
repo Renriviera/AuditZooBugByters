@@ -803,6 +803,23 @@ class IRView:
             ],
         }
 
+    async def reload(self) -> None:
+        """Clear all cached data and reload from backend."""
+        # Clear all data structures
+        self._graph.clear()
+        self._type_index.clear()
+        self._relation_facts.clear()
+        self._loaded_units.clear()
+        self._loaded_relations.clear()
+        self._loaded_unit_kinds.clear()
+        self._loaded_relation_kinds.clear()
+
+        # Reload backend data
+        await self.backend.reload()
+
+        # Preload from backend
+        await self.preload_from_backend()
+
     async def cleanup(self, sync_to_backend: bool = False) -> None:
         """Explicit cleanup method for IRView.
 

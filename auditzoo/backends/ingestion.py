@@ -43,6 +43,7 @@ def auto_detect_backend(
     source_path: str,
     language: str | None = None,
     analysis_path: str | None = None,
+    project_name: str | None = None,
     prefer: str | None = None,
 ) -> BackendConfig:
     """Auto-detect the best backend for a project.
@@ -51,6 +52,7 @@ def auto_detect_backend(
         source_path: Path to the project of interest
         language: Programming language, automatically detected if None
         analysis_path: Path to store analysis artifacts
+        project_name: Name of the project
         prefer: Preferred backend type if available
 
     Returns:
@@ -58,7 +60,10 @@ def auto_detect_backend(
     """
     if prefer == "joern" or language is None:
         return JoernConfig(
-            source_path=source_path, language=language, analysis_path=analysis_path
+            source_path=source_path,
+            language=language,
+            analysis_path=analysis_path,
+            project_name=project_name,
         )
     else:
         if language is None:
@@ -66,5 +71,8 @@ def auto_detect_backend(
                 "Language must be specified for TreeSitter backend."
             )
         return TreeSitterConfig(
-            source_path=source_path, language=language, analysis_path=analysis_path
+            source_path=source_path,
+            language=language,
+            analysis_path=analysis_path,
+            project_name=project_name,
         )

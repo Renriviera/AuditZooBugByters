@@ -209,6 +209,15 @@ class CPGBackend(ABC):
         """
         pass
 
+    @abstractmethod
+    async def reload(self) -> None:
+        """Reload or refresh the backend state.
+
+        Raises:
+            BackendError: If reload fails
+        """
+        pass
+
     # ===== Async Context Manager Support =====
 
     async def __aenter__(self):

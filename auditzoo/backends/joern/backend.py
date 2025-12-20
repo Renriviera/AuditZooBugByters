@@ -3,9 +3,6 @@
 This module implements the IRBackend interface using Joern CPG queries.
 """
 
-import os
-import shutil
-from pathlib import Path
 from typing import Any
 
 from auditzoo.backends.base import JoernConfig
@@ -54,6 +51,7 @@ class JoernBackend(CPGBackend):
             language=self.config.language,
             source_path=self.config.source_path,
             analysis_path=self.config.analysis_path,
+            project_name=self.config.project_name,
         )
         self._connected = True
 
@@ -66,23 +64,26 @@ class JoernBackend(CPGBackend):
         await self.query_raw("run.commit")
         await self.query_raw("save")
 
-        # Move the CPG from the *actual* Joern workspace back to the desired location
-        joern_workspace = Path(await self.query("project.path", "str"))
-        if self.client.cpg_path is not None:
-            joern_cpg_path = joern_workspace / os.path.basename(self.client.cpg_path)
-            if joern_cpg_path.exists():
-                joern_cpg_path.replace(self.client.cpg_path)
-
-        # Delete the workspace directory
-        if joern_workspace.exists():
-            shutil.rmtree(joern_workspace)
-
         await self.client.disconnect()
         self._connected = False
 
     def is_connected(self) -> bool:
         """Check if backend is connected."""
         return self._connected
+
+    async def reload(self) -> None:
+        """Reload the CPG from disk."""
+        if not self.is_connected() or self.client.workspace_dir is None:
+            raise BackendResponseError("Cannot reload CPG: not connected to Joern.")
+
+        current_project = await self.query("project.name", "str")
+        await self.query_raw(f'close("{current_project}")')
+
+        await self.client.load_project(
+            source_path=self.config.source_path,
+            project_name=self.config.project_name,
+            language=self.config.language,
+        )
 
     # ===== Core CPG Query Interface =====
 

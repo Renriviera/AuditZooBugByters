@@ -58,17 +58,15 @@ class JoernClient:
         self._process: subprocess.Popen | None = None
         self._connected_core: CPGQLSClient | None = None
         self._workspace_dir: Path | None = None
-        self._cpg_path: Path | None = None
-        self._first_query_executed: bool = False
 
     @property
-    def cpg_path(self) -> Path | None:
-        """Get the current CPG path.
+    def workspace_dir(self) -> Path | None:
+        """Get the current workspace directory.
 
         Returns:
-            Path to the CPG file or None if not set
+            Path to workspace directory if connected, else None
         """
-        return self._cpg_path
+        return self._workspace_dir
 
     @property
     def core(self) -> CPGQLSClient:
@@ -152,6 +150,7 @@ class JoernClient:
         language: str,
         source_path: str,
         analysis_path: str,
+        project_name: str,
     ) -> None:
         """Connect to Joern and create/load CPG.
 
@@ -171,16 +170,22 @@ class JoernClient:
             language: The programming language of the project, "auto" to let Joern detect
             source_path: Path to source code directory
             analysis_path: Path to store analysis artifacts
+            project_name: Name of the project
 
         Raises:
             BackendConnectionError: If connection fails
-
-        Example:
-            # Single language project
-            await client.connect(language="c", source_path="/path/to/c_project")
         """
         if self._connected_core is not None:
-            return
+            if self._workspace_dir != Path(analysis_path):
+                raise BackendConnectionError(
+                    "JoernClient is already connected with a different workspace."
+                )
+            return  # Already connected
+
+        # Source path must exist
+        source = Path(source_path)
+        if not source.exists():
+            raise BackendConnectionError(f"Source path does not exist: {source_path}")
 
         # Check whether the language is supported
         if language != "auto":
@@ -195,20 +200,33 @@ class JoernClient:
         if not self._workspace_dir.exists():
             self._workspace_dir.mkdir(parents=True, exist_ok=True)
 
-        self._cpg_path = self._workspace_dir / "cpg.bin"
-        if not self._cpg_path.exists():
-            # Parse source code and create new CPG
-            self._create_cpg(source_path, language=language)
-
         # Start Joern server
         try:
             self._start_joern_server()
         except BackendConnectionError as e:
-            self._cpg_path = None
             self._workspace_dir = None
             raise BackendConnectionError(f"Failed to start Joern server: {e}") from e
 
         self._connected_core = CPGQLSClient(f"{self.host}:{self.port}")
+
+        # Set up the workspace and import the project
+        # Note that this also flushes buffer from initial connection
+        await self.query(f'switchWorkspace("{self._workspace_dir}")')
+
+        _project_path = self._workspace_dir / project_name
+        if not _project_path.exists():
+            if language == "auto":
+                await self.query(
+                    f'importCode(inputPath="{source_path}", projectName="{project_name}")'
+                )
+            else:
+                await self.query(
+                    f'importCode(inputPath="{source_path}", projectName="{project_name}", language="{language}")'
+                )
+        else:
+            # Load existing project
+            await self.query(f'open("{project_name}")')
+            await self.query(f'workspace.setActiveProject("{project_name}")')
 
     def _start_joern_server(self) -> None:
         """Start Joern server process."""
@@ -223,7 +241,6 @@ class JoernClient:
             self.host,
             "--server-port",
             str(self.port),
-            str(self._cpg_path),
         ]
 
         self._process = (
@@ -275,7 +292,37 @@ class JoernClient:
             f"Joern server port {self.host}:{self.port} not available after {timeout_s} seconds"
         )
 
-    def _create_cpg(self, source_path: str, language: str = "auto"):
+    async def load_project(
+        self, source_path: str, project_name: str, language: str = "auto"
+    ) -> None:
+        """Load a project into Joern.
+
+        This recreates the CPG from the source code. Joern will automatically
+        detect build configurations as needed.
+
+        Args:
+            source_path: Path to source code (directory or file)
+            project_name: Name of the project
+            language: Programming language (default "auto")
+
+        Raises:
+            BackendConnectionError: If CPG loading fails
+        """
+        if not self._connected_core or not self._workspace_dir:
+            raise BackendConnectionError("Cannot reload CPG: not connected to Joern.")
+
+        if language == "auto":
+            await self.query(
+                f'importCode(inputPath="{source_path}", projectName="{project_name}")'
+            )
+        else:
+            await self.query(
+                f'importCode(inputPath="{source_path}", projectName="{project_name}", language="{language}")'
+            )
+
+        await self.query(f'workspace.setActiveProject("{project_name}")')
+
+    def create_cpg(self, source_path: str, project_name: str, language: str = "auto"):
         """Create a new CPG from source code.
 
         Joern automatically detects build configuration:
@@ -285,6 +332,8 @@ class JoernClient:
 
         Args:
             source_path: Path to source code (directory or file)
+            project_name: Name of the project
+            language: Programming language (default "auto")
 
         Raises:
             BackendConnectionError: If CPG creation fails
@@ -296,12 +345,15 @@ class JoernClient:
         if self._workspace_dir is None or not self._workspace_dir.exists():
             raise BackendConnectionError("Workspace directory is not initialized")
 
-        if self._cpg_path is None or self._cpg_path.exists():
-            raise BackendConnectionError("CPG path is already set or exists")
+        _project_path = self._workspace_dir / project_name
+        if not _project_path.exists():
+            raise BackendConnectionError(
+                f"Project path does not exist: {_project_path}"
+            )
 
         # Build Joern parse command
         # Joern CLI: joern-parse --language <value> --output <cpg.bin> <source_path>
-        cpg_output = self._cpg_path
+        cpg_output = _project_path / "cpg.bin"
 
         cmd = [str(self.joern_parse), "--output", str(cpg_output)]
         if language != "auto":
@@ -347,8 +399,6 @@ class JoernClient:
 
         self._connected_core = None
         self._workspace_dir = None
-        self._cpg_path = None
-        self._first_query_executed = False
 
     async def query(self, query_str: str) -> str:
         """Execute a CPG query using Joern CLI.
@@ -364,11 +414,6 @@ class JoernClient:
         """
         if not self.core:
             raise BackendConnectionError("Not connected to Joern")
-
-        if not self._first_query_executed:
-            # flush buffer from the initial connection
-            await self.core._send_query("cpg")
-            self._first_query_executed = True
 
         response = await self.core._send_query(query_str)
         if not response["success"]:
