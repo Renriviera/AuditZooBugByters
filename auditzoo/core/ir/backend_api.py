@@ -6,12 +6,11 @@ alongside convenience methods.
 """
 
 from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import Any
 
 from auditzoo.core.ir.facts.base import RelationFact, UnitFact
 from auditzoo.core.ir.model import CodeUnit, CodeUnitKind, CodeUnitRelation
-from auditzoo.core.ir.model.base import RelationDirection, RelationKind
+from auditzoo.core.ir.model.base import CodeLocation, RelationDirection, RelationKind
 
 
 class CPGBackend(ABC):
@@ -21,6 +20,23 @@ class CPGBackend(ABC):
     The interface is CPG-centered: direct query access is the primary method,
     with convenience methods built on top of CPG queries.
     """
+
+    @property
+    @abstractmethod
+    def backend_type(self) -> str:
+        """The backend type."""
+        pass
+
+    @property
+    @abstractmethod
+    def language(self) -> str | None:
+        """
+        The langauge of the project under analysis.
+
+        Returns:
+            The project's language, or None if the backend is not connected.
+        """
+        pass
 
     # ===== Core CPG Query Interface =====
 
@@ -99,14 +115,13 @@ class CPGBackend(ABC):
 
     @abstractmethod
     async def get_code_unit_by_location(
-        self, path: Path, start_line: int, end_line: int
+        self, location: CodeLocation
     ) -> CodeUnit | None:
         """Get a code unit by its source location.
 
         Args:
             path: Source file path
-            start_line: Starting line number
-            end_line: Ending line number
+            location: CodeLocation object specifying start and end lines
 
         Returns:
             CodeUnit object or None if not found

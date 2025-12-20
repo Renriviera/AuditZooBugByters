@@ -17,7 +17,6 @@ are built on top of this core graph abstraction and provided in a separate agent
 
 from collections import defaultdict
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any, Literal
 
 import networkx as nx
@@ -38,6 +37,7 @@ from auditzoo.core.ir.model import (
     RKRegistry,
     UKRegistry,
 )
+from auditzoo.core.ir.model.base import CodeLocation
 
 
 class IRView:
@@ -175,9 +175,6 @@ class IRView:
         Raises:
             IRValueError: If unit is not CPG-backed
         """
-        if unit.is_synthetic:
-            raise IRValueError("CodeUnit must be backend-backed to add to IRView")
-
         # Add node with unit and empty unit facts storage
         self._graph.add_node(
             unit.id,
@@ -188,20 +185,16 @@ class IRView:
         # Update kind index for fast lookup
         self._type_index[unit.kind].add(unit.id)
 
-    async def fetch_unit(
-        self, path: Path, start_line: int, end_line: int
-    ) -> CodeUnit | None:
+    async def fetch_unit(self, location: CodeLocation) -> CodeUnit | None:
         """Fetch a CodeUnit by its source location.
 
         Args:
-            path: Source file path
-            start_line: Starting line number
-            end_line: Ending line number
+            location: CodeLocation object specifying start and end lines
 
         Returns:
             The minimal CodeUnit covering the specified location, or None if not found
         """
-        unit = await self.backend.get_code_unit_by_location(path, start_line, end_line)
+        unit = await self.backend.get_code_unit_by_location(location)
         if unit and unit.id not in self._graph:
             self._add_unit(unit)
         return unit
@@ -389,9 +382,6 @@ class IRView:
             # Get all functions that call foo
             callers = view.get_related_units(foo, RelationKind.CALLS, "in")
         """
-        if unit.is_synthetic:
-            raise IRValueError("CodeUnit must be backend-backed to get related units")
-
         if not await self.has_unit(unit.id, fetch_backend):
             raise IRValueError(f"CodeUnit {unit.id} not found in graph")
 
@@ -595,9 +585,6 @@ class IRView:
             )
             view.add_unit_fact(unit, fact)
         """
-        if unit.is_synthetic:
-            raise IRValueError("CodeUnit must be CPG-backed to add unit facts")
-
         if not await self.has_unit(unit.id, fetch_backend):
             raise IRValueError(f"CodeUnit {unit.id} not found in graph")
 
@@ -664,9 +651,6 @@ class IRView:
             # Get all unit facts
             all_facts = view.get_unit_facts(unit)
         """
-        if unit.is_synthetic:
-            raise IRValueError("CodeUnit must be CPG-backed to get unit facts")
-
         if not await self.has_unit(unit.id, fetch_backend):
             raise IRValueError(f"CodeUnit {unit.id} not found in graph")
 
@@ -723,9 +707,6 @@ class IRView:
         Args:
             unit: CodeUnit to load facts for
         """
-        if unit.is_synthetic:
-            return
-
         # Get all tags from backend for this CPG node
         facts = await self.backend.get_unit_tags(unit)
 
@@ -761,9 +742,6 @@ class IRView:
         Args:
             unit: CodeUnit whose unit facts to sync
         """
-        if unit.is_synthetic:
-            return
-
         facts = await self.get_unit_facts(unit, fetch_backend=False)
         for fact in facts:
             # Serialize fact and store as backend tag

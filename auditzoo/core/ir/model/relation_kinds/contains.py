@@ -1,8 +1,11 @@
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from auditzoo.core.ir.model.base import CodeUnit, CodeUnitRelation, RelationKind
 from auditzoo.core.ir.model.errors import IRUnimplementedError
+
+if TYPE_CHECKING:
+    from auditzoo.core.ir.backend_api import CPGBackend
 
 
 @dataclass(frozen=True)
@@ -30,18 +33,16 @@ class ContainedIn(RelationKind):
             "ContainedInRelationKind._from_kwargs() not implemented"
         )
 
-    def to_query(
-        self, source_unit_id: str, backend_type: str, language: str | None = None
-    ) -> str:
+    async def to_query(self, source_unit_id: str, backend: "CPGBackend") -> str:
         raise IRUnimplementedError(
-            f"ContainedInRelationKind.to_query() not implemented for backend '{backend_type}'"
+            f"ContainedInRelationKind.to_query() not implemented for backend '{backend.backend_type}'"
         )
 
-    def from_response(
-        self, response: Any, backend_type: str, language: str | None = None
+    async def from_response(
+        self, response: Any, backend: "CPGBackend"
     ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
         raise IRUnimplementedError(
-            f"ContainedInRelationKind.from_response() not implemented for backend '{backend_type}'"
+            f"ContainedInRelationKind.from_response() not implemented for backend '{backend.backend_type}'"
         )
 
 
@@ -68,16 +69,14 @@ class Contains(RelationKind):
             "ContainsRelationKind._from_kwargs() not implemented"
         )
 
-    def to_query(
-        self, source_unit_id: str, backend_type: str, language: str | None = None
-    ) -> str:
+    async def to_query(self, source_unit_id: str, backend: "CPGBackend") -> str:
         raise IRUnimplementedError(
-            f"ContainsRelationKind.to_query() not implemented for backend '{backend_type}'"
+            f"ContainsRelationKind.to_query() not implemented for backend '{backend.backend_type}'"
         )
 
-    def from_response(
-        self, response: Any, backend_type: str, language: str | None = None
+    async def from_response(
+        self, response: Any, backend: "CPGBackend"
     ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
         raise IRUnimplementedError(
-            f"ContainsRelationKind.from_response() not implemented for backend '{backend_type}'"
+            f"ContainsRelationKind.from_response() not implemented for backend '{backend.backend_type}'"
         )

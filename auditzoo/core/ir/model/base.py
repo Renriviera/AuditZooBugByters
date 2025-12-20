@@ -3,6 +3,8 @@
 This module defines the core IR model types used throughout AuditZoo.
 The model is built around CodeUnit, a flexible abstraction that can represent
 any granularity of code (file, class, function, statement, etc.) backed by CPG nodes.
+Think about each CodeUnit as a editor view of a code snippet at some granularity,
+and the relations between them as how human readers navigate the code structure.
 
 Core Components:
 - CodeUnit: Represents a unit of code with unique ID, kind, code, signature, and location.
@@ -59,12 +61,17 @@ Philosophy:
 - This separation avoids model bloat while maintaining extensibility
 """
 
+from __future__ import annotations
+
 import inspect
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from auditzoo.core.ir.model.errors import IRRelationKindError, IRUnitKindError
+
+if TYPE_CHECKING:
+    from auditzoo.core.ir.backend_api import CPGBackend
 
 RelationDirection = Literal["in", "out"]
 
@@ -93,7 +100,7 @@ class CodeLocation:
             loc_str += f":{self.column_start}"
         return loc_str
 
-    def contains(self, other: "CodeLocation") -> bool:
+    def contains(self, other: CodeLocation) -> bool:
         """Check if this location contains another location.
 
         Args:
@@ -122,7 +129,7 @@ class CodeUnitKind(ABC):
     """
 
     # Registry: subclass name -> subclass type
-    _registry: ClassVar[dict[str, type["CodeUnitKind"]]] = {}
+    _registry: ClassVar[dict[str, type[CodeUnitKind]]] = {}
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -130,12 +137,11 @@ class CodeUnitKind(ABC):
             cls._registry[cls.__name__] = cls
 
     @abstractmethod
-    def to_query(self, backend_type: str, language: str | None = None) -> str:
+    async def to_query(self, backend: CPGBackend) -> str:
         """Convert to a backend-specific query string.
 
         Args:
-            backend_type: Type of backend ("joern", "treesitter", etc.)
-            language: Programming language (optional, may affect query)
+            backend: CPG backend instance
 
         Returns:
             Backend-specific query string to select this kind of code unit
@@ -143,15 +149,12 @@ class CodeUnitKind(ABC):
         pass
 
     @abstractmethod
-    def from_response(
-        self, response: Any, backend_type: str, language: str | None = None
-    ) -> list["CodeUnit"]:
+    async def from_response(self, response: Any, backend: CPGBackend) -> list[CodeUnit]:
         """Convert a backend query response to a CodeUnit of this kind.
 
         Args:
             response: Raw response from backend CPG query
-            backend_type: Type of backend ("joern", "treesitter", etc.)
-            language: Programming language (optional, may affect query)
+            backend: CPG backend instance
 
         Returns:
             List of CodeUnit instances representing the code units of this kind
@@ -159,7 +162,7 @@ class CodeUnitKind(ABC):
         pass
 
     @classmethod
-    def create(cls, kind_name: str, **kwargs) -> "CodeUnitKind":
+    def create(cls, kind_name: str, **kwargs) -> CodeUnitKind:
         """Create a CodeUnitKind instance by name.
 
         Args:
@@ -175,22 +178,21 @@ class CodeUnitKind(ABC):
         return kind_cls(**kwargs)
 
     @classmethod
-    def create_from_response(
-        cls, response: Any, backend_type: str, language: str | None = None
-    ) -> list["CodeUnit"]:
+    async def create_from_response(
+        cls, response: Any, backend: CPGBackend
+    ) -> list[CodeUnit]:
         """Convert a backend query response to a CodeUnit by trying all registered kinds. It will return the first matching kind.
 
         Args:
             response: Raw response from backend CPG query
-            backend_type: Type of backend ("joern", "treesitter", etc.)
-            language: Programming language (optional, may affect query)
+            backend: CPG backend instance
 
         Returns:
             List of CodeUnit instances representing the code units found
         """
         for kind_cls in cls._registry.values():
             try:
-                unit = kind_cls().from_response(response, backend_type, language)
+                unit = await kind_cls().from_response(response, backend)
                 if len(unit) > 0:
                     return unit
             except Exception:
@@ -207,7 +209,7 @@ class RelationKind(ABC):
     such as calls, inheritance, references, etc.
     """
 
-    _registry: ClassVar[dict[str, type["RelationKind"]]] = {}
+    _registry: ClassVar[dict[str, type[RelationKind]]] = {}
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -215,15 +217,12 @@ class RelationKind(ABC):
             cls._registry[cls.__name__] = cls
 
     @abstractmethod
-    def to_query(
-        self, source_unit_id: str, backend_type: str, language: str | None = None
-    ) -> str:
+    async def to_query(self, source_unit_id: str, backend: CPGBackend) -> str:
         """Convert to a backend-specific query string.
 
         Args:
             source_unit_id: ID of the source code unit
-            backend_type: Type of backend ("joern", "treesitter", etc.)
-            language: Programming language (optional, may affect query)
+            backend: CPG backend instance
 
         Returns:
             Backend-specific query string to select this relationship
@@ -231,15 +230,14 @@ class RelationKind(ABC):
         pass
 
     @abstractmethod
-    def from_response(
-        self, response: Any, backend_type: str, language: str | None = None
-    ) -> list[tuple["CodeUnit", "CodeUnitRelation"]]:
+    async def from_response(
+        self, response: Any, backend: CPGBackend
+    ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
         """Convert a backend query response to a related CodeUnit and relation.
 
         Args:
             response: Raw response from backend CPG query
-            backend_type: Type of backend ("joern", "treesitter", etc.)
-            language: Programming language (optional, may affect query)
+            backend: CPG backend instance
 
         Returns:
             List of (target CodeUnit, CodeUnitRelation) tuples representing the related units
@@ -253,7 +251,7 @@ class RelationKind(ABC):
 
     @classmethod
     @abstractmethod
-    def _from_kwargs(cls, **kwargs) -> "RelationKind":
+    def _from_kwargs(cls, **kwargs) -> RelationKind:
         """Create instance from kwargs dict."""
         pass
 
@@ -268,7 +266,7 @@ class RelationKind(ABC):
         return out
 
     @classmethod
-    def from_dict(cls, data: dict) -> "RelationKind":
+    def from_dict(cls, data: dict) -> RelationKind:
         """Deserialize from dict."""
         kind_name = data["__class__"]
         kind_cls = cls._registry.get(kind_name)
@@ -279,7 +277,7 @@ class RelationKind(ABC):
         return kind_cls._from_kwargs(**kwargs)
 
     @classmethod
-    def create(cls, kind_name: str, **kwargs) -> "RelationKind":
+    def create(cls, kind_name: str, **kwargs) -> RelationKind:
         """Create a RelationKind instance by name.
 
         Args:
@@ -319,7 +317,7 @@ class CodeUnitRelation:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "CodeUnitRelation":
+    def from_dict(cls, data: dict) -> CodeUnitRelation:
         """Deserialize from dict."""
         kind = RelationKind.from_dict(data["kind"])
         metadata = data.get("metadata", {})
@@ -340,8 +338,11 @@ class CodeUnit:
     CodeUnits are hashable and can be used in sets, dicts, and graph structures.
     Identity and equality are based solely on the `id` field.
 
-    A synthetic CodeUnit cannot be stored in the IRView, but can be used
-    for temporary analysis or transformations.
+    A synthetic CodeUnit can also be stored in IRViews and graphs, allowing
+    analysis results to be attached to information not directly represented in the CPG.
+
+    Note that, for synthetic units, the user is responsible for ensuring the same
+    unit has the same synthetic ID across different analyses, as well as avoiding ID collisions.
 
     Attributes:
         id: Unique identifier for this CodeUnit (CPG node ID or synthetic)
@@ -365,9 +366,10 @@ class CodeUnit:
 
         # Synthetic unit (no CPG backing)
         CodeUnit.synthetic(
+            synthetic_id="synthetic_abc",
             kind=CodeUnitType(kind=CodeUnitKind.CLASS),
             code="class MyClass:\\n    pass",
-            signature="MyClass",
+            name="MyClass",
             location=CodeLocation(Path("main.py"), 1, 2)
         )
     """
@@ -420,7 +422,7 @@ class CodeUnit:
         name: str,
         location: CodeLocation,
         **kwargs,
-    ) -> "CodeUnit":
+    ) -> CodeUnit:
         """Create a CodeUnit backed by a CPG node.
 
         Args:
@@ -446,29 +448,25 @@ class CodeUnit:
     @classmethod
     def synthetic(
         cls,
+        synthetic_id: str,
         kind: CodeUnitKind,
         code: str,
         name: str,
         location: CodeLocation,
-        id_prefix: str = "synthetic",
         **kwargs,
-    ) -> "CodeUnit":
+    ) -> CodeUnit:
         """Create a synthetic CodeUnit (not backed by CPG).
 
         Args:
+            synthetic_id: Synthetic unique identifier
             kind: Type/kind of code unit
             code: Source code text
             name: Human-readable identifier
             location: Source code location
-            id_prefix: Prefix for generated ID (default: "synthetic")
 
         Returns:
             CodeUnit with auto-generated synthetic ID
         """
-        import uuid
-
-        synthetic_id = f"{id_prefix}_{uuid.uuid4().hex[:12]}"
-
         return cls(
             id=synthetic_id,
             kind=kind,

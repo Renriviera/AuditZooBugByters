@@ -14,7 +14,7 @@ from auditzoo.backends.joern.utils import parse_joern_response
 from auditzoo.core.ir.backend_api import BackendResponseError, CPGBackend
 from auditzoo.core.ir.facts.base import RelationFact, UnitFact
 from auditzoo.core.ir.model import CodeUnit, CodeUnitKind, CodeUnitRelation
-from auditzoo.core.ir.model.base import RelationDirection, RelationKind
+from auditzoo.core.ir.model.base import CodeLocation, RelationDirection, RelationKind
 
 
 class JoernBackend(CPGBackend):
@@ -37,6 +37,14 @@ class JoernBackend(CPGBackend):
             joern_path=config.joern_path, host=config.host, port=config.port
         )
         self._connected = False
+
+    @property
+    def backend_type(self) -> str:
+        return "joern"
+
+    @property
+    def language(self) -> str | None:
+        return self._language
 
     # ===== Connection Management =====
 
@@ -162,14 +170,12 @@ class JoernBackend(CPGBackend):
     # ===== Code Unit and Relation Management =====
 
     async def get_code_unit_by_location(
-        self, path: Path, start_line: int, end_line: int
+        self, location: CodeLocation
     ) -> CodeUnit | None:
         """Get a code unit by its source location.
 
         Args:
-            path: Source file path
-            start_line: Starting line number
-            end_line: Ending line number
+            location: CodeLocation object specifying start and end lines
 
         Returns:
             CodeUnit object or None if not found
@@ -187,10 +193,9 @@ class JoernBackend(CPGBackend):
         """
         query = f"cpg.all.id({cpg_node_id}L).toJson"
         response = await self.query(query)
-        units = CodeUnitKind.create_from_response(
+        units = await CodeUnitKind.create_from_response(
             response=response,
-            backend_type="joern",
-            language=await self.get_language(),
+            backend=self,
         )
 
         if not units or not isinstance(units, list) or len(units) == 0:
@@ -207,12 +212,11 @@ class JoernBackend(CPGBackend):
         Returns:
             List of CodeUnit objects
         """
-        query = kind.to_query(backend_type="joern", language=await self.get_language())
+        query = await kind.to_query(backend=self)
         response = await self.query(query)
-        units = kind.from_response(
+        units = await kind.from_response(
             response=response,
-            backend_type="joern",
-            language=await self.get_language(),
+            backend=self,
         )
 
         return units

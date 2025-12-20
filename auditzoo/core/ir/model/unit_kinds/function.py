@@ -1,31 +1,31 @@
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from auditzoo.core.ir.model.base import CodeLocation, CodeUnit, CodeUnitKind
 from auditzoo.core.ir.model.errors import IRInvalidResponseError, IRUnimplementedError
+
+if TYPE_CHECKING:
+    from auditzoo.core.ir.backend_api import CPGBackend
 
 
 @dataclass(frozen=True)
 class Function(CodeUnitKind):
     """Kind of function code unit."""
 
-    def to_query(self, backend_type: str, language: str | None = None) -> str:
-        if backend_type != "joern":
+    async def to_query(self, backend: CPGBackend) -> str:
+        if backend.backend_type != "joern":
             raise IRUnimplementedError(
-                f"FunctionKind.to_query() not implemented for backend '{backend_type}'"
+                f"FunctionKind.to_query() not implemented for backend '{backend.backend_type}'"
             )
 
         return 'cpg.method.isExternal(false).nameNot("<global>").dedup.toJson'
 
-    def from_response(
-        self,
-        response: list[dict[str, Any]],
-        backend_type: str,
-        language: str | None = None,
+    async def from_response(
+        self, response: list[dict[str, Any]], backend: CPGBackend
     ) -> list[CodeUnit]:
-        if backend_type != "joern":
+        if backend.backend_type != "joern":
             raise IRUnimplementedError(
-                f"FunctionKind.to_code_unit() not implemented for backend '{backend_type}'"
+                f"FunctionKind.to_code_unit() not implemented for backend '{backend.backend_type}'"
             )
 
         try:
@@ -55,5 +55,5 @@ class Function(CodeUnitKind):
             return units
         except Exception as e:
             raise IRInvalidResponseError(
-                f"Invalid response format for FunctionKind from backend '{backend_type}': {response} with error {e}"
+                f"Invalid response format for FunctionKind from backend '{backend.backend_type}': {response} with error {e}"
             ) from e

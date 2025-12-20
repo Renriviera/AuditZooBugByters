@@ -1,8 +1,11 @@
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from auditzoo.core.ir.model.base import CodeUnit, CodeUnitKind
 from auditzoo.core.ir.model.errors import IRUnimplementedError
+
+if TYPE_CHECKING:
+    from auditzoo.core.ir.backend_api import CPGBackend
 
 
 @dataclass(frozen=True)
@@ -12,16 +15,14 @@ class LocalVariable(CodeUnitKind):
     Represents local variables within function/method scope.
     """
 
-    def to_query(self, backend_type: str, language: str | None = None) -> str:
+    async def to_query(self, backend: CPGBackend) -> str:
         raise IRUnimplementedError(
-            f"LocalVariableKind.to_query() not implemented for backend '{backend_type}'"
+            f"LocalVariableKind.to_query() not implemented for backend '{backend.backend_type}'"
         )
 
-    def from_response(
-        self, response: Any, backend_type: str, language: str | None = None
-    ) -> list[CodeUnit]:
+    async def from_response(self, response: Any, backend: CPGBackend) -> list[CodeUnit]:
         raise IRUnimplementedError(
-            f"LocalVariableKind.to_code_unit() not implemented for backend '{backend_type}'"
+            f"LocalVariableKind.to_code_unit() not implemented for backend '{backend.backend_type}'"
         )
 
 
@@ -32,16 +33,14 @@ class GlobalVariable(CodeUnitKind):
     Represents global/module-level variables.
     """
 
-    def to_query(self, backend_type: str, language: str | None = None) -> str:
+    async def to_query(self, backend: CPGBackend) -> str:
         raise IRUnimplementedError(
-            f"GlobalVariableKind.to_query() not implemented for backend '{backend_type}'"
+            f"GlobalVariableKind.to_query() not implemented for backend '{backend.backend_type}'"
         )
 
-    def from_response(
-        self, response: Any, backend_type: str, language: str | None = None
-    ) -> list[CodeUnit]:
+    async def from_response(self, response: Any, backend: CPGBackend) -> list[CodeUnit]:
         raise IRUnimplementedError(
-            f"GlobalVariableKind.to_code_unit() not implemented for backend '{backend_type}'"
+            f"GlobalVariableKind.to_code_unit() not implemented for backend '{backend.backend_type}'"
         )
 
 
@@ -52,14 +51,12 @@ class Parameter(CodeUnitKind):
     Represents function/method parameters.
     """
 
-    def to_query(self, backend_type: str, language: str | None = None) -> str:
+    async def to_query(self, backend: CPGBackend) -> str:
         raise IRUnimplementedError(
-            f"ParameterKind.to_query() not implemented for backend '{backend_type}'"
+            f"ParameterKind.to_query() not implemented for backend '{backend.backend_type}'"
         )
 
-    def from_response(
-        self, response: Any, backend_type: str, language: str | None = None
-    ) -> list[CodeUnit]:
+    async def from_response(self, response: Any, backend: CPGBackend) -> list[CodeUnit]:
         raise IRUnimplementedError(
-            f"ParameterKind.to_code_unit() not implemented for backend '{backend_type}'"
+            f"ParameterKind.to_code_unit() not implemented for backend '{backend.backend_type}'"
         )

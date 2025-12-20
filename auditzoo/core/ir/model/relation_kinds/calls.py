@@ -1,8 +1,11 @@
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from auditzoo.core.ir.model.base import CodeUnit, CodeUnitRelation, RelationKind
 from auditzoo.core.ir.model.errors import IRUnimplementedError
+
+if TYPE_CHECKING:
+    from auditzoo.core.ir.backend_api import CPGBackend
 
 
 @dataclass(frozen=True)
@@ -19,16 +22,14 @@ class Calls(RelationKind):
     def _from_kwargs(cls, **kwargs) -> RelationKind:
         raise IRUnimplementedError("CallRelationKind._from_kwargs() not implemented")
 
-    def to_query(
-        self, source_unit_id: str, backend_type: str, language: str | None = None
-    ) -> str:
+    async def to_query(self, source_unit_id: str, backend: "CPGBackend") -> str:
         raise IRUnimplementedError(
-            f"CallRelationKind.to_query() not implemented for backend '{backend_type}'"
+            f"CallRelationKind.to_query() not implemented for backend '{backend.backend_type}'"
         )
 
-    def from_response(
-        self, response: Any, backend_type: str, language: str | None = None
+    async def from_response(
+        self, response: Any, backend: "CPGBackend"
     ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
         raise IRUnimplementedError(
-            f"CallRelationKind.from_response() not implemented for backend '{backend_type}'"
+            f"CallRelationKind.from_response() not implemented for backend '{backend.backend_type}'"
         )
