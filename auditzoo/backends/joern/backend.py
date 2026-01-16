@@ -48,6 +48,10 @@ class JoernBackend(CPGBackend):
     def language(self) -> str | None:
         return self._language
 
+    @property
+    def source_path(self) -> str:
+        return self.config.source_path
+
     # ===== Connection Management =====
 
     async def connect(self) -> None:

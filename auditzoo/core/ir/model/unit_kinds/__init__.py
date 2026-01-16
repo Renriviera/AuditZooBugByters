@@ -10,10 +10,12 @@ from .expression import Expression
 from .file import File
 from .function import Function
 from .module import Module
+from .repository import Repository
 from .statement import Statement
 from .variable import GlobalVariable, LocalVariable, Parameter
 
 __all__ = [
+    "Repository",
     "File",
     "Module",
     "Class",

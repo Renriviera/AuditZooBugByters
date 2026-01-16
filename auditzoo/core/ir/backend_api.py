@@ -38,6 +38,12 @@ class CPGBackend(ABC):
         """
         pass
 
+    @property
+    @abstractmethod
+    def source_path(self) -> str:
+        """The source path of the project under analysis."""
+        pass
+
     # ===== Core CPG Query Interface =====
 
     @abstractmethod
