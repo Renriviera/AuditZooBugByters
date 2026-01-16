@@ -33,12 +33,14 @@ class ContainedIn(RelationKind):
             "ContainedInRelationKind._from_kwargs() not implemented"
         )
 
-    async def to_query(self, source_unit_id: str, backend: "CPGBackend") -> str:
+    async def fetch_backend(
+        self, source_unit_id: str, backend: "CPGBackend"
+    ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
         raise IRUnimplementedError(
             f"ContainedInRelationKind.to_query() not implemented for backend '{backend.backend_type}'"
         )
 
-    async def from_response(
+    async def _from_response(
         self, response: Any, backend: "CPGBackend"
     ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
         raise IRUnimplementedError(
@@ -69,12 +71,14 @@ class Contains(RelationKind):
             "ContainsRelationKind._from_kwargs() not implemented"
         )
 
-    async def to_query(self, source_unit_id: str, backend: "CPGBackend") -> str:
+    async def fetch_backend(
+        self, source_unit_id: str, backend: "CPGBackend"
+    ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
         raise IRUnimplementedError(
             f"ContainsRelationKind.to_query() not implemented for backend '{backend.backend_type}'"
         )
 
-    async def from_response(
+    async def _from_response(
         self, response: Any, backend: "CPGBackend"
     ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
         raise IRUnimplementedError(

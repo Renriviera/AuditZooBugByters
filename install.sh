@@ -21,27 +21,6 @@ if ! command -v conda &> /dev/null; then
     exit 1
 fi
 
-# Check if Java is installed and version is 17+
-if ! command -v java &> /dev/null; then
-    echo -e "${RED}Error: Java is not installed${NC}"
-    echo "Joern requires Java 17+. Please install Java:"
-    echo "  conda install -c conda-forge openjdk=17"
-    exit 1
-fi
-
-# Check Java version
-JAVA_VERSION=$(java -version 2>&1 | head -n 1 | awk -F '"' '{print $2}')
-JAVA_MAJOR=$(echo "$JAVA_VERSION" | awk -F '.' '{print $1}')
-
-if [ "$JAVA_MAJOR" -lt 17 ]; then
-    echo -e "${RED}Error: Java version $JAVA_VERSION is too old${NC}"
-    echo "Joern requires Java 17+. Please upgrade Java:"
-    echo "  conda install -c conda-forge openjdk=17"
-    exit 1
-fi
-
-echo -e "${GREEN}✓ Java version $JAVA_VERSION detected${NC}"
-
 # Environment name
 ENV_NAME="auditzoo"
 PYTHON_VERSION="3.10"
@@ -60,14 +39,18 @@ if conda env list | grep -q "^${ENV_NAME} "; then
     fi
 fi
 
-# Create conda environment
-echo -e "${GREEN}Creating conda environment '${ENV_NAME}' with Python ${PYTHON_VERSION}...${NC}"
-conda create -n ${ENV_NAME} python=${PYTHON_VERSION} -y
+# Create conda environment with Java
+echo -e "${GREEN}Creating conda environment '${ENV_NAME}' with Python ${PYTHON_VERSION} and Java 17...${NC}"
+conda create -n ${ENV_NAME} -c conda-forge python=${PYTHON_VERSION} openjdk=17 -y
 
 # Activate environment (in subshell)
 echo -e "${GREEN}Activating conda environment...${NC}"
 eval "$(conda shell.bash hook)"
 conda activate ${ENV_NAME}
+
+# Verify Java installation
+JAVA_VERSION=$(java -version 2>&1 | head -n 1 | awk -F '"' '{print $2}')
+echo -e "${GREEN}✓ Java version $JAVA_VERSION installed in conda environment${NC}"
 
 # Install Python dependencies
 echo -e "${GREEN}Installing Python dependencies...${NC}"

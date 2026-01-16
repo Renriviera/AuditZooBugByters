@@ -3,12 +3,17 @@
 This module implements the IRBackend interface using Joern CPG queries.
 """
 
+from pathlib import Path
 from typing import Any
 
 from auditzoo.backends.base import JoernConfig
 from auditzoo.backends.joern.client import JoernClient
 from auditzoo.backends.joern.utils import parse_joern_response
-from auditzoo.core.ir.backend_api import BackendResponseError, CPGBackend
+from auditzoo.core.ir.backend_api import (
+    BackendResponseError,
+    BackendUnimplementedError,
+    CPGBackend,
+)
 from auditzoo.core.ir.facts.base import RelationFact, UnitFact
 from auditzoo.core.ir.model import CodeUnit, CodeUnitKind, CodeUnitRelation
 from auditzoo.core.ir.model.base import CodeLocation, RelationDirection, RelationKind
@@ -55,6 +60,8 @@ class JoernBackend(CPGBackend):
         )
         self._connected = True
 
+        await self._load_pre_defined_scripts()
+
     async def disconnect(self) -> None:
         """Disconnect from Joern."""
         # Clean cache and close connection
@@ -84,6 +91,22 @@ class JoernBackend(CPGBackend):
             project_name=self.config.project_name,
             language=self.config.language,
         )
+
+        # Reload pre-defined scripts after reloading CPG
+        await self._load_pre_defined_scripts()
+
+    async def _load_pre_defined_scripts(self) -> None:
+        """Load pre-defined Scala scripts into Joern."""
+        scripts_dir = Path(__file__).parent / "scripts"
+        pre_define_script = scripts_dir / "pre_define.sc"
+
+        if not pre_define_script.exists():
+            raise BackendResponseError(
+                f"Pre-defined script not found: {pre_define_script}"
+            )
+
+        script_content = pre_define_script.read_text()
+        await self.query_raw(script_content)
 
     # ===== Core CPG Query Interface =====
 
@@ -181,7 +204,20 @@ class JoernBackend(CPGBackend):
         Returns:
             CodeUnit object or None if not found
         """
-        raise NotImplementedError()
+        if location.column_start is not None:
+            raise BackendUnimplementedError(
+                "get_code_unit_by_location with column_start is not implemented for Joern backend."
+            )
+
+        unit_id = await self.query(
+            f'minimalCoveringNodeInfo("{location.file_path}", {location.line_start}, {location.line_end})',
+            response_ty="int",
+        )
+
+        if unit_id is None:
+            return None
+
+        return await self.get_code_unit(cpg_node_id=str(unit_id))
 
     async def get_code_unit(self, cpg_node_id: str) -> CodeUnit | None:
         """Get a specific code unit by its CPG node ID.
@@ -213,12 +249,7 @@ class JoernBackend(CPGBackend):
         Returns:
             List of CodeUnit objects
         """
-        query = await kind.to_query(backend=self)
-        response = await self.query(query)
-        units = await kind.from_response(
-            response=response,
-            backend=self,
-        )
+        units = await kind.fetch_backend(backend=self)
 
         return units
 

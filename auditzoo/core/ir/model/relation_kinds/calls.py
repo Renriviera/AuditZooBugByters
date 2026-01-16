@@ -22,12 +22,14 @@ class Calls(RelationKind):
     def _from_kwargs(cls, **kwargs) -> RelationKind:
         raise IRUnimplementedError("CallRelationKind._from_kwargs() not implemented")
 
-    async def to_query(self, source_unit_id: str, backend: "CPGBackend") -> str:
+    async def fetch_backend(
+        self, source_unit_id: str, backend: "CPGBackend"
+    ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
         raise IRUnimplementedError(
             f"CallRelationKind.to_query() not implemented for backend '{backend.backend_type}'"
         )
 
-    async def from_response(
+    async def _from_response(
         self, response: Any, backend: "CPGBackend"
     ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
         raise IRUnimplementedError(

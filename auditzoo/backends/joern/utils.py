@@ -65,18 +65,39 @@ def parse_joern_response(raw: str, response_ty: str = "json", **kwargs) -> Any:
 
     s = raw.strip()
 
-    # If the line includes Scala assignment like: val res2: String = "...."
-    m = re.search(r"=\s*(.*)$", s)
-    if m:
-        s = m.group(1).strip()
+    updated = True
+    while updated:
+        # Loop until no more updates
+        updated = False
 
-    # Drop trailing semicolon if present
-    if s.endswith(";"):
-        s = s[:-1].strip()
+        # If the line includes Scala assignment like: val res2: Type = "...."
+        # Match pattern:
+        #   i.  (val|var|def) identifier: Type = value
+        #   ii. identifier = value
+        # We want to extract everything after the = that follows the type declaration
+        m = re.match(
+            r"^(?:(val|var|def)\s+\w+\s*:\s*[^=]+|(\w+))\s*=\s*(.*)", s, re.DOTALL
+        )
+        if m:
+            s = m.group(3).strip()
+            updated = True
 
-    # Unwrap Scala triple quotes: """..."""
-    if s.startswith('"""') and s.endswith('"""') and len(s) >= 6:
-        s = s[3:-3]
+        # Drop trailing semicolon if present
+        if s.endswith(";"):
+            s = s[:-1].strip()
+            updated = True
+
+        # Unwrap Scala triple quotes: """..."""
+        if s.startswith('"""') and s.endswith('"""') and len(s) >= 6:
+            s = s[3:-3]
+            updated = True
+
+        # Check Optional wrapping: Some(...), None
+        if s.startswith("Some(") and s.endswith(")") and len(s) >= 6:
+            s = s[5:-1].strip()
+            updated = True
+        elif s == "None":
+            return None
 
     match response_ty:
         case "json":
@@ -87,7 +108,9 @@ def parse_joern_response(raw: str, response_ty: str = "json", **kwargs) -> Any:
             return bytes(s, "utf-8").decode("unicode_escape")
         case "int":
             try:
-                return int(s)
+                # Remove Scala/Java integer suffixes (L for Long) and underscores
+                cleaned = s.rstrip("Ll").replace("_", "")
+                return int(cleaned)
             except ValueError as e:
                 raise BackendResponseError(
                     f"Failed to parse Joern int response: {raw}"

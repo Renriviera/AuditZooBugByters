@@ -32,6 +32,7 @@ dependencies = [
     "autogen-ext>=0.7",
     "tree-sitter>=0.20.0",
     "cpgqls-client>=0.0.9",
+    "networkx>=3.4",
     "dataclasses-json>=0.6.0",
     "aiofiles>=23.0.0",
     "rich>=14.2.0",

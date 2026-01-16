@@ -66,6 +66,7 @@ from __future__ import annotations
 import inspect
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from auditzoo.core.ir.model.errors import IRRelationKindError, IRUnitKindError
@@ -81,13 +82,13 @@ class CodeLocation:
     """Location of code in a source file.
 
     Attributes:
-        file_path: Path to the source file
+        file_path: Path to the source file (absolute address)
         line_start: Starting line number (1-indexed)
         line_end: Ending line number (inclusive)
         column_start: Optional starting column (1-indexed)
     """
 
-    file_path: str
+    file_path: Path
     line_start: int
     line_end: int
     column_start: int | None = None
@@ -137,19 +138,21 @@ class CodeUnitKind(ABC):
             cls._registry[cls.__name__] = cls
 
     @abstractmethod
-    async def to_query(self, backend: CPGBackend) -> str:
-        """Convert to a backend-specific query string.
+    async def fetch_backend(self, backend: CPGBackend) -> list[CodeUnit]:
+        """Fetch backend to get all code units of the corresponding kind.
 
         Args:
             backend: CPG backend instance
 
         Returns:
-            Backend-specific query string to select this kind of code unit
+            List of CodeUnit instances representing the code units of this kind
         """
         pass
 
     @abstractmethod
-    async def from_response(self, response: Any, backend: CPGBackend) -> list[CodeUnit]:
+    async def _from_response(
+        self, response: Any, backend: CPGBackend
+    ) -> list[CodeUnit]:
         """Convert a backend query response to a CodeUnit of this kind.
 
         Args:
@@ -192,7 +195,7 @@ class CodeUnitKind(ABC):
         """
         for kind_cls in cls._registry.values():
             try:
-                unit = await kind_cls().from_response(response, backend)
+                unit = await kind_cls()._from_response(response, backend)
                 if len(unit) > 0:
                     return unit
             except Exception:
@@ -217,20 +220,22 @@ class RelationKind(ABC):
             cls._registry[cls.__name__] = cls
 
     @abstractmethod
-    async def to_query(self, source_unit_id: str, backend: CPGBackend) -> str:
-        """Convert to a backend-specific query string.
+    async def fetch_backend(
+        self, source_unit_id: str, backend: CPGBackend
+    ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
+        """Fetch all relations from the backend of the given relation kind.
 
         Args:
             source_unit_id: ID of the source code unit
             backend: CPG backend instance
 
         Returns:
-            Backend-specific query string to select this relationship
+            List of (target CodeUnit, CodeUnitRelation) tuples representing the related units
         """
         pass
 
     @abstractmethod
-    async def from_response(
+    async def _from_response(
         self, response: Any, backend: CPGBackend
     ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
         """Convert a backend query response to a related CodeUnit and relation.
@@ -343,6 +348,10 @@ class CodeUnit:
 
     Note that, for synthetic units, the user is responsible for ensuring the same
     unit has the same synthetic ID across different analyses, as well as avoiding ID collisions.
+
+    Also note that, the code filed in CodeUnit is produced by a "semantic extraction" process
+    from the CPG node
+    (e.g., macro expansion, code normalization), and may not exactly match the original source code.
 
     Attributes:
         id: Unique identifier for this CodeUnit (CPG node ID or synthetic)

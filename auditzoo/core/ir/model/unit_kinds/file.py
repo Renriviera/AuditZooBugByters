@@ -15,12 +15,12 @@ class File(CodeUnitKind):
     Represents a complete source file or compilation unit.
     """
 
-    async def to_query(self, backend: "CPGBackend") -> str:
+    async def fetch_backend(self, backend: "CPGBackend") -> list[CodeUnit]:
         raise IRUnimplementedError(
             f"FileKind.to_query() not implemented for backend '{backend.backend_type}'"
         )
 
-    async def from_response(
+    async def _from_response(
         self, response: Any, backend: "CPGBackend"
     ) -> list[CodeUnit]:
         raise IRUnimplementedError(

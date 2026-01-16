@@ -11,6 +11,9 @@ tree-sitter>=0.20.0
 # CPG Query Language client library
 cpgqls-client>=0.0.9
 
+# Graph libraries
+networkx>=3.4
+
 # Utility libraries
 dataclasses-json>=0.6.0  # JSON serialization of dataclasses
 aiofiles>=23.0.0  # Async file I/O

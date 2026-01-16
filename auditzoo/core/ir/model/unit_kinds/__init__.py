@@ -4,7 +4,6 @@ This module exports all builtin code unit kinds.
 Users can import specific kinds or use the __all__ list.
 """
 
-from .block import Block
 from .class_unit import Class
 from .comment import Comment
 from .expression import Expression
@@ -19,7 +18,6 @@ __all__ = [
     "Module",
     "Class",
     "Function",
-    "Block",
     "LocalVariable",
     "GlobalVariable",
     "Parameter",

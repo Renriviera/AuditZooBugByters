@@ -12,15 +12,17 @@ if TYPE_CHECKING:
 class Function(CodeUnitKind):
     """Kind of function code unit."""
 
-    async def to_query(self, backend: "CPGBackend") -> str:
+    async def fetch_backend(self, backend: "CPGBackend") -> list[CodeUnit]:
         if backend.backend_type != "joern":
             raise IRUnimplementedError(
                 f"FunctionKind.to_query() not implemented for backend '{backend.backend_type}'"
             )
 
-        return 'cpg.method.isExternal(false).nameNot("<global>").dedup.toJson'
+        query = 'cpg.method.isExternal(false).nameNot("<global>").dedup.toJson'
+        response = await backend.query(query)
+        return await self._from_response(response, backend=backend)
 
-    async def from_response(
+    async def _from_response(
         self, response: list[dict[str, Any]], backend: "CPGBackend"
     ) -> list[CodeUnit]:
         if backend.backend_type != "joern":
