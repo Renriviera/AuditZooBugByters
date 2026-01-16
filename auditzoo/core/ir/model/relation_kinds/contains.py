@@ -7,7 +7,9 @@ from auditzoo.core.ir.model.base import (
     RelationDirection,
     RelationKind,
 )
-from auditzoo.core.ir.model.errors import IRUnimplementedError
+from auditzoo.core.ir.model.errors import IRUnimplementedError, IRUnsupportedError
+from auditzoo.core.ir.model.unit_kinds.file import File
+from auditzoo.core.ir.model.unit_kinds.function import Function
 
 if TYPE_CHECKING:
     from auditzoo.core.ir.backend_api import CPGBackend
@@ -28,28 +30,32 @@ class ContainedIn(RelationKind):
     level: str  # e.g., "class", "function", "module", "file"
 
     def _to_kwargs(self) -> dict[str, Any]:
-        raise IRUnimplementedError(
-            "ContainedInRelationKind._to_kwargs() not implemented"
-        )
+        return {"level": self.level}
 
     @classmethod
     def _from_kwargs(cls, **kwargs) -> RelationKind:
-        raise IRUnimplementedError(
-            "ContainedInRelationKind._from_kwargs() not implemented"
-        )
+        return cls(level=kwargs["level"])
 
     async def fetch_backend(
-        self, source_unit_id: str, direction: "RelationDirection", backend: "CPGBackend"
+        self,
+        source_unit: CodeUnit,
+        direction: "RelationDirection",
+        backend: "CPGBackend",
     ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
-        raise IRUnimplementedError(
-            f"ContainedInRelationKind.to_query() not implemented for backend '{backend.backend_type}'"
-        )
+        if direction != "out":
+            raise IRUnsupportedError(
+                "ContainedInRelationKind only supports 'out' direction. Try using 'Contains' relation instead."
+            )
 
-    async def _from_response(
-        self, response: Any, direction: "RelationDirection", backend: "CPGBackend"
-    ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
+        if self.level == "file":
+            node = File().from_path(source_unit.location.file_path, backend)
+            if node is None:
+                return []
+            else:
+                return [(node, CodeUnitRelation(kind=self))]
+
         raise IRUnimplementedError(
-            f"ContainedInRelationKind.from_response() not implemented for backend '{backend.backend_type}'"
+            f"ContainedInRelationKind.to_query() with level '{self.level}' not implemented for backend '{backend.backend_type}'"
         )
 
 
@@ -68,24 +74,43 @@ class Contains(RelationKind):
     level: str  # e.g., "class", "function", "module", "file"
 
     def _to_kwargs(self) -> dict[str, Any]:
-        raise IRUnimplementedError("ContainsRelationKind._to_kwargs() not implemented")
+        return {"level": self.level}
 
     @classmethod
     def _from_kwargs(cls, **kwargs) -> RelationKind:
-        raise IRUnimplementedError(
-            "ContainsRelationKind._from_kwargs() not implemented"
-        )
+        return cls(level=kwargs["level"])
 
     async def fetch_backend(
-        self, source_unit_id: str, direction: "RelationDirection", backend: "CPGBackend"
+        self,
+        source_unit: CodeUnit,
+        direction: "RelationDirection",
+        backend: "CPGBackend",
     ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
-        raise IRUnimplementedError(
-            f"ContainsRelationKind.to_query() not implemented for backend '{backend.backend_type}'"
-        )
+        if direction != "out":
+            raise IRUnsupportedError(
+                "ContainsRelationKind only supports 'out' direction. Try using 'ContainedIn' relation instead."
+            )
 
-    async def _from_response(
-        self, response: Any, direction: "RelationDirection", backend: "CPGBackend"
-    ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
+        if self.level == "function":
+            # File contains all functions defined within it's file path
+            query = f"""
+                cpg.method
+                    .where(_.filenameExact("{str(source_unit.location.file_path)}"))
+                    .filter {{ m =>
+                        val s = m.lineNumber.getOrElse(Int.MaxValue)
+                        val e = m.lineNumberEnd.getOrElse(Int.MinValue)
+                        s >= {int(source_unit.location.line_start)} && e <= {int(source_unit.location.line_end)}
+                    }}
+                    .isExternal(false)
+                    .nameNot("<global>")
+                    .dedup
+                    .toJson
+            """.strip()
+
+            response = await backend.query(query)
+            units = await Function().parse(raw_data=response, backend=backend)
+            return [(unit, CodeUnitRelation(kind=self)) for unit in units]
+
         raise IRUnimplementedError(
-            f"ContainsRelationKind.from_response() not implemented for backend '{backend.backend_type}'"
+            f"ContainsRelationKind.to_query() with level '{self.level}' not implemented for backend '{backend.backend_type}'"
         )

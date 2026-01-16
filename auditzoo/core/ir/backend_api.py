@@ -170,7 +170,7 @@ class CPGBackend(ABC):
     @abstractmethod
     async def get_relations(
         self, source_unit: CodeUnit, kind: RelationKind, direction: RelationDirection
-    ) -> list[tuple[CodeUnit, CodeUnitRelation, dict[str, Any]]]:
+    ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
         """Get all relations of a specific kind from a source code unit.
 
         Args:
@@ -179,7 +179,7 @@ class CPGBackend(ABC):
             direction: Direction of the relation (OUTGOING or INCOMING)
 
         Returns:
-            List of (target_unit, relation, metadata) tuples
+            List of (target_unit, relation) tuples
 
         Raises:
             BackendError: If retrieval fails

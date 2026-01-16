@@ -235,7 +235,7 @@ class JoernBackend(CPGBackend):
         query = f"cpg.all.id({cpg_node_id}L).toJson"
         response = await self.query(query)
         units = await CodeUnitKind.parse_units(
-            raw_str=response,
+            raw_data=response,
             backend=self,
         )
 
@@ -259,7 +259,7 @@ class JoernBackend(CPGBackend):
 
     async def get_relations(
         self, source_unit: CodeUnit, kind: RelationKind, direction: RelationDirection
-    ) -> list[tuple[CodeUnit, CodeUnitRelation, dict[str, Any]]]:
+    ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
         """Get all relations of a specific kind from a source code unit.
 
         Args:
@@ -268,6 +268,8 @@ class JoernBackend(CPGBackend):
             direction: Direction of the relation (OUTGOING or INCOMING)
 
         Returns:
-            List of (target_unit, relation, metadata) tuples
+            List of (target_unit, relation) tuples
         """
-        raise NotImplementedError()
+        return await kind.fetch_backend(
+            source_unit=source_unit, direction=direction, backend=self
+        )

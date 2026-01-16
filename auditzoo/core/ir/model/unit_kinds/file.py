@@ -16,7 +16,36 @@ class File(CodeUnitKind):
     Represents a complete source file or compilation unit.
     """
 
-    synthetic_query: str = "z.file"
+    def from_path(self, file_path: Path, backend: "CPGBackend") -> CodeUnit | None:
+        """Create a CodeUnit from a given file path.
+
+        Args:
+            file_path: Path to the source file
+            backend: CPG backend instance
+
+        Returns:
+            CodeUnit representing the file
+        """
+        absolute_path = Path(backend.source_path) / Path(file_path)
+        try:
+            code = absolute_path.read_text()
+        except (UnicodeDecodeError, PermissionError):
+            return None
+
+        line_count = len(code.splitlines()) if code else 1
+
+        return CodeUnit.synthetic(
+            synthetic_id=f"file:{file_path}",
+            kind=self,
+            code=code,
+            name=str(file_path),
+            location=CodeLocation(
+                file_path=file_path,
+                line_start=1,
+                line_end=line_count,
+                column_start=None,
+            ),
+        )
 
     async def fetch_backend(self, backend: "CPGBackend") -> list[CodeUnit]:
         # File unit query is agnostic to backend
@@ -48,20 +77,15 @@ class File(CodeUnitKind):
 
             # Create synthetic CodeUnit for this file
             # Use relative path as name for readability
-            try:
-                relative_path = file_path.relative_to(project_root)
-                name = str(relative_path)
-            except ValueError:
-                # If file is not under project_root, use absolute path
-                name = str(file_path)
+            relative_path = file_path.relative_to(project_root)
 
             unit = CodeUnit.synthetic(
-                synthetic_id=f"file:{file_path}",
+                synthetic_id=f"file:{relative_path}",
                 kind=self,
                 code=code,
-                name=name,
+                name=str(relative_path),
                 location=CodeLocation(
-                    file_path=file_path,
+                    file_path=relative_path,
                     line_start=1,
                     line_end=line_count,
                     column_start=None,
@@ -71,7 +95,7 @@ class File(CodeUnitKind):
 
         return units
 
-    async def parse(self, raw_str: Any, backend: "CPGBackend") -> list[CodeUnit]:
+    async def parse(self, raw_data: Any, backend: "CPGBackend") -> list[CodeUnit]:
         raise IRUnsupportedError(
             f"FileKind.parse() is unsupported for backend '{backend.backend_type}'"
         )

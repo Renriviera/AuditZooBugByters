@@ -151,11 +151,11 @@ class CodeUnitKind(ABC):
         pass
 
     @abstractmethod
-    async def parse(self, raw_str: Any, backend: CPGBackend) -> list[CodeUnit]:
+    async def parse(self, raw_data: Any, backend: CPGBackend) -> list[CodeUnit]:
         """Parse backend response to extract code units of this kind.
 
         Args:
-            raw_str: Raw string representation from backend
+            raw_data: Raw data representation from backend
             backend: Backend instance
 
         Returns:
@@ -180,11 +180,11 @@ class CodeUnitKind(ABC):
         return kind_cls(**kwargs)
 
     @classmethod
-    async def parse_units(cls, raw_str: Any, backend: CPGBackend) -> list[CodeUnit]:
-        """Parse raw string representation to extract code units.
+    async def parse_units(cls, raw_data: Any, backend: CPGBackend) -> list[CodeUnit]:
+        """Parse raw data representation to extract code units.
 
         Args:
-            raw_str: Raw string representation from backend
+            raw_data: Raw data representation from backend
             backend: Backend instance
 
         Returns:
@@ -193,8 +193,7 @@ class CodeUnitKind(ABC):
         for kind_cls in cls._registry.values():
             unit: list[CodeUnit] = []
             with suppress(Exception):
-                unit = await kind_cls().parse(raw_str, backend)
-
+                unit = await kind_cls().parse(raw_data, backend)
             if len(unit) > 0:
                 return unit
 
@@ -218,12 +217,12 @@ class RelationKind(ABC):
 
     @abstractmethod
     async def fetch_backend(
-        self, source_unit_id: str, direction: RelationDirection, backend: CPGBackend
+        self, source_unit: CodeUnit, direction: RelationDirection, backend: CPGBackend
     ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
         """Fetch all relations from the backend of the given relation kind.
 
         Args:
-            source_unit_id: ID of the source code unit
+            source_unit: Source CodeUnit
             direction: Direction of the relation
             backend: CPG backend instance
 

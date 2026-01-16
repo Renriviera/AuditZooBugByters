@@ -227,6 +227,8 @@ class JoernClient:
             # Load existing project
             await self.query(f'open("{project_name}")')
             await self.query(f'workspace.setActiveProject("{project_name}")')
+            await self.query("run.controlflow")
+            await self.query("run.callgraph")
 
     def _start_joern_server(self) -> None:
         """Start Joern server process."""

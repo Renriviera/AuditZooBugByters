@@ -29,8 +29,8 @@ int uaf_case04_main(int argc, char *argv[]) {
 
     int should_cleanup = (argc > 1) ? 1 : 0;
     uaf_case04_conditional_cleanup(should_cleanup, buffer);
-    
+
     uaf_case04_use_buffer(buffer);
-    
+
     return 0;
 }

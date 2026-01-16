@@ -7,8 +7,8 @@ and tag management.
 For the graph representation, we use NetworkX's MultiDiGraph to represent
 directed relations (e.g., function calls, inheritance, data flow) between CodeUnits.
 Nodes represent CPG-backed CodeUnits, and edges represent relations with
-associated metadata (like call sites, confidence scores, etc.). The key of each
-edge is the CodeUnitRelation type.
+associated information (within relation,  call sites, confidence scores, etc.).
+The key of each edge is the CodeUnitRelation type.
 
 Note that IRView provides low-level graph operations (e.g., get the neighbors of a node).
 Higher-level analyses (e.g., caller/callee analysis, data flow analysis, taint analysis)
@@ -47,7 +47,7 @@ class IRView:
     - Nodes: CodeUnit objects (identified by their `id`)
     - Edges: Relations between CodeUnits (with CodeUnitRelation attributes)
     - Node attributes: CodeUnit object and Facts
-    - Edge attributes: CodeUnitRelation and metadata
+    - Edge attributes: CodeUnitRelation
 
     This provides:
     - Efficient graph traversal
@@ -284,7 +284,6 @@ class IRView:
         source_id: str,
         target_id: str,
         relation: CodeUnitRelation,
-        **metadata: Any,
     ) -> None:
         """Add a relation (edge) between two CodeUnits.
 
@@ -292,7 +291,6 @@ class IRView:
             source_id: Source CodeUnit ID
             target_id: Target CodeUnit ID
             relation: Type of relation (CALLS, INHERITS, etc.) - the key
-            **metadata: Additional edge attributes (e.g., confidence)
 
         Note:
             For MultiDiGraph, we will use relation_type as the key, which means
@@ -314,13 +312,13 @@ class IRView:
         if not await self.has_unit(target_id):
             raise IRValueError(f"Target unit {target_id} not found in graph")
 
-        self._graph.add_edge(source_id, target_id, key=relation, **metadata)
+        self._graph.add_edge(source_id, target_id, key=relation)
 
     async def get_all_relations_by_kind(
         self,
         kind: RelationKind,
         fetch_backend: bool = True,
-    ) -> list[tuple[CodeUnit, CodeUnit, CodeUnitRelation, dict[str, Any]]]:
+    ) -> list[tuple[CodeUnit, CodeUnit, CodeUnitRelation]]:
         """Get all relations of a specific type (for units that exist in the graph).
 
         Args:
@@ -328,7 +326,7 @@ class IRView:
             fetch_backend: If True, attempt to load from backend if not in graph
 
         Returns:
-            List of (source_unit, target_unit, metadata) tuples
+            List of (source_unit, target_unit) tuples
         """
         if fetch_backend and kind not in self._loaded_relation_kinds:
             # Load all relations of this type from backend
@@ -338,25 +336,22 @@ class IRView:
                 # We only need to do one direction, since we track all nodes
                 relations = await self.backend.get_relations(source_unit, kind, "out")
 
-                for target_unit, relation, metadata in relations:
+                for target_unit, relation in relations:
                     if not await self.has_unit(target_unit.id, fetch_backend=True):
                         raise IRValueError(
                             f"Related unit {target_unit.id} not found in backend"
                         )
-                    await self._add_relation(
-                        source_id, target_unit.id, relation, **metadata
-                    )
+                    await self._add_relation(source_id, target_unit.id, relation)
 
             self._loaded_relation_kinds.add(kind)
 
         # Collect results - MultiDiGraph returns (source, target, key, data)
         result = []
-        for source_id, target_id, key, data in self._graph.edges(data=True, keys=True):
+        for source_id, target_id, key, _ in self._graph.edges(data=True, keys=True):
             if key.kind == kind:
                 source_unit = self._graph.nodes[source_id]["unit"]
                 target_unit = self._graph.nodes[target_id]["unit"]
-                metadata = data
-                result.append((source_unit, target_unit, key, metadata))
+                result.append((source_unit, target_unit, key))
 
         return result
 
@@ -376,7 +371,7 @@ class IRView:
             fetch_backend: If True, attempt to load from backend if not in graph
 
         Returns:
-            List of (related_unit, relation, direction, metadata) tuples where metadata contains
+            List of (related_unit, relation, direction) tuples
             edge attributes like call_site_id, confidence, etc.
 
         Raises:
@@ -408,22 +403,18 @@ class IRView:
         ):
             # Load relations from backend
             relations = await self.backend.get_relations(unit, kind, direction)
-            for target_unit, relation, metadata in relations:
+            for target_unit, relation in relations:
                 # Ensure target unit exists
                 if not await self.has_unit(target_unit.id, fetch_backend=True):
                     raise IRValueError(
                         f"Related unit {target_unit.id} not found in backend"
                     )
 
-                # Add relation with metadata
+                # Add relation
                 if direction == "out":
-                    await self._add_relation(
-                        unit.id, target_unit.id, relation, **metadata
-                    )
+                    await self._add_relation(unit.id, target_unit.id, relation)
                 else:
-                    await self._add_relation(
-                        target_unit.id, unit.id, relation, **metadata
-                    )
+                    await self._add_relation(target_unit.id, unit.id, relation)
 
             self._loaded_relations.add((unit.id, direction, kind))
 
@@ -451,16 +442,16 @@ class IRView:
         """Get all relations in the graph. Note that this does NOT fetch from backend.
 
         Returns:
-            List of (source_unit, target_unit, relation, metadata) tuples
+            List of (source_unit, target_unit, relation) tuples
         """
         result = []
-        for source_id, target_id, key, data in self._graph.edges(data=True, keys=True):
+        for source_id, target_id, key, _ in self._graph.edges(data=True, keys=True):
             source_unit = self._graph.nodes[source_id]["unit"]
             target_unit = self._graph.nodes[target_id]["unit"]
-            metadata = data
-            result.append((source_unit, target_unit, key, metadata))
+            result.append((source_unit, target_unit, key))
+            result.append((source_unit, target_unit, key))
 
-        return result
+        return result  # type: ignore
 
     # ============================================
     # GRAPH QUERIES (No BACKEND FETCH)

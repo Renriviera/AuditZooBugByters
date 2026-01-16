@@ -20,7 +20,7 @@ class LocalVariable(CodeUnitKind):
             f"LocalVariableKind.to_query() not implemented for backend '{backend.backend_type}'"
         )
 
-    async def parse(self, raw_str: Any, backend: "CPGBackend") -> list[CodeUnit]:
+    async def parse(self, raw_data: Any, backend: "CPGBackend") -> list[CodeUnit]:
         raise IRUnimplementedError(
             f"LocalVariableKind.parse() not implemented for backend '{backend.backend_type}'"
         )
@@ -38,7 +38,7 @@ class GlobalVariable(CodeUnitKind):
             f"GlobalVariableKind.to_query() not implemented for backend '{backend.backend_type}'"
         )
 
-    async def parse(self, raw_str: Any, backend: "CPGBackend") -> list[CodeUnit]:
+    async def parse(self, raw_data: Any, backend: "CPGBackend") -> list[CodeUnit]:
         raise IRUnimplementedError(
             f"GlobalVariableKind.parse() not implemented for backend '{backend.backend_type}'"
         )
@@ -56,7 +56,7 @@ class Parameter(CodeUnitKind):
             f"ParameterKind.to_query() not implemented for backend '{backend.backend_type}'"
         )
 
-    async def parse(self, raw_str: Any, backend: "CPGBackend") -> list[CodeUnit]:
+    async def parse(self, raw_data: Any, backend: "CPGBackend") -> list[CodeUnit]:
         raise IRUnimplementedError(
             f"ParameterKind.parse() not implemented for backend '{backend.backend_type}'"
         )

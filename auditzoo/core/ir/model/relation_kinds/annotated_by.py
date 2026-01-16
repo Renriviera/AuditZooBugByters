@@ -33,15 +33,11 @@ class AnnotatedBy(RelationKind):
         )
 
     async def fetch_backend(
-        self, source_unit_id: str, direction: "RelationDirection", backend: "CPGBackend"
+        self,
+        source_unit: CodeUnit,
+        direction: "RelationDirection",
+        backend: "CPGBackend",
     ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
         raise IRUnimplementedError(
             f"AnnotatedByRelationKind.to_query() not implemented for backend '{backend.backend_type}'"
-        )
-
-    async def _from_response(
-        self, response: Any, direction: "RelationDirection", backend: "CPGBackend"
-    ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
-        raise IRUnimplementedError(
-            f"AnnotatedByRelationKind.from_response() not implemented for backend '{backend.backend_type}'"
         )

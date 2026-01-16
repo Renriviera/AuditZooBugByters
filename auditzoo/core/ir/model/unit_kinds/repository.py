@@ -155,7 +155,7 @@ class Repository(CodeUnitKind):
 
         return [unit]
 
-    async def parse(self, raw_str: Any, backend: "CPGBackend") -> list[CodeUnit]:
+    async def parse(self, raw_data: Any, backend: "CPGBackend") -> list[CodeUnit]:
         raise IRUnsupportedError(
             f"RepositoryKind.parse() is unsupported for backend '{backend.backend_type}'"
         )
