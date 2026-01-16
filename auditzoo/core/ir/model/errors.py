@@ -31,6 +31,12 @@ class IRUnimplementedError(IRError):
     pass
 
 
+class IRUnsupportedError(IRError):
+    """Raised when a requested IR feature is unsupported."""
+
+    pass
+
+
 class IRBackendError(IRError):
     """Raised when there is a backend-related error in IR operations."""
 

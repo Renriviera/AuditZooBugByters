@@ -20,19 +20,19 @@ class Function(CodeUnitKind):
 
         query = 'cpg.method.isExternal(false).nameNot("<global>").dedup.toJson'
         response = await backend.query(query)
-        return await self._from_response(response, backend=backend)
+        return await self.parse(response, backend=backend)
 
-    async def _from_response(
-        self, response: list[dict[str, Any]], backend: "CPGBackend"
+    async def parse(
+        self, raw_str: list[dict[str, Any]], backend: "CPGBackend"
     ) -> list[CodeUnit]:
         if backend.backend_type != "joern":
             raise IRUnimplementedError(
-                f"FunctionKind.to_code_unit() not implemented for backend '{backend.backend_type}'"
+                f"FunctionKind.parse() not implemented for backend '{backend.backend_type}'"
             )
 
         try:
             units = []
-            for raw_function in response:
+            for raw_function in raw_str:
                 if raw_function.get("_label") != "METHOD":
                     continue
 
@@ -57,5 +57,5 @@ class Function(CodeUnitKind):
             return units
         except Exception as e:
             raise IRInvalidResponseError(
-                f"Invalid response format for FunctionKind from backend '{backend.backend_type}': {response} with error {e}"
+                f"Invalid response format for FunctionKind from backend '{backend.backend_type}': {raw_str} with error {e}"
             ) from e

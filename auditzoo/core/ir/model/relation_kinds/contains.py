@@ -1,7 +1,12 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from auditzoo.core.ir.model.base import CodeUnit, CodeUnitRelation, RelationKind
+from auditzoo.core.ir.model.base import (
+    CodeUnit,
+    CodeUnitRelation,
+    RelationDirection,
+    RelationKind,
+)
 from auditzoo.core.ir.model.errors import IRUnimplementedError
 
 if TYPE_CHECKING:
@@ -34,14 +39,14 @@ class ContainedIn(RelationKind):
         )
 
     async def fetch_backend(
-        self, source_unit_id: str, backend: "CPGBackend"
+        self, source_unit_id: str, direction: "RelationDirection", backend: "CPGBackend"
     ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
         raise IRUnimplementedError(
             f"ContainedInRelationKind.to_query() not implemented for backend '{backend.backend_type}'"
         )
 
     async def _from_response(
-        self, response: Any, backend: "CPGBackend"
+        self, response: Any, direction: "RelationDirection", backend: "CPGBackend"
     ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
         raise IRUnimplementedError(
             f"ContainedInRelationKind.from_response() not implemented for backend '{backend.backend_type}'"
@@ -72,14 +77,14 @@ class Contains(RelationKind):
         )
 
     async def fetch_backend(
-        self, source_unit_id: str, backend: "CPGBackend"
+        self, source_unit_id: str, direction: "RelationDirection", backend: "CPGBackend"
     ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
         raise IRUnimplementedError(
             f"ContainsRelationKind.to_query() not implemented for backend '{backend.backend_type}'"
         )
 
     async def _from_response(
-        self, response: Any, backend: "CPGBackend"
+        self, response: Any, direction: "RelationDirection", backend: "CPGBackend"
     ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
         raise IRUnimplementedError(
             f"ContainsRelationKind.from_response() not implemented for backend '{backend.backend_type}'"

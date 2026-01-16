@@ -217,6 +217,12 @@ class IRView:
                 raise IRValueError(f"Node {unit_id} is not a valid CodeUnit")
             return unit
 
+        if CodeUnit.is_synthetic_id(unit_id):
+            # Synthetic units cannot be fetched from backend via ID
+            raise IRValueError(
+                f"Synthetic CodeUnit {unit_id} not found in graph and cannot be fetched from backend"
+            )
+
         if fetch_backend and unit_id not in self._loaded_units:
             unit = await self.backend.get_code_unit(unit_id)
             self._loaded_units.add(unit_id)
@@ -315,7 +321,7 @@ class IRView:
         kind: RelationKind,
         fetch_backend: bool = True,
     ) -> list[tuple[CodeUnit, CodeUnit, CodeUnitRelation, dict[str, Any]]]:
-        """Get all relations of a specific type.
+        """Get all relations of a specific type (for units that exist in the graph).
 
         Args:
             kind: RelationKind to filter by

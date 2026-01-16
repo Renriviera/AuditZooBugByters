@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from auditzoo.core.ir.model.base import CodeLocation, CodeUnit, CodeUnitKind
-from auditzoo.core.ir.model.errors import IRUnimplementedError
+from auditzoo.core.ir.model.errors import IRUnsupportedError
 
 if TYPE_CHECKING:
     from auditzoo.core.ir.backend_api import CPGBackend
@@ -155,12 +155,7 @@ class Repository(CodeUnitKind):
 
         return [unit]
 
-    async def _from_response(
-        self, response: Any, backend: "CPGBackend"
-    ) -> list[CodeUnit]:
-        if response != self.synthetic_query:
-            raise IRUnimplementedError(
-                f"RepositoryKind.from_response() received unexpected response from backend '{backend.backend_type}': {response}"
-            )
-
-        return await self.fetch_backend(backend=backend)
+    async def parse(self, raw_str: Any, backend: "CPGBackend") -> list[CodeUnit]:
+        raise IRUnsupportedError(
+            f"RepositoryKind.parse() is unsupported for backend '{backend.backend_type}'"
+        )

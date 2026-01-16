@@ -21,9 +21,7 @@ class Module(CodeUnitKind):
             f"ModuleKind.to_query() not implemented for backend '{backend.backend_type}'"
         )
 
-    async def _from_response(
-        self, response: Any, backend: "CPGBackend"
-    ) -> list[CodeUnit]:
+    async def parse(self, raw_str: Any, backend: "CPGBackend") -> list[CodeUnit]:
         raise IRUnimplementedError(
-            f"ModuleKind.to_code_unit() not implemented for backend '{backend.backend_type}'"
+            f"ModuleKind.parse() not implemented for backend '{backend.backend_type}'"
         )

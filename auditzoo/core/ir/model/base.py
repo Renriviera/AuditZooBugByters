@@ -151,14 +151,12 @@ class CodeUnitKind(ABC):
         pass
 
     @abstractmethod
-    async def _from_response(
-        self, response: Any, backend: CPGBackend
-    ) -> list[CodeUnit]:
-        """Convert a backend query response to a CodeUnit of this kind.
+    async def parse(self, raw_str: Any, backend: CPGBackend) -> list[CodeUnit]:
+        """Parse backend response to extract code units of this kind.
 
         Args:
-            response: Raw response from backend CPG query
-            backend: CPG backend instance
+            raw_str: Raw string representation from backend
+            backend: Backend instance
 
         Returns:
             List of CodeUnit instances representing the code units of this kind
@@ -182,14 +180,12 @@ class CodeUnitKind(ABC):
         return kind_cls(**kwargs)
 
     @classmethod
-    async def create_from_response(
-        cls, response: Any, backend: CPGBackend
-    ) -> list[CodeUnit]:
-        """Convert a backend query response to a CodeUnit by trying all registered kinds. It will return the first matching kind.
+    async def parse_units(cls, raw_str: Any, backend: CPGBackend) -> list[CodeUnit]:
+        """Parse raw string representation to extract code units.
 
         Args:
-            response: Raw response from backend CPG query
-            backend: CPG backend instance
+            raw_str: Raw string representation from backend
+            backend: Backend instance
 
         Returns:
             List of CodeUnit instances representing the code units found
@@ -197,7 +193,7 @@ class CodeUnitKind(ABC):
         for kind_cls in cls._registry.values():
             unit: list[CodeUnit] = []
             with suppress(Exception):
-                unit = await kind_cls()._from_response(response, backend)
+                unit = await kind_cls().parse(raw_str, backend)
 
             if len(unit) > 0:
                 return unit
@@ -222,27 +218,13 @@ class RelationKind(ABC):
 
     @abstractmethod
     async def fetch_backend(
-        self, source_unit_id: str, backend: CPGBackend
+        self, source_unit_id: str, direction: RelationDirection, backend: CPGBackend
     ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
         """Fetch all relations from the backend of the given relation kind.
 
         Args:
             source_unit_id: ID of the source code unit
-            backend: CPG backend instance
-
-        Returns:
-            List of (target CodeUnit, CodeUnitRelation) tuples representing the related units
-        """
-        pass
-
-    @abstractmethod
-    async def _from_response(
-        self, response: Any, backend: CPGBackend
-    ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
-        """Convert a backend query response to a related CodeUnit and relation.
-
-        Args:
-            response: Raw response from backend CPG query
+            direction: Direction of the relation
             backend: CPG backend instance
 
         Returns:
@@ -356,7 +338,6 @@ class CodeUnit:
 
     Attributes:
         id: Unique identifier for this CodeUnit (CPG node ID or synthetic)
-        is_synthetic: True if this unit is synthetic (not backend-backed)
         kind: The kind of this code unit
         code: The actual source code text for this unit
         name: Human-readable identifier (e.g., "foo" for functions,
@@ -393,9 +374,6 @@ class CodeUnit:
     name: str
     location: CodeLocation
 
-    # === Backend Reference ===
-    is_synthetic: bool  # True if synthetic (not backend-backed)
-
     # === Additional Metadata ===
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -422,6 +400,22 @@ class CodeUnit:
         if not isinstance(other, CodeUnit):
             return False
         return self.id == other.id
+
+    @property
+    def is_synthetic(self) -> bool:
+        """Check if this CodeUnit is synthetic (not backend-backed)."""
+        return self.is_synthetic_id(self.id)
+
+    @classmethod
+    def is_synthetic_id(cls, unit_id: str) -> bool:
+        """Check if a given unit ID is synthetic.
+
+        Args:
+            unit_id: CodeUnit ID to check
+        Returns:
+            True if the ID is synthetic (not backend-backed)
+        """
+        return unit_id.startswith("synthetic:")
 
     @classmethod
     def from_cpg(
@@ -451,7 +445,6 @@ class CodeUnit:
             code=code,
             name=name,
             location=location,
-            is_synthetic=False,
             metadata=kwargs,
         )
 
@@ -478,11 +471,10 @@ class CodeUnit:
             CodeUnit with auto-generated synthetic ID
         """
         return cls(
-            id=synthetic_id,
+            id=f"synthetic:{synthetic_id}",
             kind=kind,
             code=code,
             name=name,
             location=location,
-            is_synthetic=True,
             metadata=kwargs,
         )

@@ -20,9 +20,7 @@ class Comment(CodeUnitKind):
             f"CommentKind.to_query() not implemented for backend '{backend.backend_type}'"
         )
 
-    async def _from_response(
-        self, response: Any, backend: "CPGBackend"
-    ) -> list[CodeUnit]:
+    async def parse(self, raw_str: Any, backend: "CPGBackend") -> list[CodeUnit]:
         raise IRUnimplementedError(
-            f"CommentKind.to_code_unit() not implemented for backend '{backend.backend_type}'"
+            f"CommentKind.parse() not implemented for backend '{backend.backend_type}'"
         )

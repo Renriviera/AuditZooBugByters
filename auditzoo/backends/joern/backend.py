@@ -234,8 +234,8 @@ class JoernBackend(CPGBackend):
         """
         query = f"cpg.all.id({cpg_node_id}L).toJson"
         response = await self.query(query)
-        units = await CodeUnitKind.create_from_response(
-            response=response,
+        units = await CodeUnitKind.parse_units(
+            raw_str=response,
             backend=self,
         )
 
