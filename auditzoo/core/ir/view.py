@@ -213,7 +213,8 @@ class IRView:
         """
         if unit_id in self._graph:
             unit = self._graph.nodes[unit_id]["unit"]
-            assert isinstance(unit, CodeUnit)
+            if not isinstance(unit, CodeUnit):
+                raise IRValueError(f"Node {unit_id} is not a valid CodeUnit")
             return unit
 
         if fetch_backend and unit_id not in self._loaded_units:

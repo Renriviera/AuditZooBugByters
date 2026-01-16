@@ -65,6 +65,7 @@ from __future__ import annotations
 
 import inspect
 from abc import ABC, abstractmethod
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
@@ -194,12 +195,12 @@ class CodeUnitKind(ABC):
             List of CodeUnit instances representing the code units found
         """
         for kind_cls in cls._registry.values():
-            try:
+            unit: list[CodeUnit] = []
+            with suppress(Exception):
                 unit = await kind_cls()._from_response(response, backend)
-                if len(unit) > 0:
-                    return unit
-            except Exception:
-                continue
+
+            if len(unit) > 0:
+                return unit
 
         return []
 
