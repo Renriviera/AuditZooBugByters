@@ -15,8 +15,9 @@ Storage:
 """
 
 import inspect
+import json
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, ClassVar
 
@@ -38,7 +39,6 @@ class GraphUpdateOp(Enum):
 
     ADD_EDGE = "add_edge"  # Add an edge between source and target
     REMOVE_EDGE = "remove_edge"  # Remove an edge between source and target
-    UPDATE_EDGE = "update_edge"  # Update edge attributes
 
 
 @dataclass(frozen=True)
@@ -50,27 +50,23 @@ class GraphUpdater:
     Attributes:
         operation: Type of graph operation (add/remove/update edge)
         relation_kind: RelationKind to use for the edge (e.g., CALLS, INHERITS)
-        edge_attrs: Additional edge attributes to set
 
     Example:
         # Create an updater for adding a CALLS edge
         updater = GraphUpdater(
             operation=GraphUpdateOp.ADD_EDGE,
             relation_kind="CALLS",
-            edge_attrs={"confidence": 0.8, "context": "dynamic"}
         )
     """
 
     operation: GraphUpdateOp
     relation: CodeUnitRelation
-    edge_attrs: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         """Serialize to dict."""
         return {
             "operation": self.operation.value,
             "relation": self.relation.to_dict(),
-            "edge_attrs": self.edge_attrs,
         }
 
     @classmethod
@@ -79,7 +75,6 @@ class GraphUpdater:
         return cls(
             operation=GraphUpdateOp(data["operation"]),
             relation=CodeUnitRelation.from_dict(data["relation"]),
-            edge_attrs=data.get("edge_attrs", {}),
         )
 
     def execute(self, graph: nx.MultiDiGraph, source_id: str, target_id: str):
@@ -92,15 +87,11 @@ class GraphUpdater:
         """
         if self.operation == GraphUpdateOp.ADD_EDGE:
             # Add edge to graph with attributes
-            graph.add_edge(source_id, target_id, key=self.relation, **self.edge_attrs)
+            graph.add_edge(source_id, target_id, key=self.relation)
         elif self.operation == GraphUpdateOp.REMOVE_EDGE:
             # Remove edge from graph, based on relation type
             if graph.has_edge(source_id, target_id, key=self.relation):
                 graph.remove_edge(source_id, target_id, key=self.relation)
-        elif self.operation == GraphUpdateOp.UPDATE_EDGE:
-            # Update edge attributes
-            if graph.has_edge(source_id, target_id, key=self.relation):
-                graph.edges[source_id, target_id, self.relation].update(self.edge_attrs)
 
 
 @dataclass(frozen=True)
@@ -120,7 +111,14 @@ class UnitFact(ABC):
 
     def id(self) -> str:
         """Get the unique ID of this unit fact."""
-        return f"{self.__class__.__name__}_{self.__hash__()}"
+        return f"unitfact:{self.__class__.__name__}:{self._force_hash()}"
+
+    def _force_hash(self) -> int:
+        """Hash based on class and fields.
+
+        We do this because dataclass-generated hash does not account for nested dataclasses. And we cannot override __hash__ directly due to frozen=True.
+        """
+        return hash(json.dumps(self._to_kwargs(), sort_keys=True))
 
     @abstractmethod
     def _to_kwargs(self) -> dict[str, Any]:
@@ -184,7 +182,21 @@ class RelationFact(ABC):
 
     def id(self) -> str:
         """Get the unique ID of this relation fact."""
-        return f"{self.__class__.__name__}_{self.__hash__()}"
+        return f"relationfact:{self.__class__.__name__}:{self._force_hash()}"
+
+    def _force_hash(self) -> int:
+        """Hash based on class and fields.
+
+        We do this because dataclass-generated hash does not account for nested dataclasses. And we cannot override __hash__ directly due to frozen=True.
+        """
+        return hash(
+            (
+                self.source_node_id,
+                self.target_node_id,
+                self.graph_updater,
+                json.dumps(self._to_kwargs(), sort_keys=True),
+            )
+        )
 
     @abstractmethod
     def _to_kwargs(self) -> dict[str, Any]:

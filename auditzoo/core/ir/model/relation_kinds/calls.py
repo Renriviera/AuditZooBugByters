@@ -35,9 +35,7 @@ class Calls(RelationKind):
         backend: "CPGBackend",
     ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
         if source_unit.kind != Function():
-            raise IRUnsupportedError(
-                "CallRelationKind only supports source units of FunctionKind."
-            )
+            return []
 
         if direction == "out":
             # We are querying callees called by the source function

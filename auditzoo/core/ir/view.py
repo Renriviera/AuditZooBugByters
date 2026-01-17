@@ -361,7 +361,7 @@ class IRView:
         kind: RelationKind,
         direction: Literal["both"] | RelationDirection,
         fetch_backend: bool = True,
-    ) -> list[tuple[CodeUnit, str, dict[str, Any]]]:
+    ) -> list[tuple[CodeUnit, str, CodeUnitRelation]]:
         """Get units related to this unit by a specific relation.
 
         Args:
@@ -421,18 +421,18 @@ class IRView:
         related = []
         if direction == "out":
             # Outgoing edges (e.g., who this calls) - MultiDiGraph returns (source, target, key, data)
-            for _, target, key, data in self._graph.out_edges(
+            for _, target, key, _ in self._graph.out_edges(
                 unit.id, data=True, keys=True
             ):
                 if key.kind == kind:
-                    related.append((self._graph.nodes[target]["unit"], "out", data))
+                    related.append((self._graph.nodes[target]["unit"], "out", key))
         else:
             # Incoming edges (e.g., who calls this) - MultiDiGraph returns (source, target, key, data)
-            for source, _, key, data in self._graph.in_edges(
+            for source, _, key, _ in self._graph.in_edges(
                 unit.id, data=True, keys=True
             ):  # pyright: ignore[reportCallIssue]
                 if key.kind == kind:
-                    related.append((self._graph.nodes[source]["unit"], "in", data))
+                    related.append((self._graph.nodes[source]["unit"], "in", key))
 
         return related
 
@@ -678,6 +678,12 @@ class IRView:
         else:
             return list(self._relation_facts)
 
+    async def load_facts(self) -> None:
+        """Load all unit and relation facts from the backend into the IRView."""
+        for unit in self.get_all_units():
+            await self._load_unit_facts_from_backend(unit)
+        await self._load_relation_facts_from_backend()
+
     # ============================================
     # SYNC BACKEND
     # ============================================
@@ -688,16 +694,12 @@ class IRView:
         """
 
         await self.get_all_units_by_kind(UKRegistry.Function(), fetch_backend=True)
+        await self.get_all_units_by_kind(UKRegistry.File(), fetch_backend=True)
         await self.get_all_relations_by_kind(RKRegistry.Calls(), fetch_backend=True)
-        await self.get_all_relations_by_kind(
-            RKRegistry.AnnotatedBy(), fetch_backend=True
-        )
 
-        for unit in self.get_all_units():
-            await self.load_unit_facts_from_backend(unit)
-        await self.load_relation_facts_from_backend()
+        await self.load_facts()
 
-    async def load_unit_facts_from_backend(self, unit: CodeUnit) -> None:
+    async def _load_unit_facts_from_backend(self, unit: CodeUnit) -> None:
         """Load unit facts for a CodeUnit from the backend.
 
         This queries the backend for tags and deserializes them into UnitFact objects.
@@ -711,7 +713,7 @@ class IRView:
         for fact in facts:
             await self.add_unit_fact(unit, fact)
 
-    async def load_relation_facts_from_backend(self) -> None:
+    async def _load_relation_facts_from_backend(self) -> None:
         """Load all relation facts from the backend.
 
         This queries the backend for global tags and deserializes them into RelationFact objects.
@@ -727,12 +729,12 @@ class IRView:
         # Sync unit facts
         for node_id in self._graph.nodes:
             unit = self._graph.nodes[node_id]["unit"]
-            await self.store_unit_facts_to_backend(unit)
+            await self._store_unit_facts_to_backend(unit)
 
         # Sync relation facts
-        await self.store_relation_facts_to_backend()
+        await self._store_relation_facts_to_backend()
 
-    async def store_unit_facts_to_backend(self, unit: CodeUnit) -> None:
+    async def _store_unit_facts_to_backend(self, unit: CodeUnit) -> None:
         """Sync all unit facts for a CodeUnit to the CPG backend for persistence.
 
         Unit facts are stored as per-node tags in the backend.
@@ -745,7 +747,7 @@ class IRView:
             # Serialize fact and store as backend tag
             await self.backend.set_unit_tag(unit, fact)
 
-    async def store_relation_facts_to_backend(self) -> None:
+    async def _store_relation_facts_to_backend(self) -> None:
         """Sync all relation facts to the CPG backend for persistence.
 
         Relation facts are stored as global tags (on a special "_global" node)

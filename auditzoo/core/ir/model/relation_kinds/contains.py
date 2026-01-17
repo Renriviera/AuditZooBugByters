@@ -7,7 +7,7 @@ from auditzoo.core.ir.model.base import (
     RelationDirection,
     RelationKind,
 )
-from auditzoo.core.ir.model.errors import IRUnimplementedError, IRUnsupportedError
+from auditzoo.core.ir.model.errors import IRUnsupportedError
 from auditzoo.core.ir.model.unit_kinds.file import File
 from auditzoo.core.ir.model.unit_kinds.function import Function
 
@@ -54,9 +54,7 @@ class ContainedIn(RelationKind):
             else:
                 return [(node, CodeUnitRelation(kind=self))]
 
-        raise IRUnimplementedError(
-            f"ContainedInRelationKind.to_query() with level '{self.level}' not implemented for backend '{backend.backend_type}'"
-        )
+        return []
 
 
 @dataclass(frozen=True)
@@ -111,6 +109,4 @@ class Contains(RelationKind):
             units = await Function().parse(raw_data=response, backend=backend)
             return [(unit, CodeUnitRelation(kind=self)) for unit in units]
 
-        raise IRUnimplementedError(
-            f"ContainsRelationKind.to_query() with level '{self.level}' not implemented for backend '{backend.backend_type}'"
-        )
+        return []

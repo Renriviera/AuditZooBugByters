@@ -64,6 +64,7 @@ Philosophy:
 from __future__ import annotations
 
 import inspect
+import json
 from abc import ABC, abstractmethod
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -309,6 +310,10 @@ class CodeUnitRelation:
         kind = RelationKind.from_dict(data["kind"])
         metadata = data.get("metadata", {})
         return cls(kind=kind, **metadata)
+
+    def __hash__(self) -> int:
+        """Hash based on kind and metadata."""
+        return hash((self.kind, json.dumps(self.metadata, sort_keys=True)))
 
 
 @dataclass(frozen=True)

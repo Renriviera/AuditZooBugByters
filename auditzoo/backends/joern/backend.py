@@ -3,6 +3,7 @@
 This module implements the IRBackend interface using Joern CPG queries.
 """
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +15,7 @@ from auditzoo.core.ir.backend_api import (
     BackendUnimplementedError,
     CPGBackend,
 )
-from auditzoo.core.ir.facts.base import RelationFact, UnitFact
+from auditzoo.core.ir.facts.base import RelationFact, UnitFact, deserialize_fact
 from auditzoo.core.ir.model import CodeUnit, CodeUnitKind, CodeUnitRelation
 from auditzoo.core.ir.model.base import CodeLocation, RelationDirection, RelationKind
 
@@ -88,6 +89,8 @@ class JoernBackend(CPGBackend):
             raise BackendResponseError("Cannot reload CPG: not connected to Joern.")
 
         current_project = await self.query("project.name", "str")
+        await self.query_raw("run.commit")
+        await self.query_raw("save")
         await self.query_raw(f'close("{current_project}")')
 
         await self.client.load_project(
@@ -165,7 +168,14 @@ class JoernBackend(CPGBackend):
         Returns:
             List of RelationFact objects
         """
-        raise NotImplementedError()
+        query = 'cpg.tag.filter(_.name.startsWith("relationfact:")).toJson'
+        response = await self.query(query)
+
+        return [
+            deserialize_fact(json.loads(response["fact"]))  # type: ignore
+            for response in response
+            if "fact" in response
+        ]
 
     async def get_unit_tags(self, unit: CodeUnit) -> list[UnitFact]:
         """Get tags attached to a code unit.
@@ -176,7 +186,19 @@ class JoernBackend(CPGBackend):
         Returns:
             List of UnitFact objects
         """
-        raise NotImplementedError()
+        if unit.is_synthetic:
+            query = 'cpg.tag.filter(_.name.startsWith("unitfact:")).toJson'
+        else:
+            query = (
+                f'cpg.tag.id({unit.id}L).filter(_.name.startsWith("unitfact:")).toJson'
+            )
+        response = await self.query(query)
+
+        return [
+            deserialize_fact(json.loads(response["fact"]))  # type: ignore
+            for response in response
+            if "fact" in response and response["unit_id"] == unit.id
+        ]
 
     async def set_unit_tag(self, unit: CodeUnit, fact: UnitFact) -> None:
         """Add a tag to a code unit.
@@ -185,7 +207,16 @@ class JoernBackend(CPGBackend):
             unit: CodeUnit to add tag to
             fact: UnitFact object representing the tag
         """
-        raise NotImplementedError()
+        tag = {
+            "unit_id": unit.id,
+            "fact": fact.to_dict(),
+        }
+        value = json.dumps(json.dumps(tag))  # Double JSON encode to escape quotes
+        key = fact.id()
+
+        query = f'cpg.metaData.newTagNodePair({key}, "{value}").store()'
+        await self.query_raw(query)
+        await self.query_raw("run.commit")
 
     async def set_relation_tag(self, fact: RelationFact) -> None:
         """Add a tag to a relation.
@@ -193,7 +224,15 @@ class JoernBackend(CPGBackend):
         Args:
             fact: RelationFact object representing the tag
         """
-        raise NotImplementedError()
+        tag = {
+            "fact": fact.to_dict(),
+        }
+        value = json.dumps(json.dumps(tag))  # Double JSON encode to escape quotes
+        key = fact.id()
+
+        query = f'cpg.metaData.newTagNodePair({key}, "{value}").store()'
+        await self.query_raw(query)
+        await self.query_raw("run.commit")
 
     # ===== Code Unit and Relation Management =====
 
