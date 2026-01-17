@@ -46,7 +46,7 @@ class Calls(RelationKind):
             for call_info in response:
                 callees = call_info["callees"]
                 for callee in callees:
-                    if callee["isExternal"]:
+                    if callee.get("isExternal", False):
                         continue
 
                     callee_unit = (await Function().parse([callee], backend=backend))[0]
@@ -71,7 +71,7 @@ class Calls(RelationKind):
                 caller = call_info["caller"]
                 callsite = call_info["callsite"]
 
-                if caller["isExternal"]:
+                if caller.get("isExternal", False):
                     continue
 
                 caller_unit = (await Function().parse([caller], backend=backend))[0]
