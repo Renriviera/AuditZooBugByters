@@ -1,202 +1,156 @@
 # AuditZoo
 
-**CPG-centered, agent-based program analysis framework built on Joern and AutoGen-Core**
+AuditZoo is a CPG-centered, agent-based program analysis framework built on Joern and AutoGen-Core. It provides a unified infrastructure for building and composing program analyses using lightweight agents that communicate through a flexible protocol.
 
-AuditZoo is a unified infrastructure for building and composing program analyses. It uses Joern's Code Property Graph (CPG) as the foundation and represents programs as a graph of `CodeUnit` objects with analysis results attached as `Facts`.
+## Installation
 
-## Key Features
+### Prerequisites
+- Python 3.10+
+- Conda (Miniconda or Anaconda)
 
-- **CPG-Centered**: Built on Joern's Code Property Graph
-- **Graph-Based IR**: NetworkX graph of CodeUnits for flexible queries
-- **Fact System**: Unit facts (per-node) and Relation facts (graph-level) for analysis results
-- **Direct Query Access**: Write CPG queries directly for maximum flexibility
-- **Analysis Agents**: Composable analyses using AutoGen-Core
-- **Multi-Language**: Supports all Joern languages (C/C++, Java, JavaScript/TypeScript, Python, Go, Kotlin)
-
-## Architecture
-
-AuditZoo has two phases:
-
-1. **Preprocessing**: Generate CPG from source code using Joern
-2. **Analysis**: Run analysis agents that query CPG via IRView (NetworkX graph of CodeUnits)
-
-**Design Philosophy**: The CPG is the source of truth for program structure. Analysis results are stored as Facts (both in-memory on CodeUnits and persisted to CPG tags).
-
-See [docs/auditzoo_spec.md](docs/auditzoo_spec.md) for detailed architecture.
-
-## Quick Start
-
-### Installation
+### Quick Install
 
 ```bash
 # Clone the repository
-git clone https://github.com/BiScope-AI/auditzoo
+git clone https://github.com/Biscope-AI/auditzoo.git
 cd auditzoo
 
-# Run automated installation
-./install.sh
+# Run the installation script (installs AuditZoo + Joern in a conda environment)
+bash install.sh
 
-# Activate environment
+# Activate the environment
 conda activate auditzoo
 ```
 
-**📋 Full installation guide**: [INSTALL.md](INSTALL.md)
+The installation script will:
+- Create a conda environment with Python 3.10 and Java 17
+- Install AuditZoo and its dependencies
+- Download and install Joern
+- Configure environment variables
 
-### Basic Usage
+## Usage
+
+### Basic Example
 
 ```python
 import asyncio
-from auditzoo.backends.base import JoernConfig
-from auditzoo.backends.joern.backend import JoernBackend
-from auditzoo.core.ir.view import IRView
-from auditzoo.core.ir.facts import SummaryFact, CallFact
+from auditzoo import AnalysisRuntime, UKRegistry, auto_detect_backend, Request
 
 async def main():
-    # Configure Joern backend
-    config = JoernConfig(
-        language="c",
-        source_path="./my_project",
-        analysis_path="./analysis",
-        joern_path="/opt/joern"
-    )
+    # Auto-detect backend configuration
+    config = auto_detect_backend("./my_project")
 
-    # Create backend and connect
-    async with JoernBackend(config) as backend:
-        # Create IR view (graph of CodeUnits)
-        view = IRView(backend)
+    # Initialize runtime (connects to backend, loads IR)
+    async with AnalysisRuntime(config) as runtime:
+        # Send IR queries
+        response = await runtime.send_message(
+            Request(type="ir.get_all_units_by_kind", payload={"kind": UKRegistry.Function()}),
+            runtime.ir_agent_id
+        )
 
-        # Load functions into graph
-        functions = await view.get_all_functions()
-        print(f"Loaded {len(functions)} functions")
-
-        # Load call graph
-        await view.load_call_graph()
-
-        # Query the graph
-        foo = view.get_function_by_signature("foo()")
-        if foo:
-            callers = view.get_callers(foo)
-            callees = view.get_callees(foo)
-            print(f"foo() has {len(callers)} callers and {len(callees)} callees")
-
-        # Add analysis results as facts
-        view.add_unit_fact(foo, SummaryFact(
-            name="vulnerability",
-            summary="Buffer overflow detected",
-            details={"severity": "high", "cwe": "CWE-120"}
-        ))
-
-        # Add additional call edges
-        view.add_relation_fact(CallFact(
-            source_node_id="caller_id",
-            target_node_id="callee_id",
-            call_context="dynamic dispatch",
-            confidence=0.8
-        ))
-
-        # Find all vulnerable units
-        vulnerable = view.find_units_with_unit_fact("vulnerability")
-        print(f"Found {len(vulnerable)} vulnerable functions")
+        functions = response.unwrap()["units"]
+        print(f"Found {len(functions)} functions")
 
 asyncio.run(main())
 ```
 
-## Core Concepts
+### Creating Custom Analysis Agents
 
-### CodeUnit
-A flexible unit of code at any granularity (file, class, function, statement). Each has:
-- `id`: Unique identifier
-- `unit_type`: Kind (FUNCTION, CLASS, FILE, etc.)
-- `code`: Source code text
-- `signature`: Human-readable name
-- `location`: Source file and line numbers
-- `cpg_node_id`: Link to CPG node (optional)
+AuditZoo allows you to create custom analysis agents that can query the IR and perform complex analyses:
 
-### IRView
-NetworkX graph of CodeUnits with:
-- **Nodes**: CodeUnits
-- **Edges**: Relations (calls, data flow, inheritance)
-- **Unit Facts**: Attached to individual nodes
-- **Relation Facts**: Stored globally, connect two nodes
+```python
+from autogen_core import MessageContext, AgentId
+from auditzoo import BaseAnalysisAgent, Request, Response
 
-### Facts
-Two types of facts for analysis results:
+class MyAnalysisAgent(BaseAnalysisAgent):
+    def __init__(self):
+        super().__init__("My custom analysis agent")
 
-**Unit Facts** (attached to single CodeUnit):
-- `SummaryFact`: General analysis results
-- `CustomUnitFact`: Domain-specific annotations
+    async def _handle_request(self, message: Request, ctx: MessageContext) -> Response:
+        if message.type != "task.my_analysis":
+            return Response.fail("Unknown task type")
 
-**Relation Facts** (connect two CodeUnits):
-- `CallFact`: Function call relationships
-- `CustomRelationFact`: Custom relationships (dataflow, inheritance)
+        # Use sugar methods to access IR
+        functions = await self.get_functions(ctx)
 
-## Language Support
+        # Perform analysis...
+        results = []
+        for func in functions:
+            callers = await self.get_callers(func.id, ctx)
+            # ... analyze ...
 
-| Language | Backend | Features |
-|----------|---------|----------|
-| C/C++ | Joern | ✅ Full (CFG, dataflow, taint, call graph) |
-| Java | Joern | ✅ Full |
-| JavaScript/TypeScript | Joern | ✅ Full |
-| Python | Joern | ✅ Full |
-| Go | Joern | ✅ Full |
-| Kotlin | Joern | ✅ Full |
+        return Response.ok(data={"results": results})
 
-## Project Structure
+# Register and use the agent
+async with AnalysisRuntime(config) as runtime:
+    await runtime.register_agent(
+        agent_type=MyAnalysisAgent,
+        agent_name="my_analyzer",
+        agent_factory=lambda: MyAnalysisAgent()
+    )
+    runtime.start()
 
-```
-auditzoo/
-├── core/
-│   ├── ir/              # IR model, view, backend API, facts
-│   ├── agents/          # Core infrastructure agents
-│   ├── protocol/        # Message types and envelopes
-│   └── runtime/         # AutoGen-Core runtime integration
-├── backends/
-│   ├── joern/           # Joern CPG backend
-│   └── ingestion.py     # Backend setup
-├── sdk/
-│   ├── base_agent.py    # Base class for analysis agents
-│   ├── context.py       # Analysis context helper
-│   └── registry.py      # Agent registration
-└── analyses/
-    ├── primitives/      # Primitive analyses (slicing, taint, etc.)
-    └── detectors/       # High-level detectors (buffer overflow, etc.)
+    # Send task to your agent
+    response = await runtime.send_message(
+        Request(type="task.my_analysis", payload={}),
+        AgentId("my_analyzer", "default")
+    )
 ```
 
-## Documentation
+See [examples/find_callers.py](examples/find_callers.py) for a complete working example.
 
-- **[INSTALL.md](INSTALL.md)** - Installation guide
-- **[DEVELOP.md](DEVELOP.md)** - Development setup
-- **[docs/auditzoo_spec.md](docs/auditzoo_spec.md)** - Architecture specification
+## Key Concepts
 
-## Development Status
+- **Runtime**: Manages backend connections, IR storage, and agent lifecycle
+- **Agents**: Lightweight workers that handle specific analysis tasks
+  - `IRStorageAgent`: Manages the IR graph (CRUD operations)
+  - `BaseAnalysisAgent`: Base class for custom analysis agents
+- **Protocol**: Request/Response messaging for agent communication
+  - `Request`: Universal message class for all agent communication
+    - IR operations: type="ir.*" (get units, relations, facts)
+    - Analysis tasks: type="task.*" (performed by custom agents)
+    - Queries: type="query.*" (quick searches and lookups)
+  - Payload: Flexible dict for custom data structures
+  - Optional response_schema for runtime validation
+- **IR Model**: Code representation built on Code Property Graphs
+  - `CodeUnit`: Represents code at any granularity (file, function, statement, etc.)
+  - `CodeUnitRelation`: Relationships between units (calls, contains, etc.)
+  - `Facts`: Analysis results attached to units or relations
 
-**Current Status:**
-- ✅ CodeUnit model with mandatory IDs
-- ✅ IRView with NetworkX graph
-- ✅ Unit facts and Relation facts system
-- ✅ Serializable graph updaters
-- ✅ AutoGen-Core integration
-- ⚠️ Joern backend (partial implementation)
-- ⚠️ Analysis agents (under development)
+## Development
 
-## Contributing
+> **Note**: If you want to contribute to or extend AuditZoo, please refer to [DEVELOPMENT.md](DEVELOPMENT.md) for detailed architecture documentation and development guidelines.
 
-We welcome contributions! See [DEVELOP.md](DEVELOP.md) for development setup.
+## Project Status
 
-Quick development setup:
-```bash
-git clone https://github.com/BiScope-AI/auditzoo
-cd auditzoo
-./install-dev.sh
-conda activate auditzoo-dev
-```
+AuditZoo is at a very early stage of development. We welcome contributions and feedback!
+
+Feel free to open pull requests, but please note:
+- **IMPORTANT**: Any PR should NOT mix changes in `core/` and changes in other places. Keep core infrastructure changes separate from analysis implementations.
 
 ## License
 
-[To be determined]
+AuditZoo is licensed under the [GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later)](LICENSE).
 
-## Acknowledgments
+Copyright (C) 2025 Zhuo Zhang
 
-- **Joern**: https://joern.io - Code Property Graph framework
-- **AutoGen-Core**: https://github.com/microsoft/autogen - Multi-agent framework
-- **NetworkX**: https://networkx.org - Graph library
+This means:
+- ✅ You can freely use, modify, and distribute this software
+- ✅ Perfect for academic research and open-source projects
+- ⚠️ If you run a modified version as a network service (e.g., SaaS, web application), you **must** make your source code available to users
+- ⚠️ Any modifications or derivative works must also be licensed under AGPL-3.0
+
+For commercial licensing options or if AGPL doesn't fit your use case, please contact the author.
+
+## Citation
+
+If you use AuditZoo in your research, please cite:
+
+```bibtex
+@software{auditzoo,
+  author = {Zhang, Zhuo},
+  title = {AuditZoo: CPG-centered Agent-based Program Analysis Framework},
+  year = {2025},
+  url = {https://github.com/Biscope-AI/auditzoo}
+}
+```

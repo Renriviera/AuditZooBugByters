@@ -1,50 +1,115 @@
 """Base Analysis Agent - Foundation for all analysis agents.
 
 This is the base class for all analysis agents in the system. It provides syntactic
-sugar methods for common IR operations by sending IRRequest messages to the
-IRStorageAgent.
+sugar methods for common IR operations by sending Request messages to the IRStorageAgent.
 
 Subclasses should:
 1. Inherit from BaseAnalysisAgent
-2. Implement message handlers for their specific TaskRequest types
+2. Implement _handle_request for their specific task types
 3. Use the provided sugar methods (get_functions, get_callers, etc.) to access IR data
-4. Optionally integrate LLM for complex analysis tasks
+4. Define custom data structures in payload (dataclasses, TypedDicts, plain dicts)
+5. Optionally define response schemas for type awareness on caller side
+6. Optionally integrate LLM for complex analysis tasks
+
+Important Notes:
+- BaseAnalysisAgent does NOT implement _handle_request - this is left abstract
+  for subclasses to implement. Each analysis agent defines its own task handling.
+- Do NOT use @message_handler on _handle_request in subclasses (handled by BaseAgent)
+- Do NOT inherit from Request to create custom request types (AutoGen doesn't support it)
+- Instead, put your custom data structures in the payload dict
+
+Response Schema Best Practice:
+- Define response schemas as module-level constants in your agent file
+- Callers import these schemas to understand expected response structure
+- Schemas provide runtime validation and documentation
+- Only define schemas when no circular import would occur
+
+Example:
+    # In your agent file
+    from dataclasses import dataclass, asdict
+
+    # Define custom payload structure
+    @dataclass
+    class TaintParams:
+        source: str
+        sink: str
+        max_depth: int = 10
+
+    # Define response schema (optional but recommended)
+    TAINT_RESPONSE_SCHEMA = {
+        "type": "object",
+        "properties": {
+            "paths": {"type": "array"},
+            "vulnerable": {"type": "boolean"}
+        },
+        "required": ["paths", "vulnerable"]
+    }
+
+    class TaintAnalyzer(BaseAnalysisAgent):
+        async def _handle_request(self, message: Request, ctx: MessageContext):
+            if message.type != "task.taint_analysis":
+                return Response.fail("Unknown task")
+
+            # Extract structured data from payload
+            params = TaintParams(**message.payload)
+
+            # Use sugar methods
+            functions = await self.get_functions(ctx)
+            # ... analysis logic ...
+
+            return Response.ok(data={"paths": [...], "vulnerable": True})
+
+    # Caller code
+    from my_agent import TAINT_RESPONSE_SCHEMA
+
+    request = Request(
+        type="task.taint_analysis",
+        payload=asdict(TaintParams(source="user_input", sink="sql_query")),
+        response_schema=TAINT_RESPONSE_SCHEMA  # Optional validation
+    )
 """
 
 from typing import Any
 
-from autogen_core import AgentId, MessageContext, RoutedAgent
+from autogen_core import AgentId, MessageContext
+from pydantic import TypeAdapter
 
+from auditzoo.core.agents.base import BaseAgent
 from auditzoo.core.ir.model import RKRegistry, UKRegistry
 from auditzoo.core.ir.model.base import CodeUnit, CodeUnitRelation
-from auditzoo.core.protocol.requests import IRRequest
+from auditzoo.core.protocol.requests import Request
 from auditzoo.core.protocol.responses import Response
 
 
-class BaseAnalysisAgent(RoutedAgent):
+class BaseAnalysisAgent(BaseAgent):
     """Base class for all analysis agents.
 
     Provides syntactic sugar methods for common IR operations. Analysis agents
-    send IRRequest messages to the IRStorageAgent and receive responses.
+    send Request messages to the IRStorageAgent and receive responses.
 
-    Subclasses implement their own TaskRequest handlers for specific analyses
+    Subclasses must implement _handle_request for their specific analyses
     (e.g., taint analysis, vulnerability scanning).
+
+    Note:
+        This class does NOT implement _handle_request - it remains abstract.
+        Each analysis agent subclass must provide its own implementation.
 
     Example:
         class TaintAnalysisAgent(BaseAnalysisAgent):
-            @message_handler
-            async def handle_task(self, message: TaskRequest, ctx: MessageContext):
+            async def _handle_request(
+                self, message: Request, ctx: MessageContext
+            ) -> Response:
                 if message.type != "task.taint_analysis":
-                    return Response(success=False, error="Unknown task type")
+                    return Response.fail("Unknown task type")
 
                 # Use sugar methods to access IR
                 functions = await self.get_functions(ctx)
 
                 for func in functions:
-                    callers = await self.get_callers(ctx, func["id"])
+                    callers = await self.get_callers(func.id, ctx)
                     # ... perform taint analysis ...
 
-                return Response(success=True, data={"vulnerabilities": [...]})
+                return Response.ok(data={"vulnerabilities": [...]})
     """
 
     def __init__(
@@ -87,9 +152,14 @@ class BaseAnalysisAgent(RoutedAgent):
         if self._ir_agent_id is None:
             raise RuntimeError("IRStorageAgent ID not registered")
 
-        request = IRRequest(
-            type="get_all_units_by_kind",
+        request = Request(
+            type="ir.get_all_units_by_kind",
             payload={"kind": UKRegistry.Function()},
+            response_schema={
+                "type": "object",
+                "properties": {"units": TypeAdapter(list[CodeUnit]).json_schema()},
+                "required": ["units"],
+            },
         )
         response = await self.send_message(request, self._ir_agent_id)
 
@@ -115,9 +185,14 @@ class BaseAnalysisAgent(RoutedAgent):
         if self._ir_agent_id is None:
             raise RuntimeError("IRStorageAgent ID not registered")
 
-        request = IRRequest(
-            type="get_all_units_by_kind",
+        request = Request(
+            type="ir.get_all_units_by_kind",
             payload={"kind": UKRegistry.File()},
+            response_schema={
+                "type": "object",
+                "properties": {"units": TypeAdapter(list[CodeUnit]).json_schema()},
+                "required": ["units"],
+            },
         )
         response = await self.send_message(request, self._ir_agent_id)
 
@@ -144,9 +219,14 @@ class BaseAnalysisAgent(RoutedAgent):
             raise RuntimeError("IRStorageAgent ID not registered")
 
         # Get all Repository units (should be just one)
-        request = IRRequest(
-            type="get_all_units_by_kind",
+        request = Request(
+            type="ir.get_all_units_by_kind",
             payload={"kind": UKRegistry.Repository()},
+            response_schema={
+                "type": "object",
+                "properties": {"units": TypeAdapter(list[CodeUnit]).json_schema()},
+                "required": ["units"],
+            },
         )
         response = await self.send_message(request, self._ir_agent_id)
 
@@ -176,12 +256,29 @@ class BaseAnalysisAgent(RoutedAgent):
         if self._ir_agent_id is None:
             raise RuntimeError("IRStorageAgent ID not registered")
 
-        request = IRRequest(
-            type="get_related_units",
+        request = Request(
+            type="ir.get_related_units",
             payload={
                 "unit_id": function_id,
                 "kind": RKRegistry.Calls(),
                 "direction": "in",  # Incoming calls = callers
+            },
+            response_schema={
+                "type": "object",
+                "properties": {
+                    "neighbors": {
+                        "type": "array",
+                        "items": {
+                            "type": "array",
+                            "items": [
+                                TypeAdapter(CodeUnit).json_schema(),
+                                "string",
+                                TypeAdapter(CodeUnitRelation).json_schema(),
+                            ],
+                        },
+                    }
+                },
+                "required": ["neighbors"],
             },
         )
         response = await self.send_message(request, self._ir_agent_id)
@@ -212,12 +309,29 @@ class BaseAnalysisAgent(RoutedAgent):
         if self._ir_agent_id is None:
             raise RuntimeError("IRStorageAgent ID not registered")
 
-        request = IRRequest(
-            type="get_related_units",
+        request = Request(
+            type="ir.get_related_units",
             payload={
                 "unit_id": function_id,
                 "kind": RKRegistry.Calls(),
                 "direction": "out",  # Outgoing calls = callees
+            },
+            response_schema={
+                "type": "object",
+                "properties": {
+                    "neighbors": {
+                        "type": "array",
+                        "items": {
+                            "type": "array",
+                            "items": [
+                                TypeAdapter(CodeUnit).json_schema(),
+                                "string",
+                                TypeAdapter(CodeUnitRelation).json_schema(),
+                            ],
+                        },
+                    }
+                },
+                "required": ["neighbors"],
             },
         )
         response = await self.send_message(request, self._ir_agent_id)
@@ -248,7 +362,15 @@ class BaseAnalysisAgent(RoutedAgent):
         if self._ir_agent_id is None:
             raise RuntimeError("IRStorageAgent ID not registered")
 
-        request = IRRequest(type="get_unit", payload={"unit_id": unit_id})
+        request = Request(
+            type="ir.get_unit",
+            payload={"unit_id": unit_id},
+            response_schema={
+                "type": "object",
+                "properties": {"unit": TypeAdapter(CodeUnit).json_schema()},
+                "required": ["unit"],
+            },
+        )
         response = await self.send_message(request, self._ir_agent_id)
 
         if not isinstance(response, Response):
@@ -277,8 +399,8 @@ class BaseAnalysisAgent(RoutedAgent):
         Raises:
             RuntimeError: If query fails
         """
-        request = IRRequest(
-            type="query", payload={"query": query, "response_ty": response_ty}
+        request = Request(
+            type="ir.query", payload={"query": query, "response_ty": response_ty}
         )
         response = await self.send_message(request, self._ir_agent_id)
 

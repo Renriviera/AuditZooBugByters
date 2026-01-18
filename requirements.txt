@@ -19,3 +19,4 @@ dataclasses-json>=0.6.0  # JSON serialization of dataclasses
 aiofiles>=23.0.0  # Async file I/O
 rich>=14.2.0  # ANSI parsing
 jsonschema>=4.25.0  # JSON schema validation
+pydantic>=2.12.0 # Data validation and settings management

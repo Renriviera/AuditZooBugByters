@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "CPG-centered, agent-based program analysis framework built on Joern and AutoGen-Core"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "TBD"}
+license = {text = "AGPL-3.0-or-later"}
 authors = [
     {name = "Zhuo Zhang", email = "zz3474@columbia.edu"}
 ]
@@ -17,6 +17,7 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
     "Topic :: Software Development :: Quality Assurance",
     "Topic :: Security",
     "Topic :: Software Development :: Code Generators",
@@ -37,6 +38,7 @@ dependencies = [
     "aiofiles>=23.0.0",
     "rich>=14.2.0",
     "jsonschema>=4.25.0",
+    "pydantic>=2.12.0",
 ]
 
 [project.optional-dependencies]

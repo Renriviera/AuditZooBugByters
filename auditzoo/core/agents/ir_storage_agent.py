@@ -9,15 +9,17 @@ CRUD operations on the code property graph stored in IRView.
 
 from typing import Any
 
-from autogen_core import MessageContext, RoutedAgent, message_handler
+from autogen_core import MessageContext
+from pydantic import TypeAdapter
 
+from auditzoo.core.agents.base import BaseAgent
 from auditzoo.core.ir.model import (
     CodeLocation,
     CodeUnitKind,
     RelationKind,
 )
 from auditzoo.core.ir.view import IRView
-from auditzoo.core.protocol.requests import IRRequest
+from auditzoo.core.protocol.requests import Request
 from auditzoo.core.protocol.responses import Response
 
 # JSON schemas for request validation
@@ -59,8 +61,7 @@ REQUEST_SCHEMAS = {
     "get_all_units_by_kind": {
         "type": "object",
         "properties": {
-            # Note: kind is a CodeUnitKind instance (Python object), not validated by JSON schema
-            "kind": {},  # accept anything; presence enforced via "required"
+            "kind": TypeAdapter(CodeUnitKind).json_schema(),
             "fetch_backend": {"type": "boolean"},
         },
         "required": ["kind"],
@@ -68,8 +69,7 @@ REQUEST_SCHEMAS = {
     "get_all_relations_by_kind": {
         "type": "object",
         "properties": {
-            # Note: kind is a RelationKind instance (Python object), not validated by JSON schema
-            "kind": {},  # accept anything; presence enforced via "required"
+            "kind": TypeAdapter(RelationKind).json_schema(),
             "fetch_backend": {"type": "boolean"},
         },
         "required": ["kind"],
@@ -78,8 +78,7 @@ REQUEST_SCHEMAS = {
         "type": "object",
         "properties": {
             "unit_id": {"type": "string"},
-            # Note: kind is a RelationKind instance (Python object), not validated by JSON schema
-            "kind": {},  # accept anything; presence enforced via "required"
+            "kind": TypeAdapter(RelationKind).json_schema(),
             "direction": {"type": "string", "enum": ["in", "out", "both"]},
             "fetch_backend": {"type": "boolean"},
         },
@@ -128,7 +127,7 @@ REQUEST_SCHEMAS = {
 }
 
 
-class IRStorageAgent(RoutedAgent):
+class IRStorageAgent(BaseAgent):
     """Agent providing complete access to all IRView operations.
 
     Handles all IRRequest messages (ir.*) and provides full CRUD operations on the
@@ -209,18 +208,15 @@ class IRStorageAgent(RoutedAgent):
         super().__init__(description="IR Storage Agent - Complete IRView API access")
         self._ir_view = ir_view
 
-    @message_handler
-    async def handle_ir_request(
-        self, message: IRRequest, ctx: MessageContext
-    ) -> Response:
-        """Handle IR request messages with validation.
+    async def _handle_request(self, message: Request, ctx: MessageContext) -> Response:
+        """Implement abstract method - delegates to handle_ir_request.
 
         Args:
-            message: IRRequest with type and payload
+            message: Request message (should be IRRequest)
             ctx: Message context from autogen
 
         Returns:
-            Response with success/data or error
+            Response from IR handling logic
         """
         try:
             # Validate request payload if schema exists

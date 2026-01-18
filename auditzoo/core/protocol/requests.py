@@ -1,64 +1,89 @@
 """Request messages for agent communication.
 
-This module defines the Request class and its specialized subclasses used by all
-agents to send requests.
+This module defines the Request class used by all agents to send requests.
 
-Usage Note
-==========
+Request Design Philosophy
+=========================
 
-While the specialized request classes (IRRequest, TaskRequest, QueryRequest) provide
-automatic prefix handling for convenience, you are also welcome to use the base
-`Request` class directly with the full type string (e.g., "ir.get_unit",
-"task.taint_analysis", "query.search"). Both approaches are fully supported and
-functionally equivalent.
+AuditZoo uses a single, flexible Request class rather than specialized subclasses.
+This design choice is intentional:
 
-Request Type Definitions
+1. **AutoGen Compatibility**: AutoGen's message routing doesn't handle inheritance
+   for @message_handler decorated methods. Using a single Request class ensures
+   all messages are properly routed.
+
+2. **Payload Flexibility**: Request payloads are untyped dicts (dict[str, Any]),
+   allowing developers to define their own data structures without modifying the
+   core protocol. Simply put your dataclasses, TypedDicts, or plain dicts in the
+   payload field.
+
+3. **Optional Type Checking**: The response_schema field enables runtime validation
+   to help caller-side code understand what response data to expect, without
+   requiring static types.
+
+Request Type Conventions
 ========================
 
-The system supports three categories of requests, each with a specific purpose:
+The system uses dot notation for request types to organize requests by category:
 
-1. **IRRequest** (prefix: "ir.")
+1. **IR Operations** (prefix: "ir.")
    - **Purpose**: Direct operations on the Intermediate Representation (IR) storage
-   - **Use cases**: CRUD operations on code units and relations in the code property graph
    - **Handler**: IRStorageAgent
-   - **Examples**:
-     - `ir.get_unit`: Retrieve a code unit by ID
-     - `ir.get_neighbors`: Get related units (callers/callees, contains, etc.)
-     - `ir.add_unit`: Add a new code unit to the IR
-     - `ir.add_relation`: Create a relationship between code units
-     - `ir.query`: Execute a graph query on the IR
-   - **Characteristics**: Fast, direct database-like operations
+   - **Examples**: "ir.get_unit", "ir.get_neighbors", "ir.add_fact"
+   - **Characteristics**: Fast, direct CRUD operations on the code property graph
 
-2. **TaskRequest** (prefix: "task.")
-   - **Purpose**: Long-running analysis tasks that perform computation or processing
-   - **Use cases**: Complex analyses that require multiple steps, computation, or AI reasoning
-   - **Handler**: Analysis agents (subclasses of BaseAnalysisAgent)
-   - **Examples**:
-     - `task.taint_analysis`: Track data flow from sources to sinks
-     - `task.vulnerability_scan`: Detect security vulnerabilities in code
-     - `task.code_review`: Perform automated code review
-     - `task.impact_analysis`: Analyze the impact of code changes
-   - **Characteristics**: Compute-intensive, may involve LLM calls, returns analysis results
+2. **Analysis Tasks** (prefix: "task.")
+   - **Purpose**: Long-running analysis tasks with computation or processing
+   - **Handler**: Custom analysis agents (subclasses of BaseAnalysisAgent)
+   - **Examples**: "task.taint_analysis", "task.vulnerability_scan"
+   - **Characteristics**: Compute-intensive, may involve LLM calls
 
-3. **QueryRequest** (prefix: "query.")
+3. **Queries** (prefix: "query.")
    - **Purpose**: Quick searches and lookups in the IR or codebase
-   - **Use cases**: Finding code patterns, filtering units, searching by criteria
-   - **Handler**: IRStorageAgent or lightweight query processors
-   - **Examples**:
-     - `query.search`: Search for code matching a pattern or regex
-     - `query.pattern_match`: Find code units matching specific structural patterns
-     - `query.filter_by_type`: Get all units of a specific kind (functions, classes, etc.)
-     - `query.find_by_name`: Locate code units by name or signature
-   - **Characteristics**: Fast lookups, no heavy computation, retrieval-focused
+   - **Handler**: IRStorageAgent or query processors
+   - **Examples**: "query.search", "query.pattern_match"
+   - **Characteristics**: Fast lookups, no heavy computation
 
-Key Differences
-===============
+Note: These are conventions, not enforced rules. You can define your own
+      request type namespaces (e.g., "custom.my_operation").
 
-- **IR vs Query**: IR operations are about manipulating the graph structure (CRUD),
-  while queries are about searching/filtering existing data
-- **Task vs Query**: Tasks involve analysis and computation, while queries are simple lookups
-- **Task vs IR**: Tasks perform high-level analysis using IR data, while IR operations
-  directly read/write the underlying storage
+Response Schema Pattern
+=======================
+
+The optional response_schema field serves a specific purpose:
+
+**Why use response_schema?**
+- Helps caller agents understand what data structure to expect in the response
+- Enables runtime validation to catch mismatches early
+- Acts as documentation for the response format
+
+**Best Practice**: Define response schemas in the CALLEE agent file (the agent
+that handles the request), not the caller. This way:
+1. Schema lives with the implementation
+2. Callers import the schema to validate responses
+3. No circular dependencies (as long as agents don't call each other circularly)
+
+**Example**:
+```python
+# In my_analysis_agent.py (callee)
+MY_TASK_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "results": {"type": "array"},
+        "confidence": {"type": "number"}
+    },
+    "required": ["results"]
+}
+
+# In caller code
+from my_analysis_agent import MY_TASK_RESPONSE_SCHEMA
+
+request = Request(
+    type="task.my_analysis",
+    payload={"param": "value"},
+    response_schema=MY_TASK_RESPONSE_SCHEMA  # Optional validation
+)
+```
 """
 
 from dataclasses import asdict, dataclass, field
@@ -73,55 +98,71 @@ class Request:
     """Universal request message for agent communication.
 
     All agents use this class to send requests. The request type uses dot notation
-    for namespacing (e.g., "ir.get_unit", "task.analysis").
+    for namespacing (e.g., "ir.get_unit", "task.my_analysis").
 
     Attributes:
-        type: Request type using dot notation
-            - IR operations: "ir.get_unit", "ir.get_neighbors", "ir.add_fact"
-            - Tasks: "task.taint_analysis", "task.vulnerability_scan"
-            - Queries: "query.search", "query.pattern_match"
-        payload: Request data (JSON-serializable dict)
+        type: Request type using dot notation (e.g., "ir.get_unit", "task.analyze")
+        payload: Request data as a dict. You can put any JSON-serializable structure here:
+            - Plain dicts: {"param": "value"}
+            - Dataclass instances: asdict(my_dataclass)
+            - TypedDicts, Pydantic models, etc.
         request_id: Unique identifier (auto-generated via uuid4)
         metadata: Optional metadata (e.g., timestamps, priority, correlation_id)
+        response_schema: Optional JSON schema to validate response.data against.
+            - Purpose: Helps caller-side code understand expected response structure
+            - When to use: Improves type awareness and catches mismatches early
+            - Best practice: Define schemas in the callee agent file, import in callers
+            - Validation: Only runs if schema provided AND response.success is True
 
     Examples:
-        # IR request - get a code unit
+        # Basic IR request with plain dict payload
         Request(
             type="ir.get_unit",
             payload={"unit_id": "func_123"}
         )
 
-        # IR request - get neighbors (callers/callees)
-        Request(
-            type="ir.get_neighbors",
-            payload={
-                "unit_id": "func_123",
-                "direction": "in",
-                "relation_kind": "calls"
-            }
-        )
+        # Task request with custom data structure
+        @dataclass
+        class TaintAnalysisParams:
+            source: str
+            sink: str
+            max_depth: int = 10
 
-        # Task request
+        params = TaintAnalysisParams(source="user_input", sink="sql_query")
         Request(
             type="task.taint_analysis",
-            payload={"source": "user_input", "sink": "sql_query"}
+            payload=asdict(params)  # Convert dataclass to dict
         )
 
-        # Query request
+        # Request with response validation
+        CALLERS_SCHEMA = {
+            "type": "object",
+            "properties": {
+                "callers": {"type": "array"},
+                "count": {"type": "integer"}
+            },
+            "required": ["callers"]
+        }
+
         Request(
-            type="query.search",
-            payload={"pattern": "malloc.*free", "language": "c"}
+            type="task.find_callers",
+            payload={"function_name": "malloc"},
+            response_schema=CALLERS_SCHEMA  # Optional: validates response
         )
 
     Note:
-        The request_id is automatically generated and should not be manually set.
-        Responses will reference this request_id in their metadata.
+        - request_id is auto-generated; don't set it manually
+        - Responses reference this request_id in their metadata
+        - Payload flexibility is intentional; define your own structures
+        - AutoGen doesn't support inheritance in @message_handler, so we use
+          a single Request class rather than IRRequest/TaskRequest subclasses
     """
 
     type: str
     payload: dict[str, Any]
     request_id: str = field(default_factory=lambda: str(uuid4()))
     metadata: dict[str, Any] = field(default_factory=dict)
+    response_schema: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert request to dictionary for serialization.
@@ -172,78 +213,3 @@ class Request:
             return True
         except jsonschema.ValidationError as e:
             raise ValueError(f"JSON Schema validation failed: {e}") from e
-
-
-@dataclass
-class IRRequest(Request):
-    """IR operation request with automatic 'ir.' prefix.
-
-    Automatically adds 'ir.' prefix to the request type if not already present.
-
-    Examples:
-        # Type gets auto-prefixed
-        IRRequest(
-            type="get_unit",
-            payload={"unit_id": "func_123"}
-        )  # type becomes "ir.get_unit"
-
-        # Full type also works (won't double-prefix)
-        IRRequest(
-            type="ir.get_neighbors",
-            payload={"unit_id": "func_123", "direction": "in"}
-        )  # type stays "ir.get_neighbors"
-    """
-
-    def __post_init__(self):
-        if not self.type.startswith("ir."):
-            self.type = f"ir.{self.type}"
-
-
-@dataclass
-class TaskRequest(Request):
-    """Task request with automatic 'task.' prefix.
-
-    Automatically adds 'task.' prefix to the request type if not already present.
-
-    Examples:
-        # Type gets auto-prefixed
-        TaskRequest(
-            type="taint_analysis",
-            payload={"source": "user_input", "sink": "sql_query"}
-        )  # type becomes "task.taint_analysis"
-
-        # Full type also works
-        TaskRequest(
-            type="task.vulnerability_scan",
-            payload={"target": "auth_module"}
-        )  # type stays "task.vulnerability_scan"
-    """
-
-    def __post_init__(self):
-        if not self.type.startswith("task."):
-            self.type = f"task.{self.type}"
-
-
-@dataclass
-class QueryRequest(Request):
-    """Query request with automatic 'query.' prefix.
-
-    Automatically adds 'query.' prefix to the request type if not already present.
-
-    Examples:
-        # Type gets auto-prefixed
-        QueryRequest(
-            type="search",
-            payload={"pattern": "malloc.*free", "language": "c"}
-        )  # type becomes "query.search"
-
-        # Full type also works
-        QueryRequest(
-            type="query.pattern_match",
-            payload={"pattern": ".*"}
-        )  # type stays "query.pattern_match"
-    """
-
-    def __post_init__(self):
-        if not self.type.startswith("query."):
-            self.type = f"query.{self.type}"

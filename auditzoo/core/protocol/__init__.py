@@ -1,6 +1,6 @@
 """Protocol definitions for agent communication."""
 
-from .requests import IRRequest, QueryRequest, Request, TaskRequest
+from .requests import Request
 from .responses import Response
 
-__all__ = ["Request", "IRRequest", "TaskRequest", "QueryRequest", "Response"]
+__all__ = ["Request", "Response"]

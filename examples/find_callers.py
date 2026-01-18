@@ -19,12 +19,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from autogen_core import AgentId, MessageContext, message_handler
+from autogen_core import AgentId, MessageContext
 
 from auditzoo.backends.base import JoernConfig
 from auditzoo.backends.ingestion import auto_detect_backend
 from auditzoo.core.agents import BaseAnalysisAgent
-from auditzoo.core.protocol.requests import TaskRequest
+from auditzoo.core.protocol.requests import Request
 from auditzoo.core.protocol.responses import Response
 from auditzoo.core.runtime import AnalysisRuntime
 
@@ -43,18 +43,14 @@ class CallerFinderAgent(BaseAnalysisAgent):
         """Initialize CallerFinderAgent.
 
         Note: ir_storage_agent_id is injected by runtime during registration.
-
-        Args:
-            description: Agent description
         """
         super().__init__("Finds all callers of a given function")
 
-    @message_handler
-    async def handle_task(self, message: TaskRequest, ctx: MessageContext) -> Response:
+    async def _handle_request(self, message: Request, ctx: MessageContext) -> Response:
         """Handle find_callers task requests.
 
         Args:
-            message: TaskRequest with type="find_callers" and payload containing:
+            message: Request with type="find_callers" and payload containing:
                 - function_name: str - Name of function to find callers for
             ctx: Message context from AutoGen
 
@@ -63,12 +59,12 @@ class CallerFinderAgent(BaseAnalysisAgent):
         """
         # Only handle find_callers tasks
         if message.type != "task.find_callers":
-            return Response(success=False, error=f"Unknown task type: {message.type}")
+            return Response.fail(f"Unknown task type: {message.type}")
 
         # Extract function name from request
         function_name = message.payload.get("function_name")
         if not function_name:
-            return Response(success=False, error="Missing 'function_name' in payload")
+            return Response.fail("Missing 'function_name' in payload")
 
         try:
             # Step 1: Get all functions from IR
@@ -80,13 +76,12 @@ class CallerFinderAgent(BaseAnalysisAgent):
             ]
 
             if not matching_functions:
-                return Response(
-                    success=True,
+                return Response.ok(
                     data={
                         "function_name": function_name,
                         "matches": [],
                         "message": f"No functions found matching '{function_name}'",
-                    },
+                    }
                 )
 
             # Step 3: For each matching function, find its callers
@@ -113,10 +108,10 @@ class CallerFinderAgent(BaseAnalysisAgent):
                     }
                 )
 
-            return Response(success=True, data={"results": results})
+            return Response.ok(data={"results": results})
 
         except Exception as e:
-            return Response(success=False, error=f"Analysis failed: {e}")
+            return Response.fail(f"Analysis failed: {e}")
 
 
 def format_results(response_data: dict[str, Any] | None) -> None:
@@ -223,7 +218,7 @@ async def main(project_path: str, function_name: str) -> None:
         print("Error: This example currently only supports Joern backend.")
         sys.exit(1)
 
-    config.port = 9000  # Use default Joern port
+    config.port = 12345  # Example: customize Joern port if needed
 
     # Use AnalysisRuntime with async context manager
     async with AnalysisRuntime(config) as runtime:
@@ -245,8 +240,37 @@ async def main(project_path: str, function_name: str) -> None:
         print(f"\nSearching for function '{function_name}' and its callers...")
 
         response = await runtime.send_message(
-            request=TaskRequest(
-                type="find_callers", payload={"function_name": function_name}
+            request=Request(
+                type="task.find_callers",
+                payload={"function_name": function_name},
+                # Schema is optional but helps understand expected format
+                response_schema={
+                    "type": "object",
+                    "properties": {
+                        "results": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "function_name": {"type": "string"},
+                                    "callers": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "caller_name": {"type": "string"},
+                                                "callsite": {"type": "string"},
+                                            },
+                                            "required": ["caller_name"],
+                                        },
+                                    },
+                                },
+                                "required": ["function_name", "callers"],
+                            },
+                        }
+                    },
+                    "required": ["results"],
+                },
             ),
             target=AgentId("caller_finder", "default"),
         )

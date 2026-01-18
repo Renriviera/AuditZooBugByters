@@ -31,7 +31,7 @@ __version__ = "0.1.0"
 from auditzoo.backends.ingestion import auto_detect_backend, create_backend
 
 # Agents
-from auditzoo.core.agents import BaseAnalysisAgent, IRStorageAgent
+from auditzoo.core.agents import BaseAgent, BaseAnalysisAgent, IRStorageAgent
 
 # Backend
 from auditzoo.core.ir.backend_api import BackendConfig, CPGBackend
@@ -49,12 +49,7 @@ from auditzoo.core.ir.model import (
 )
 
 # Protocol
-from auditzoo.core.protocol.requests import (
-    IRRequest,
-    QueryRequest,
-    Request,
-    TaskRequest,
-)
+from auditzoo.core.protocol.requests import Request
 from auditzoo.core.protocol.responses import Response
 
 # Runtime
@@ -66,13 +61,11 @@ __all__ = [
     # Runtime
     "AnalysisRuntime",
     # Agents
+    "BaseAgent",
     "BaseAnalysisAgent",
     "IRStorageAgent",
     # Protocol
     "Request",
-    "IRRequest",
-    "TaskRequest",
-    "QueryRequest",
     "Response",
     # IR Model
     "CodeUnit",

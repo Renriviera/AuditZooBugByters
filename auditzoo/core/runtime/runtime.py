@@ -4,6 +4,8 @@ This module provides the AnalysisRuntime class that wraps AutoGen Core runtime
 and manages the full lifecycle of backend connections, IRView, and agents.
 """
 
+import asyncio
+import atexit
 from collections.abc import Callable
 
 from autogen_core import AgentId, AgentRuntime, SingleThreadedAgentRuntime
@@ -14,6 +16,25 @@ from auditzoo.core.ir.backend_api import BackendConfig, CPGBackend
 from auditzoo.core.ir.view import IRView
 from auditzoo.core.protocol.requests import Request
 from auditzoo.core.protocol.responses import Response
+
+_connected_backends: set[CPGBackend] = set()
+
+
+def _cleanup_backends() -> None:
+    """Cleanup function to disconnect all connected backends at exit."""
+
+    async def disconnect_all() -> None:
+        for backend in list(_connected_backends):
+            try:
+                if backend.is_connected():
+                    await backend.disconnect()
+            except Exception:
+                pass  # Ignore errors during cleanup
+
+    asyncio.run(disconnect_all())
+
+
+atexit.register(_cleanup_backends)
 
 
 class AnalysisRuntime:
@@ -105,6 +126,7 @@ class AnalysisRuntime:
 
         # 1. Backend setup: create_backend connects and returns ready backend
         self._backend = await create_backend(self._backend_config)
+        _connected_backends.add(self._backend)
 
         # 2. IRView setup: IRView.create connects backend and preloads data
         self._ir_view = await IRView.create(self._backend)
