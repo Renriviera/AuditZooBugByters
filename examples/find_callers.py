@@ -17,15 +17,61 @@ Example:
 import asyncio
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from autogen_core import AgentId, MessageContext
+from autogen_core.models import ChatCompletionClient, UserMessage
+from autogen_ext.models.openai import OpenAIChatCompletionClient
+from pydantic import TypeAdapter
+from typing_extensions import NotRequired, TypedDict
 
 from auditzoo.backends.ingestion import auto_detect_backend
 from auditzoo.core.agents import BaseAnalysisAgent
+from auditzoo.core.ir.model.base import CodeUnit
 from auditzoo.core.protocol.requests import Request
 from auditzoo.core.protocol.responses import Response
 from auditzoo.core.runtime import AnalysisRuntime
+
+
+class CallerInfo(TypedDict):
+    caller_name: str
+    callsite: NotRequired[str]
+
+
+class FunctionCallersResult(TypedDict):
+    function_name: str
+    summary: str
+    callers: list[CallerInfo]
+
+
+class FindCallersResponse(TypedDict):
+    results: list[FunctionCallersResult]
+    message: NotRequired[str]
+
+
+class FunctionSummaryAgent(BaseAnalysisAgent):
+    """Summarizes function code using OpenAI LLM."""
+
+    def __init__(self, model_client: ChatCompletionClient) -> None:
+        super().__init__("Summarizes function code using OpenAI")
+        # Initialize OpenAI client (requires OPENAI_API_KEY env var)
+        self._model_client = model_client
+
+    async def _handle_request(self, message: Request, ctx: MessageContext) -> Response:
+        if message.type != "task.summarize_function":
+            return Response.fail(f"Unknown task type: {message.type}")
+
+        unit = cast(CodeUnit, message.payload.get("unit"))
+        if not unit:
+            return Response.fail("Missing 'unit' in payload")
+
+        # Call OpenAI
+        prompt = f"Summarize this function in 2-3 sentences:\n\n{unit.code}"
+        result = await self._model_client.create(
+            messages=[UserMessage(content=prompt, source="user")]
+        )
+
+        return Response.ok(result.content)
 
 
 class CallerFinderAgent(BaseAnalysisAgent):
@@ -65,72 +111,70 @@ class CallerFinderAgent(BaseAnalysisAgent):
         if not function_name:
             return Response.fail("Missing 'function_name' in payload")
 
-        try:
-            # Step 1: Get all functions from IR
-            all_functions = await self.get_functions(ctx)
+        # Step 1: Get all functions from IR
+        all_functions = await self.get_functions(ctx)
 
-            # Step 2: Find functions matching the name
-            matching_functions = [
-                func for func in all_functions if function_name in func.name
-            ]
+        # Step 2: Find functions matching the name
+        matching_functions = [
+            func for func in all_functions if function_name in func.name
+        ]
 
-            if not matching_functions:
-                return Response.ok(
-                    data={
-                        "function_name": function_name,
-                        "matches": [],
-                        "message": f"No functions found matching '{function_name}'",
-                    }
-                )
+        if not matching_functions:
+            return Response.ok(
+                data={
+                    "function_name": function_name,
+                    "matches": [],
+                    "message": f"No functions found matching '{function_name}'",
+                }
+            )
 
-            # Step 3: For each matching function, find its callers
-            results = []
-            for func in matching_functions:
-                func_id = func.id
+        # Step 3: For each matching function, find its callers
+        coros = [self._handle_function(func, ctx) for func in matching_functions]
+        results = await asyncio.gather(*coros)
+        return Response.ok(data={"results": results})
 
-                # Get callers using BaseAnalysisAgent sugar method
-                callers = await self.get_callers(func_id, ctx)
-                caller_infos = []
+    async def _handle_function(
+        self, function: CodeUnit, ctx: MessageContext
+    ) -> dict[str, Any]:
+        func_id = function.id
+        # Get callers using BaseAnalysisAgent sugar method
+        callers = await self.get_callers(func_id, ctx)
+        caller_infos = []
 
-                for caller, relation in callers:
-                    caller_infos.append(
-                        {
-                            "caller_name": caller.name,
-                            "callsite": relation.metadata.get("callsite_code"),
-                        }
-                    )
+        for caller, relation in callers:
+            caller_infos.append(
+                {
+                    "caller_name": caller.name,
+                    "callsite": relation.metadata.get("callsite_code"),
+                }
+            )
 
-                results.append(
-                    {
-                        "function_name": func.name,
-                        "callers": caller_infos,
-                    }
-                )
+        request = Request(
+            type="task.summarize_function",
+            payload={"unit": function},
+            response_schema=TypeAdapter(str).json_schema(),
+        )
+        summary_response = await self.send_message(
+            message=request,
+            recipient=AgentId("function_summarizer", function.id),
+        )
 
-            return Response.ok(data={"results": results})
-
-        except Exception as e:
-            return Response.fail(f"Analysis failed: {e}")
+        if summary_response.success:
+            return {
+                "function_name": function.name,
+                "callers": caller_infos,
+                "summary": summary_response.data,
+            }
+        else:
+            return {
+                "function_name": function.name,
+                "callers": caller_infos,
+                "summary": "Summary generation failed.",
+            }
 
 
 def format_results(response_data: dict[str, Any] | None) -> None:
-    """Format and print analysis results in a readable way.
-
-    Args:
-        response_data: Response data from CallerFinderAgent with format:
-            {
-                "results": [
-                    {
-                        "function_name": "malloc",
-                        "callers": [
-                            {"caller_name": "foo", "callsite": "ptr = malloc(10);"},
-                            ...
-                        ]
-                    },
-                    ...
-                ]
-            }
-    """
+    """Format and print analysis results in a readable way."""
     if not response_data:
         print("\nNo data returned from analysis.")
         return
@@ -164,6 +208,7 @@ def format_results(response_data: dict[str, Any] | None) -> None:
 
         # Function header
         print(f"\n[{idx}] Function: {function_name}")
+        print(f"    Summary: {result['summary']}")
         print(f"    Callers: {len(callers)}")
 
         if callers:
@@ -217,12 +262,22 @@ async def main(project_path: str, function_name: str) -> None:
     async with AnalysisRuntime(config) as runtime:
         print("Runtime initialized successfully!")
 
-        # Register our custom CallerFinderAgent
+        # Register our custom agents
         print("Registering CallerFinderAgent...")
         await runtime.register_agent(
             agent_type=CallerFinderAgent,
             agent_name="caller_finder",
             agent_factory=lambda: CallerFinderAgent(),
+        )
+
+        print("Registering FunctionSummaryAgent...")
+        model_client = OpenAIChatCompletionClient(
+            model="gpt-4o-mini",
+        )
+        await runtime.register_agent(
+            agent_type=FunctionSummaryAgent,
+            agent_name="function_summarizer",
+            agent_factory=lambda: FunctionSummaryAgent(model_client),
         )
 
         # start the runtime
@@ -236,34 +291,7 @@ async def main(project_path: str, function_name: str) -> None:
             request=Request(
                 type="task.find_callers",
                 payload={"function_name": function_name},
-                # Schema is optional but helps understand expected format
-                response_schema={
-                    "type": "object",
-                    "properties": {
-                        "results": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "function_name": {"type": "string"},
-                                    "callers": {
-                                        "type": "array",
-                                        "items": {
-                                            "type": "object",
-                                            "properties": {
-                                                "caller_name": {"type": "string"},
-                                                "callsite": {"type": "string"},
-                                            },
-                                            "required": ["caller_name"],
-                                        },
-                                    },
-                                },
-                                "required": ["function_name", "callers"],
-                            },
-                        }
-                    },
-                    "required": ["results"],
-                },
+                response_schema=TypeAdapter(FindCallersResponse).json_schema(),
             ),
             target=AgentId("caller_finder", "default"),
         )
