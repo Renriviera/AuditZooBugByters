@@ -122,6 +122,15 @@ def parse_joern_response(raw: str, response_ty: str = "json", **kwargs) -> Any:
                 raise BackendResponseError(
                     f"Failed to parse Joern float response: {raw}"
                 ) from e
+        case "bool":
+            try:
+                if s.lower() in ("true", "false"):
+                    return s.lower() == "true"
+                raise ValueError("Not a boolean string")
+            except ValueError as e:
+                raise BackendResponseError(
+                    f"Failed to parse Joern bool response: {raw}"
+                ) from e
         case _:
             raise BackendResponseError(
                 f"Unsupported response type '{response_ty}' for Joern parsing."

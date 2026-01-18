@@ -13,6 +13,7 @@ import psutil
 from cpgqls_client import CPGQLSClient
 from rich.text import Text
 
+from auditzoo.backends.joern.utils import parse_joern_response
 from auditzoo.core.ir.backend_api import BackendConnectionError, BackendQueryError
 
 
@@ -151,6 +152,7 @@ class JoernClient:
         source_path: str,
         analysis_path: str,
         project_name: str,
+        force_create_cpg: bool = False,
     ) -> None:
         """Connect to Joern and create/load CPG.
 
@@ -171,6 +173,7 @@ class JoernClient:
             source_path: Path to source code directory
             analysis_path: Path to store analysis artifacts
             project_name: Name of the project
+            force_create_cpg: Whether to force create a new CPG even if one exists
 
         Raises:
             BackendConnectionError: If connection fails
@@ -213,8 +216,14 @@ class JoernClient:
         # Note that this also flushes buffer from initial connection
         await self.query(f'switchWorkspace("{self._workspace_dir}")')
 
-        _project_path = self._workspace_dir / project_name
-        if not _project_path.exists():
+        # Check whether project already exists
+        exists: bool = parse_joern_response(
+            await self.query(f'workspace.projects.exists(_.name == "{project_name}")'),
+            "bool",
+        )
+
+        if not exists or force_create_cpg:
+            # Create new project
             if language == "auto":
                 await self.query(
                     f'importCode(inputPath="{source_path}", projectName="{project_name}")'
@@ -223,12 +232,12 @@ class JoernClient:
                 await self.query(
                     f'importCode(inputPath="{source_path}", projectName="{project_name}", language="{language}")'
                 )
+            await self.query("run.controlflow")
+            await self.query("run.callgraph")
         else:
             # Load existing project
             await self.query(f'open("{project_name}")')
             await self.query(f'workspace.setActiveProject("{project_name}")')
-            await self.query("run.controlflow")
-            await self.query("run.callgraph")
 
     def _start_joern_server(self) -> None:
         """Start Joern server process."""
@@ -295,7 +304,11 @@ class JoernClient:
         )
 
     async def load_project(
-        self, source_path: str, project_name: str, language: str = "auto"
+        self,
+        source_path: str,
+        project_name: str,
+        language: str = "auto",
+        force_create_cpg: bool = False,
     ) -> None:
         """Load a project into Joern.
 
@@ -306,6 +319,7 @@ class JoernClient:
             source_path: Path to source code (directory or file)
             project_name: Name of the project
             language: Programming language (default "auto")
+            force_create_cpg: Whether to force create a new CPG even if one exists
 
         Raises:
             BackendConnectionError: If CPG loading fails
@@ -313,14 +327,18 @@ class JoernClient:
         if not self._connected_core or not self._workspace_dir:
             raise BackendConnectionError("Cannot reload CPG: not connected to Joern.")
 
-        if language == "auto":
-            await self.query(
-                f'importCode(inputPath="{source_path}", projectName="{project_name}")'
-            )
+        if force_create_cpg:
+            if language == "auto":
+                await self.query(
+                    f'importCode(inputPath="{source_path}", projectName="{project_name}")'
+                )
+            else:
+                await self.query(
+                    f'importCode(inputPath="{source_path}", projectName="{project_name}", language="{language}")'
+                )
         else:
-            await self.query(
-                f'importCode(inputPath="{source_path}", projectName="{project_name}", language="{language}")'
-            )
+            # Load existing project
+            await self.query(f'open("{project_name}")')
 
         await self.query(f'workspace.setActiveProject("{project_name}")')
 

@@ -62,6 +62,7 @@ class JoernBackend(CPGBackend):
             source_path=self.config.source_path,
             analysis_path=self.config.analysis_path,
             project_name=self.config.project_name,
+            force_create_cpg=self.config.force_create_cpg,
         )
         self._connected = True
 
@@ -72,9 +73,13 @@ class JoernBackend(CPGBackend):
         # Clean cache and close connection
         self._language = None
 
+        # Get current project name
+        current_project = await self.query("project.name", "str")
+
         # Commit any pending changes and save the CPG
         await self.query_raw("run.commit")
         await self.query_raw("save")
+        await self.query_raw(f'close("{current_project}")')
 
         await self.client.disconnect()
         self._connected = False
@@ -97,6 +102,7 @@ class JoernBackend(CPGBackend):
             source_path=self.config.source_path,
             project_name=self.config.project_name,
             language=self.config.language,
+            force_create_cpg=self.config.force_create_cpg,
         )
 
         # Reload pre-defined scripts after reloading CPG

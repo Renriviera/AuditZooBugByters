@@ -45,6 +45,7 @@ def auto_detect_backend(
     analysis_path: str | None = None,
     project_name: str | None = None,
     prefer: str | None = None,
+    **kwargs,
 ) -> BackendConfig:
     """Auto-detect the best backend for a project.
 
@@ -64,6 +65,7 @@ def auto_detect_backend(
             language=language,
             analysis_path=analysis_path,
             project_name=project_name,
+            **kwargs,
         )
     else:
         if language is None:
@@ -75,4 +77,5 @@ def auto_detect_backend(
             language=language,
             analysis_path=analysis_path,
             project_name=project_name,
+            **kwargs,
         )

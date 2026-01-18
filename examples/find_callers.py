@@ -21,7 +21,6 @@ from typing import Any
 
 from autogen_core import AgentId, MessageContext
 
-from auditzoo.backends.base import JoernConfig
 from auditzoo.backends.ingestion import auto_detect_backend
 from auditzoo.core.agents import BaseAnalysisAgent
 from auditzoo.core.protocol.requests import Request
@@ -213,14 +212,8 @@ async def main(project_path: str, function_name: str) -> None:
 
     # Create backend configuration
     # This uses Joern backend by default
-    config = auto_detect_backend(project_path)
-    if not isinstance(config, JoernConfig):
-        print("Error: This example currently only supports Joern backend.")
-        sys.exit(1)
+    config = auto_detect_backend(project_path, port=12345)
 
-    config.port = 12345  # Example: customize Joern port if needed
-
-    # Use AnalysisRuntime with async context manager
     async with AnalysisRuntime(config) as runtime:
         print("Runtime initialized successfully!")
 

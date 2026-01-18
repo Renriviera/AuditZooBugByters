@@ -14,6 +14,7 @@ class JoernConfig(BackendConfig):
     """Configuration for Joern backend."""
 
     joern_path: str  # Path to Joern installation
+    force_create_cpg: bool = False
     host: str = "localhost"
     port: int = 8080
 
@@ -45,6 +46,7 @@ class JoernConfig(BackendConfig):
 
         self.host = kwargs.get("host", "localhost")
         self.port = kwargs.get("port", 8080)
+        self.force_create_cpg = kwargs.get("force_create_cpg", False)
 
 
 @dataclass
