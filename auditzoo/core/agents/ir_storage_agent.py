@@ -11,6 +11,7 @@ from typing import Any
 
 from autogen_core import MessageContext
 from pydantic import TypeAdapter
+from typing_extensions import NotRequired, TypedDict
 
 from auditzoo.core.agents.base import BaseAgent
 from auditzoo.core.ir.model import (
@@ -24,106 +25,113 @@ from auditzoo.core.protocol.responses import Response
 
 # JSON schemas for request validation
 REQUEST_SCHEMAS = {
-    "query": {
-        "type": "object",
-        "properties": {
-            "query": {"type": "string"},
-            "response_ty": {"type": "string"},
-        },
-        "required": ["query"],
-    },
-    "fetch_unit": {
-        "type": "object",
-        "properties": {
-            "file_path": {"type": "string"},
-            "line_start": {"type": "integer"},
-            "line_end": {"type": "integer"},
-            "column_start": {"type": "integer"},
-        },
-        "required": ["file_path", "line_start", "line_end"],
-    },
-    "get_unit": {
-        "type": "object",
-        "properties": {
-            "unit_id": {"type": "string"},
-            "fetch_backend": {"type": "boolean"},
-        },
-        "required": ["unit_id"],
-    },
-    "has_unit": {
-        "type": "object",
-        "properties": {
-            "unit_id": {"type": "string"},
-            "fetch_backend": {"type": "boolean"},
-        },
-        "required": ["unit_id"],
-    },
-    "get_all_units_by_kind": {
-        "type": "object",
-        "properties": {
-            "kind": TypeAdapter(CodeUnitKind).json_schema(),
-            "fetch_backend": {"type": "boolean"},
-        },
-        "required": ["kind"],
-    },
-    "get_all_relations_by_kind": {
-        "type": "object",
-        "properties": {
-            "kind": TypeAdapter(RelationKind).json_schema(),
-            "fetch_backend": {"type": "boolean"},
-        },
-        "required": ["kind"],
-    },
-    "get_related_units": {
-        "type": "object",
-        "properties": {
-            "unit_id": {"type": "string"},
-            "kind": TypeAdapter(RelationKind).json_schema(),
-            "direction": {"type": "string", "enum": ["in", "out", "both"]},
-            "fetch_backend": {"type": "boolean"},
-        },
-        "required": ["unit_id", "kind", "direction"],
-    },
-    "get_unit_facts": {
-        "type": "object",
-        "properties": {
-            "unit_id": {"type": "string"},
-            "fact_cls": {"type": "string"},
-            "fetch_backend": {"type": "boolean"},
-        },
-        "required": ["unit_id"],
-    },
-    "get_relation_facts": {
-        "type": "object",
-        "properties": {
-            "fact_cls": {"type": "string"},
-        },
-    },
-    "filter_graph": {
-        "type": "object",
-        "properties": {
-            "filter_expr": {"type": "string"},
-        },
-        "required": ["filter_expr"],
-    },
-    "get_reachable_units": {
-        "type": "object",
-        "properties": {
-            "unit_id": {"type": "string"},
-            "filter_expr": {"type": "string"},
-            "max_depth": {"type": ["integer", "null"]},
-        },
-        "required": ["unit_id", "filter_expr"],
-    },
-    "find_shortest_path": {
-        "type": "object",
-        "properties": {
-            "from_unit_id": {"type": "string"},
-            "to_unit_id": {"type": "string"},
-            "filter_expr": {"type": "string"},
-        },
-        "required": ["from_unit_id", "to_unit_id", "filter_expr"],
-    },
+    "query": TypeAdapter(
+        TypedDict("QueryPayload", {"query": str, "response_ty": str})  # type: ignore
+    ).json_schema(),
+    "fetch_unit": TypeAdapter(
+        TypedDict(
+            "FetchUnitPayload",
+            {
+                "file_path": str,
+                "line_start": int,
+                "line_end": int,
+                "column_start": NotRequired[int],
+            },
+        )  # type: ignore
+    ).json_schema(),
+    "get_unit": TypeAdapter(
+        TypedDict(
+            "GetUnitPayload",
+            {
+                "unit_id": str,
+                "fetch_backend": NotRequired[bool],
+            },
+        )  # type: ignore
+    ).json_schema(),
+    "has_unit": TypeAdapter(
+        TypedDict(
+            "HasUnitPayload",
+            {
+                "unit_id": str,
+                "fetch_backend": NotRequired[bool],
+            },
+        )  # type: ignore
+    ).json_schema(),
+    "get_all_units_by_kind": TypeAdapter(
+        TypedDict(
+            "GetAllUnitsByKindPayload",
+            {
+                "kind": CodeUnitKind,
+                "fetch_backend": NotRequired[bool],
+            },
+        )  # type: ignore
+    ).json_schema(),
+    "get_all_relations_by_kind": TypeAdapter(
+        TypedDict(
+            "GetAllRelationsByKindPayload",
+            {
+                "kind": RelationKind,
+                "fetch_backend": NotRequired[bool],
+            },
+        )  # type: ignore
+    ).json_schema(),
+    "get_related_units": TypeAdapter(
+        TypedDict(
+            "GetRelatedUnitsPayload",
+            {
+                "unit_id": str,
+                "kind": RelationKind,
+                "direction": str,  # Literal["in", "out", "both"] if you want to be more specific
+                "fetch_backend": NotRequired[bool],
+            },
+        )  # type: ignore
+    ).json_schema(),
+    "get_unit_facts": TypeAdapter(
+        TypedDict(
+            "GetUnitFactsPayload",
+            {
+                "unit_id": str,
+                "fact_cls": NotRequired[str],
+                "fetch_backend": NotRequired[bool],
+            },
+        )  # type: ignore
+    ).json_schema(),
+    "get_relation_facts": TypeAdapter(
+        TypedDict(
+            "GetRelationFactsPayload",
+            {
+                "fact_cls": NotRequired[str],
+            },
+        )  # type: ignore
+    ).json_schema(),
+    "filter_graph": TypeAdapter(
+        TypedDict(
+            "FilterGraphPayload",
+            {
+                "filter_expr": str,
+            },
+        )  # type: ignore
+    ).json_schema(),
+    "get_reachable_units": TypeAdapter(
+        TypedDict(
+            "GetReachableUnitsPayload",
+            {
+                "unit_id": str,
+                "filter_expr": str,
+                "max_depth": NotRequired[int | None],
+            },
+        )  # type: ignore
+    ).json_schema(),
+    "find_shortest_path": TypeAdapter(
+        TypedDict(
+            "FindShortestPathPayload",
+            {
+                "from_unit_id": str,
+                "to_unit_id": str,
+                "filter_expr": str,
+            },
+        )  # type: ignore
+    ).json_schema(),
 }
 
 
@@ -175,12 +183,12 @@ class IRStorageAgent(BaseAgent):
         from auditzoo.core.ir.model import UKRegistry, RKRegistry
 
         # Get a code unit
-        request = IRRequest(type="get_unit", payload={"unit_id": "func_123"})
+        request = Request(type="ir.get_unit", payload={"unit_id": "func_123"})
         response = await runtime.send_message(request, IRStorageAgent)
 
         # Get all functions - pass CodeUnitKind instance directly
-        request = IRRequest(
-            type="get_all_units_by_kind",
+        request = Request(
+            type="ir.get_all_units_by_kind",
             payload={
                 "kind": UKRegistry.Function(),  # Direct Python object
                 "fetch_backend": True
@@ -188,8 +196,8 @@ class IRStorageAgent(BaseAgent):
         )
 
         # Get callers with full parameters - pass RelationKind instance directly
-        request = IRRequest(
-            type="get_related_units",
+        request = Request(
+            type="ir.get_related_units",
             payload={
                 "unit_id": "func_123",
                 "kind": RKRegistry.Calls(),  # Direct Python object
@@ -223,21 +231,19 @@ class IRStorageAgent(BaseAgent):
             request_type = message.type.removeprefix("ir.")
             if request_type in REQUEST_SCHEMAS:
                 if not message.validate(REQUEST_SCHEMAS[request_type]):
-                    return Response(success=False, error="Request validation failed")
+                    return Response.fail(error="Request validation failed")
 
             # Route to appropriate handler
             handler = getattr(self, f"_handle_{request_type}", None)
             if handler is None:
-                return Response(
-                    success=False,
+                return Response.fail(
                     error=f"Unknown IR request type: {message.type}",
                 )
 
             return await handler(message.payload)  # type: ignore
 
         except Exception as e:
-            return Response(
-                success=False,
+            return Response.fail(
                 error=f"IR operation failed: {type(e).__name__}: {e}",
             )
 
@@ -256,7 +262,7 @@ class IRStorageAgent(BaseAgent):
         response_ty = payload.get("response_ty", "json")
 
         result = await self._ir_view.query(query, response_ty=response_ty)
-        return Response(success=True, data={"result": result})
+        return Response.ok(result)
 
     # ============================================
     # Unit Management
@@ -280,9 +286,9 @@ class IRStorageAgent(BaseAgent):
 
         unit = await self._ir_view.fetch_unit(location)
         if not unit:
-            return Response(success=False, error="Unit not found at specified location")
+            return Response.fail("Unit not found at specified location")
 
-        return Response(success=True, data={"unit": unit})
+        return Response.ok(unit)
 
     async def _handle_get_unit(self, payload: dict[str, Any]) -> Response:
         """Handle ir.get_unit - get unit by ID.
@@ -296,9 +302,9 @@ class IRStorageAgent(BaseAgent):
 
         unit = await self._ir_view.get_unit(unit_id, fetch_backend=fetch_backend)
         if not unit:
-            return Response(success=False, error=f"Unit not found: {unit_id}")
+            return Response.fail(f"Unit not found: {unit_id}")
 
-        return Response(success=True, data={"unit": unit})
+        return Response.ok(unit)
 
     async def _handle_has_unit(self, payload: dict[str, Any]) -> Response:
         """Handle ir.has_unit - check if unit exists.
@@ -311,7 +317,7 @@ class IRStorageAgent(BaseAgent):
         fetch_backend = payload.get("fetch_backend", True)
 
         exists = await self._ir_view.has_unit(unit_id, fetch_backend=fetch_backend)
-        return Response(success=True, data={"exists": exists})
+        return Response.ok(exists)
 
     async def _handle_get_all_units_by_kind(self, payload: dict[str, Any]) -> Response:
         """Handle ir.get_all_units_by_kind - get all units of specific kind.
@@ -324,27 +330,20 @@ class IRStorageAgent(BaseAgent):
         fetch_backend = payload.get("fetch_backend", True)
 
         if not isinstance(kind, CodeUnitKind):
-            return Response(
-                success=False,
-                error=f"kind must be a CodeUnitKind instance, got {type(kind).__name__}",
+            return Response.fail(
+                f"kind must be a CodeUnitKind instance, got {type(kind).__name__}",
             )
 
         units = await self._ir_view.get_all_units_by_kind(
             kind, fetch_backend=fetch_backend
         )
 
-        return Response(
-            success=True,
-            data={"units": units},
-        )
+        return Response.ok(units)
 
     async def _handle_get_all_units(self, payload: dict[str, Any]) -> Response:
         """Handle ir.get_all_units - get all units (no backend fetch)."""
         units = self._ir_view.get_all_units()
-        return Response(
-            success=True,
-            data={"units": units},
-        )
+        return Response.ok(units)
 
     # ============================================
     # Relation Management
@@ -363,19 +362,15 @@ class IRStorageAgent(BaseAgent):
         fetch_backend = payload.get("fetch_backend", True)
 
         if not isinstance(kind, RelationKind):
-            return Response(
-                success=False,
-                error=f"kind must be a RelationKind instance, got {type(kind).__name__}",
+            return Response.fail(
+                f"kind must be a RelationKind instance, got {type(kind).__name__}"
             )
 
         relations = await self._ir_view.get_all_relations_by_kind(
             kind, fetch_backend=fetch_backend
         )
 
-        return Response(
-            success=True,
-            data={"relations": relations},
-        )
+        return Response.ok(relations)
 
     async def _handle_get_related_units(self, payload: dict[str, Any]) -> Response:
         """Handle ir.get_related_units - get related units.
@@ -393,30 +388,23 @@ class IRStorageAgent(BaseAgent):
 
         unit = await self._ir_view.get_unit(unit_id, fetch_backend=fetch_backend)
         if not unit:
-            return Response(success=False, error=f"Unit not found: {unit_id}")
+            return Response.fail(f"Unit not found: {unit_id}")
 
         if not isinstance(kind, RelationKind):
-            return Response(
-                success=False,
-                error=f"kind must be a RelationKind instance, got {type(kind).__name__}",
+            return Response.fail(
+                f"kind must be a RelationKind instance, got {type(kind).__name__}"
             )
 
         related = await self._ir_view.get_related_units(
             unit, kind, direction, fetch_backend=fetch_backend
         )
 
-        return Response(
-            success=True,
-            data={"neighbors": related},
-        )
+        return Response.ok(related)
 
     async def _handle_get_all_relations(self, payload: dict[str, Any]) -> Response:
         """Handle ir.get_all_relations - get all relations (no backend fetch)."""
         relations = self._ir_view.get_all_relations()
-        return Response(
-            success=True,
-            data={"relations": relations},
-        )
+        return Response.ok(relations)
 
     # ======================================================
     # Graph Queries (No Backend Fetch): Not Yet Implemented
@@ -428,9 +416,8 @@ class IRStorageAgent(BaseAgent):
         Note: This requires a filter expression that will be evaluated.
         For now, returns error as we need to define filter expression syntax.
         """
-        return Response(
-            success=False,
-            error="filter_graph not yet implemented - needs filter expression syntax definition",
+        return Response.fail(
+            "filter_graph not yet implemented - needs filter expression syntax definition",
         )
 
     async def _handle_get_reachable_units(self, payload: dict[str, Any]) -> Response:
@@ -438,9 +425,8 @@ class IRStorageAgent(BaseAgent):
 
         Note: This requires a filter expression. Not yet implemented.
         """
-        return Response(
-            success=False,
-            error="get_reachable_units not yet implemented - needs filter expression syntax",
+        return Response.fail(
+            "get_reachable_units not yet implemented - needs filter expression syntax",
         )
 
     async def _handle_find_shortest_path(self, payload: dict[str, Any]) -> Response:
@@ -448,9 +434,8 @@ class IRStorageAgent(BaseAgent):
 
         Note: This requires a filter expression. Not yet implemented.
         """
-        return Response(
-            success=False,
-            error="find_shortest_path not yet implemented - needs filter expression syntax",
+        return Response.fail(
+            "find_shortest_path not yet implemented - needs filter expression syntax",
         )
 
     # ============================================
@@ -462,9 +447,8 @@ class IRStorageAgent(BaseAgent):
 
         TODO: Implement fact deserialization.
         """
-        return Response(
-            success=False,
-            error="add_unit_fact not yet implemented - needs fact deserialization",
+        return Response.fail(
+            "add_unit_fact not yet implemented - needs fact deserialization",
         )
 
     async def _handle_add_relation_fact(self, payload: dict[str, Any]) -> Response:
@@ -472,9 +456,8 @@ class IRStorageAgent(BaseAgent):
 
         TODO: Implement fact deserialization.
         """
-        return Response(
-            success=False,
-            error="add_relation_fact not yet implemented - needs fact deserialization",
+        return Response.fail(
+            "add_relation_fact not yet implemented - needs fact deserialization",
         )
 
     async def _handle_get_unit_facts(self, payload: dict[str, Any]) -> Response:
@@ -482,9 +465,8 @@ class IRStorageAgent(BaseAgent):
 
         TODO: Implement fact serialization and filtering.
         """
-        return Response(
-            success=False,
-            error="get_unit_facts not yet implemented - needs fact serialization",
+        return Response.fail(
+            "get_unit_facts not yet implemented - needs fact serialization",
         )
 
     async def _handle_get_relation_facts(self, payload: dict[str, Any]) -> Response:
@@ -492,15 +474,14 @@ class IRStorageAgent(BaseAgent):
 
         TODO: Implement fact serialization and filtering.
         """
-        return Response(
-            success=False,
-            error="get_relation_facts not yet implemented - needs fact serialization",
+        return Response.fail(
+            "get_relation_facts not yet implemented - needs fact serialization",
         )
 
     async def _handle_load_facts(self, payload: dict[str, Any]) -> Response:
         """Handle ir.load_facts - load all facts from backend."""
         await self._ir_view.load_facts()
-        return Response(success=True, data={"message": "Facts loaded from backend"})
+        return Response.ok(None)
 
     # ============================================
     # Sync & Cache Management
@@ -509,22 +490,22 @@ class IRStorageAgent(BaseAgent):
     async def _handle_preload_from_backend(self, payload: dict[str, Any]) -> Response:
         """Handle ir.preload_from_backend - preload common data."""
         await self._ir_view.preload_from_backend()
-        return Response(success=True, data={"message": "Data preloaded from backend"})
+        return Response.ok(None)
 
     async def _handle_sync_backend(self, payload: dict[str, Any]) -> Response:
         """Handle ir.sync_backend - sync all facts to backend."""
         await self._ir_view.sync_backend()
-        return Response(success=True, data={"message": "Facts synced to backend"})
+        return Response.ok(None)
 
     async def _handle_get_graph_stats(self, payload: dict[str, Any]) -> Response:
         """Handle ir.get_graph_stats - get graph statistics."""
         stats = self._ir_view.get_graph_stats()
-        return Response(success=True, data=stats)
+        return Response.ok(data=stats)
 
     async def _handle_reload(self, payload: dict[str, Any]) -> Response:
         """Handle ir.reload - reload from backend."""
         await self._ir_view.reload()
-        return Response(success=True, data={"message": "IRView reloaded from backend"})
+        return Response.ok(None)
 
     async def _handle_cleanup(self, payload: dict[str, Any]) -> Response:
         """Handle ir.cleanup - cleanup graph.
@@ -534,4 +515,4 @@ class IRStorageAgent(BaseAgent):
         """
         sync_to_backend = payload.get("sync_to_backend", False)
         await self._ir_view.cleanup(sync_to_backend=sync_to_backend)
-        return Response(success=True, data={"message": "IRView cleaned up"})
+        return Response.ok(None)

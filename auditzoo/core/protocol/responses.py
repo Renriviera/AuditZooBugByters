@@ -8,6 +8,9 @@ from typing import Any
 
 import jsonschema
 
+from auditzoo.core.protocol.errors import ProtocolRuntimeError, ProtocolValidationError
+from auditzoo.core.protocol.utils import to_dict_for_validation
+
 
 @dataclass
 class Response:
@@ -50,14 +53,12 @@ class Response:
     """
 
     success: bool
-    data: dict[str, Any] | None = None
+    data: Any = None
     error: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def ok(
-        cls, data: dict[str, Any], metadata: dict[str, Any] | None = None
-    ) -> "Response":
+    def ok(cls, data: Any, metadata: dict[str, Any] | None = None) -> "Response":
         """Create a successful response.
 
         Args:
@@ -94,28 +95,27 @@ class Response:
         """
         return cls(success=False, error=error, metadata=metadata or {})
 
-    def unwrap(self) -> dict[str, Any]:
+    def unwrap(self) -> Any:
         """Get the data, raising an exception if the response is a failure.
 
         Returns:
             The response data
 
         Raises:
-            RuntimeError: If the response represents a failure
+            ProtocolError: If the response represents a failure
 
         Example:
             try:
                 data = response.unwrap()
                 print(data["unit"])
-            except RuntimeError as e:
+            except ProtocolError as e:
                 print(f"Request failed: {e}")
         """
         if not self.success:
-            raise RuntimeError(f"Response failed: {self.error}")
-        assert self.data is not None
+            raise ProtocolRuntimeError(f"Response failed: {self.error}")
         return self.data
 
-    def unwrap_or(self, default: dict[str, Any]) -> dict[str, Any]:
+    def unwrap_or(self, default: Any) -> Any:
         """Get the data, or a default value if the response is a failure.
 
         Args:
@@ -127,7 +127,7 @@ class Response:
         Example:
             data = response.unwrap_or(default={})
         """
-        return self.data if self.success and self.data is not None else default
+        return self.data if self.success else default
 
     def to_dict(self) -> dict[str, Any]:
         """Convert response to dictionary for serialization.
@@ -181,7 +181,11 @@ class Response:
 
         # Validate with JSON Schema
         try:
-            jsonschema.validate(instance=self.data, schema=schema)
+            jsonschema.validate(
+                instance=to_dict_for_validation(self.data), schema=schema
+            )
             return True
-        except jsonschema.ValidationError as e:
-            raise ValueError(f"JSON Schema validation failed: {e}") from e
+        except Exception as e:  # MDZZ
+            raise ProtocolValidationError(
+                f"JSON Schema validation failed: {e}MDZZ 1 {self}"
+            ) from e

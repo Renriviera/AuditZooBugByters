@@ -92,6 +92,9 @@ from uuid import uuid4
 
 import jsonschema
 
+from auditzoo.core.protocol.errors import ProtocolValidationError
+from auditzoo.core.protocol.utils import to_dict_for_validation
+
 
 @dataclass
 class Request:
@@ -209,7 +212,11 @@ class Request:
         """
         # Validate with JSON Schema
         try:
-            jsonschema.validate(instance=self.payload, schema=schema)
+            jsonschema.validate(
+                instance=to_dict_for_validation(self.payload), schema=schema
+            )
             return True
-        except jsonschema.ValidationError as e:
-            raise ValueError(f"JSON Schema validation failed: {e}") from e
+        except Exception as e:  # MDZZ
+            raise ProtocolValidationError(
+                f"JSON Schema validation failed: {e}\nMDZZ 1 {self}"
+            ) from e

@@ -69,7 +69,7 @@ Example:
     )
 """
 
-from typing import Any
+from typing import Any, cast
 
 from autogen_core import AgentId, MessageContext
 from pydantic import TypeAdapter
@@ -155,11 +155,7 @@ class BaseAnalysisAgent(BaseAgent):
         request = Request(
             type="ir.get_all_units_by_kind",
             payload={"kind": UKRegistry.Function()},
-            response_schema={
-                "type": "object",
-                "properties": {"units": TypeAdapter(list[CodeUnit]).json_schema()},
-                "required": ["units"],
-            },
+            response_schema=TypeAdapter(list[CodeUnit]).json_schema(),
         )
         response = await self.send_message(request, self._ir_agent_id)
 
@@ -168,7 +164,7 @@ class BaseAnalysisAgent(BaseAgent):
                 f"Failed to get functions: {response.error if isinstance(response, Response) else 'Unknown error'}"
             )
 
-        return response.data.get("units", []) if response.data else []
+        return cast(list[CodeUnit], response.data)
 
     async def get_files(self, ctx: MessageContext) -> list[dict[str, Any]]:
         """Get all files from the IR.
@@ -188,11 +184,7 @@ class BaseAnalysisAgent(BaseAgent):
         request = Request(
             type="ir.get_all_units_by_kind",
             payload={"kind": UKRegistry.File()},
-            response_schema={
-                "type": "object",
-                "properties": {"units": TypeAdapter(list[CodeUnit]).json_schema()},
-                "required": ["units"],
-            },
+            response_schema=TypeAdapter(list[CodeUnit]).json_schema(),
         )
         response = await self.send_message(request, self._ir_agent_id)
 
@@ -201,7 +193,7 @@ class BaseAnalysisAgent(BaseAgent):
                 f"Failed to get files: {response.error if isinstance(response, Response) else 'Unknown error'}"
             )
 
-        return response.data.get("units", []) if response.data else []
+        return response.data if response.data else []
 
     async def get_repo_structure(self, ctx: MessageContext) -> dict[str, Any] | None:
         """Get repository structure from the IR.
@@ -222,11 +214,7 @@ class BaseAnalysisAgent(BaseAgent):
         request = Request(
             type="ir.get_all_units_by_kind",
             payload={"kind": UKRegistry.Repository()},
-            response_schema={
-                "type": "object",
-                "properties": {"units": TypeAdapter(list[CodeUnit]).json_schema()},
-                "required": ["units"],
-            },
+            response_schema=TypeAdapter(list[CodeUnit]).json_schema(),
         )
         response = await self.send_message(request, self._ir_agent_id)
 
@@ -235,7 +223,7 @@ class BaseAnalysisAgent(BaseAgent):
                 f"Failed to get repository structure: {response.error if isinstance(response, Response) else 'Unknown error'}"
             )
 
-        units = response.data.get("units", []) if response.data else []
+        units = response.data if response.data else []
         return units[0] if units else None
 
     async def get_callers(
@@ -263,23 +251,9 @@ class BaseAnalysisAgent(BaseAgent):
                 "kind": RKRegistry.Calls(),
                 "direction": "in",  # Incoming calls = callers
             },
-            response_schema={
-                "type": "object",
-                "properties": {
-                    "neighbors": {
-                        "type": "array",
-                        "items": {
-                            "type": "array",
-                            "items": [
-                                TypeAdapter(CodeUnit).json_schema(),
-                                "string",
-                                TypeAdapter(CodeUnitRelation).json_schema(),
-                            ],
-                        },
-                    }
-                },
-                "required": ["neighbors"],
-            },
+            response_schema=TypeAdapter(
+                list[tuple[CodeUnit, str, CodeUnitRelation]]
+            ).json_schema(),
         )
         response = await self.send_message(request, self._ir_agent_id)
 
@@ -288,7 +262,7 @@ class BaseAnalysisAgent(BaseAgent):
                 f"Failed to get callers for {function_id}: {response.error if isinstance(response, Response) else 'Unknown error'}"
             )
 
-        neighbors = response.data.get("neighbors", []) if response.data else []
+        neighbors = response.data
         return [(caller_unit, relation) for caller_unit, _, relation in neighbors]
 
     async def get_callees(
@@ -316,23 +290,9 @@ class BaseAnalysisAgent(BaseAgent):
                 "kind": RKRegistry.Calls(),
                 "direction": "out",  # Outgoing calls = callees
             },
-            response_schema={
-                "type": "object",
-                "properties": {
-                    "neighbors": {
-                        "type": "array",
-                        "items": {
-                            "type": "array",
-                            "items": [
-                                TypeAdapter(CodeUnit).json_schema(),
-                                "string",
-                                TypeAdapter(CodeUnitRelation).json_schema(),
-                            ],
-                        },
-                    }
-                },
-                "required": ["neighbors"],
-            },
+            response_schema=TypeAdapter(
+                list[tuple[CodeUnit, str, CodeUnitRelation]]
+            ).json_schema(),
         )
         response = await self.send_message(request, self._ir_agent_id)
 
@@ -341,12 +301,10 @@ class BaseAnalysisAgent(BaseAgent):
                 f"Failed to get callees for {function_id}: {response.error if isinstance(response, Response) else 'Unknown error'}"
             )
 
-        neighbors = response.data.get("neighbors", []) if response.data else []
+        neighbors = response.data
         return [(callee_unit, relation) for callee_unit, _, relation in neighbors]
 
-    async def get_unit(
-        self, unit_id: str, ctx: MessageContext
-    ) -> dict[str, Any] | None:
+    async def get_unit(self, unit_id: str, ctx: MessageContext) -> CodeUnit | None:
         """Get a specific code unit by ID.
 
         Args:
@@ -354,7 +312,7 @@ class BaseAnalysisAgent(BaseAgent):
             unit_id: ID of the unit to retrieve
 
         Returns:
-            Unit dictionary, or None if not found
+            Code unit dictionary, or None if not found
 
         Raises:
             RuntimeError: If IR request fails
@@ -365,11 +323,7 @@ class BaseAnalysisAgent(BaseAgent):
         request = Request(
             type="ir.get_unit",
             payload={"unit_id": unit_id},
-            response_schema={
-                "type": "object",
-                "properties": {"unit": TypeAdapter(CodeUnit).json_schema()},
-                "required": ["unit"],
-            },
+            response_schema=TypeAdapter(CodeUnit).json_schema(),
         )
         response = await self.send_message(request, self._ir_agent_id)
 
@@ -380,7 +334,7 @@ class BaseAnalysisAgent(BaseAgent):
             # Unit not found is not an error, just return None
             return None
 
-        return response.data.get("unit") if response.data else None
+        return cast(CodeUnit, response.data)
 
     async def query_ir(self, query: str, response_ty: str, ctx: MessageContext) -> Any:
         if self._ir_agent_id is None:

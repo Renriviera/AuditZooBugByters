@@ -6,9 +6,9 @@ It handles message routing and optional response validation.
 
 from abc import ABC, abstractmethod
 
-import jsonschema
 from autogen_core import MessageContext, RoutedAgent, message_handler
 
+from auditzoo.core.protocol.errors import ProtocolValidationError
 from auditzoo.core.protocol.requests import Request
 from auditzoo.core.protocol.responses import Response
 
@@ -101,18 +101,28 @@ class BaseAgent(RoutedAgent, ABC):
 
         Returns:
             Response from the handler, validated if schema was provided
-
-        Raises:
-            ValueError: If response validation fails against provided schema
         """
-        # Delegate actual handling to subclass
-        response = await self._handle_request(message, ctx)
+        try:
+            # Delegate actual handling to subclass
+            response = await self._handle_request(message, ctx)
 
-        # Validate response if schema provided and response is successful
-        if message.response_schema != {} and response.success:
-            return self._validate_response(response, message.response_schema)
-        else:
+            # Validate response if schema provided and response is successful
+            if message.response_schema != {}:
+                try:
+                    response.validate(message.response_schema)
+                except ProtocolValidationError as e:
+                    error = (
+                        f"Response validation failed against schema: {e}\n"
+                        f"Schema: {message.response_schema}\n"
+                        f"Response data: {response.data}"
+                    )
+                    return Response.fail(error)
+
             return response
+        except Exception as e:
+            return Response.fail(
+                f"Exception in handling request at Agent {self.id}: {e}"
+            )
 
     @abstractmethod
     async def _handle_request(self, message: Request, ctx: MessageContext) -> Response:
@@ -133,39 +143,3 @@ class BaseAgent(RoutedAgent, ABC):
             It's called internally by handle_message.
         """
         pass
-
-    def _validate_response(
-        self, response: Response, schema: dict[str, str]
-    ) -> Response:
-        """Validate response data against a JSON schema.
-
-        Args:
-            response: Response object to validate
-            schema: JSON schema dict to validate response.data against
-
-        Returns:
-            The original response if validation passes, otherwise return a failed Response.
-
-        Note:
-            Only validates if response.success is True and response.data exists.
-        """
-        if not response.success:
-            # Don't validate error responses
-            return response
-
-        if response.data is None:
-            # Successful response with no data - check if schema allows this
-            # If schema requires properties, this will fail
-            return response
-
-        try:
-            jsonschema.validate(instance=response.data, schema=schema)
-        except jsonschema.ValidationError as e:
-            error = (
-                f"Response validation failed against schema: {e.message}\n"
-                f"Schema: {schema}\n"
-                f"Response data: {response.data}"
-            )
-            return Response.fail(error)
-
-        return response
