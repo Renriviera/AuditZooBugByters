@@ -35,8 +35,8 @@ AuditZoo follows a layered architecture:
 └───────────┬──────────┘    └───────────┬──────────────┘
             │                           │
 ┌───────────▼───────────────────────────▼──────────────┐
-│              Protocol Layer                          │
-│  Request/Response messaging (IRRequest, TaskRequest) │
+│                  Protocol Layer                      │
+│            Request/Response messaging                │
 └───────────┬──────────────────────────────────────────┘
             │
 ┌───────────▼──────────────────────────────────────────┐
@@ -153,7 +153,7 @@ Facts support:
 All agent communication uses structured messages defined in the protocol layer.
 
 **Design Philosophy:**
-- **Single Request class**: No IRRequest/TaskRequest/QueryRequest subclasses
+- **Single Request class**:
   - Reason: AutoGen's `@message_handler` doesn't support inheritance
   - Message routing breaks when handlers are in subclasses
 - **Flexible payloads**: Use `dict[str, Any]` to allow any data structure
@@ -176,7 +176,7 @@ class Request:
     response_schema: dict[str, Any]     # Optional JSON schema for response validation
 ```
 
-**Important Design Note**: AuditZoo uses a **single Request class** rather than specialized subclasses (IRRequest, TaskRequest, etc.). This is because AutoGen's `@message_handler` decorator doesn't support inheritance - message routing breaks when using handler methods in subclasses.
+**Important Design Note**: AuditZoo uses a **single Request class** rather than specialized subclasses. This is because AutoGen's `@message_handler` decorator doesn't support inheritance - message routing breaks when using handler methods in subclasses.
 
 **Request Type Conventions:**
 
@@ -261,7 +261,7 @@ result = response.unwrap_or(default={})  # Returns default if failed
 
 #### IRStorageAgent ([`agents/ir_storage_agent.py`](auditzoo/core/agents/ir_storage_agent.py))
 - Built-in agent that manages the IR graph
-- Handles all `IRRequest` messages
+- Handles all IR-related `Request` messages
 - Provides CRUD operations on units, relations, and facts
 - Automatically registered by `AnalysisRuntime`
 
@@ -320,7 +320,6 @@ class MyAgent(BaseAnalysisAgent):
 **Important Notes**:
 - Implement `_handle_request`, not `handle_task`
 - Do NOT use `@message_handler` on `_handle_request` (handled by BaseAgent)
-- Use plain `Request` class, not TaskRequest (doesn't exist anymore)
 - Define response schemas as module constants for callers to import
 
 ## Backend System
@@ -386,39 +385,6 @@ auditzoo/agents/
 ```
 
 > **Note**: The `auditzoo/agents/` directory is currently empty but is the designated location for analysis agent implementations. Analysis agents are separate from the core infrastructure to maintain clean separation between framework and applications.
-
-### Example Agent Structure
-
-```python
-# auditzoo/agents/taint_analyzer.py
-from auditzoo.core.agents import BaseAnalysisAgent
-from auditzoo.core.protocol import TaskRequest, Response
-
-class TaintAnalyzer(BaseAnalysisAgent):
-    def __init__(self):
-        super().__init__("Taint analysis agent")
-
-    @message_handler
-    async def handle_task(self, message: TaskRequest, ctx: MessageContext) -> Response:
-        if message.type != "task.taint_analysis":
-            return Response.fail("Unknown task")
-
-        # Extract parameters
-        source = message.payload["source"]
-        sink = message.payload["sink"]
-
-        # Get IR data
-        functions = await self.get_functions(ctx)
-
-        # Perform analysis...
-        tainted_paths = self._analyze_taint_flow(functions, source, sink)
-
-        return Response.ok(data={"paths": tainted_paths})
-
-    def _analyze_taint_flow(self, functions, source, sink):
-        # Analysis logic...
-        pass
-```
 
 ## Advanced Topics
 
