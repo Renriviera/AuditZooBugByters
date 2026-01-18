@@ -89,7 +89,11 @@ class JoernBackend(CPGBackend):
         return self._connected
 
     async def reload(self) -> None:
-        """Reload the CPG from disk."""
+        """Reload the CPG from disk.
+
+        Note: this action will discard any facts stored in the current session.
+        And create a fresh session with the CPG re-analyzed from code.
+        """
         if not self.is_connected() or self.client.workspace_dir is None:
             raise BackendResponseError("Cannot reload CPG: not connected to Joern.")
 
@@ -102,7 +106,7 @@ class JoernBackend(CPGBackend):
             source_path=self.config.source_path,
             project_name=self.config.project_name,
             language=self.config.language,
-            force_create_cpg=self.config.force_create_cpg,
+            force_create_cpg=True,
         )
 
         # Reload pre-defined scripts after reloading CPG

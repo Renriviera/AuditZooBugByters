@@ -125,6 +125,31 @@ else
     exit 1
 fi
 
+# Check for optional CLI tools
+echo ""
+echo -e "${YELLOW}Checking optional dependencies...${NC}"
+MISSING_TOOLS=0
+
+if ! command -v claude-code &> /dev/null; then
+    echo -e "${YELLOW}⚠ Claude Code CLI not found${NC}"
+    MISSING_TOOLS=1
+fi
+
+if ! command -v codex &> /dev/null; then
+    echo -e "${YELLOW}⚠ Codex CLI not found${NC}"
+    MISSING_TOOLS=1
+fi
+
+if [ $MISSING_TOOLS -eq 1 ]; then
+    echo ""
+    echo -e "${YELLOW}Note: Some auditors/agents require these tools to function properly.${NC}"
+    echo "To install them (requires npm):"
+    echo -e "${GREEN}  npm install -g @anthropic-ai/claude-code @anthropic-ai/codex${NC}"
+    echo ""
+    echo "If you don't have npm, install Node.js first:"
+    echo -e "${GREEN}  conda install -c conda-forge nodejs${NC}"
+fi
+
 # Installation complete
 echo ""
 echo -e "${GREEN}=== Installation Complete! ===${NC}"

@@ -30,7 +30,8 @@ classifiers = [
 # Core dependencies (matches requirements.txt)
 dependencies = [
     "autogen-core>=0.7",
-    "autogen-ext>=0.7",
+    "autogen-agentchat>=0.7",
+    "autogen-ext[openai,azure,anthropic,ollama,llama-cpp,mcp]>=0.7",
     "tree-sitter>=0.20.0",
     "cpgqls-client>=0.0.9",
     "networkx>=3.4",
