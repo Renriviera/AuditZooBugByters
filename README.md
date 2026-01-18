@@ -132,15 +132,13 @@ Feel free to open pull requests, but please note:
 
 AuditZoo is licensed under the [GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later)](LICENSE).
 
-Copyright (C) 2025 Zhuo Zhang
-
 This means:
 - ✅ You can freely use, modify, and distribute this software
 - ✅ Perfect for academic research and open-source projects
 - ⚠️ If you run a modified version as a network service (e.g., SaaS, web application), you **must** make your source code available to users
 - ⚠️ Any modifications or derivative works must also be licensed under AGPL-3.0
 
-For commercial licensing options or if AGPL doesn't fit your use case, please contact the author.
+For commercial licensing options or if AGPL doesn't fit your use case, please contact us.
 
 ## Citation
 
