@@ -55,3 +55,12 @@ Thumbs.db
 
 # AuditZoo
 .auditzoo/
+
+# Benchmark
+benchmark/builders-hub*
+
+# Node modules
+node_modules/
+
+# Claude code cache
+.claude/
