@@ -35,6 +35,7 @@ The installation script will:
 ```python
 import asyncio
 from auditzoo import AnalysisRuntime, UKRegistry, auto_detect_backend, Request
+from pydantic import TypeAdapter
 
 async def main():
     # Auto-detect backend configuration
@@ -44,11 +45,15 @@ async def main():
     async with AnalysisRuntime(config) as runtime:
         # Send IR queries
         response = await runtime.send_message(
-            Request(type="ir.get_all_units_by_kind", payload={"kind": UKRegistry.Function()}),
+            Request(
+                type="ir.get_all_units_by_kind",
+                payload={"kind": UKRegistry.Function()},
+                response_schema=TypeAdapter(list[CodeUnit]).json_schema(),
+            ),
             runtime.ir_agent_id
         )
 
-        functions = response.unwrap()["units"]
+        functions = response.unwrap()
         print(f"Found {len(functions)} functions")
 
 asyncio.run(main())
@@ -61,6 +66,16 @@ AuditZoo allows you to create custom analysis agents that can query the IR and p
 ```python
 from autogen_core import MessageContext, AgentId
 from auditzoo import BaseAnalysisAgent, Request, Response
+from pydantic import TypeAdapter
+from typing_extensions import TypedDict
+
+# Define response schema using TypeAdapter and TypedDict
+MY_RESPONSE_SCHEMA = TypeAdapter(TypedDict(
+    "MyAnalysisResponse",
+    {
+        "results": list[str],
+    },
+)).json_schema()
 
 class MyAnalysisAgent(BaseAnalysisAgent):
     def __init__(self):
@@ -92,7 +107,11 @@ async with AnalysisRuntime(config) as runtime:
 
     # Send task to your agent
     response = await runtime.send_message(
-        Request(type="task.my_analysis", payload={}),
+        Request(
+            type="task.my_analysis",
+            payload={},
+            response_schema=MY_RESPONSE_SCHEMA,
+        ),
         AgentId("my_analyzer", "default")
     )
 ```
@@ -106,16 +125,17 @@ See [examples/find_callers.py](examples/find_callers.py) for a complete working 
   - `IRStorageAgent`: Manages the IR graph (CRUD operations)
   - `BaseAnalysisAgent`: Base class for custom analysis agents
 - **Protocol**: Request/Response messaging for agent communication
-  - `Request`: Universal message class for all agent communication
+  - `Request`: Universal message class with flexible payloads
     - IR operations: type="ir.*" (get units, relations, facts)
     - Analysis tasks: type="task.*" (performed by custom agents)
     - Queries: type="query.*" (quick searches and lookups)
-  - Payload: Flexible dict for custom data structures
-  - Optional response_schema for runtime validation
+  - `Response`: Contains success status and data (any type) or error
+  - Response schemas: Use `TypeAdapter` with `TypedDict` for validation
 - **IR Model**: Code representation built on Code Property Graphs
   - `CodeUnit`: Represents code at any granularity (file, function, statement, etc.)
   - `CodeUnitRelation`: Relationships between units (calls, contains, etc.)
   - `Facts`: Analysis results attached to units or relations
+- **Exception Handling**: Agents catch all exceptions and return `Response.fail()`
 
 ## Development
 
