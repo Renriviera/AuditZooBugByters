@@ -61,3 +61,13 @@ repos:
       - id: bandit
         args: ["-c", "pyproject.toml"]
         additional_dependencies: ["bandit[toml]"]
+
+  # Custom local hooks
+  - repo: local
+    hooks:
+      - id: check-core-boundary
+        name: Check core/ boundary
+        entry: .pre-commit-hooks/check-core-boundary.sh
+        language: script
+        pass_filenames: false
+        always_run: true

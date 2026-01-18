@@ -1,0 +1,109 @@
+name: Check Core Boundary
+
+on:
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  check-boundary:
+    runs-on: ubuntu-latest
+    name: Check for cross-boundary commits
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history to check all commits in PR
+
+      - name: Check each commit for cross-boundary changes
+        run: |
+          set -e
+
+          # Get the base branch
+          BASE_REF="${{ github.event.pull_request.base.sha }}"
+          HEAD_REF="${{ github.event.pull_request.head.sha }}"
+
+          echo "Checking commits from $BASE_REF to $HEAD_REF"
+          echo ""
+
+          # Get all commits in the PR
+          COMMITS=$(git rev-list $BASE_REF..$HEAD_REF)
+
+          FAILED=0
+
+          for commit in $COMMITS; do
+            echo "================================================"
+            echo "Checking commit: $commit"
+            git log -1 --oneline $commit
+            echo ""
+
+            # Get files changed in this commit
+            FILES=$(git diff-tree --no-commit-id --name-only -r $commit)
+
+            if [ -z "$FILES" ]; then
+              echo "No files changed in this commit"
+              echo ""
+              continue
+            fi
+
+            INSIDE_CORE=0
+            OUTSIDE_CORE=0
+            FILES_INSIDE=""
+            FILES_OUTSIDE=""
+
+            while IFS= read -r file; do
+              if [[ "$file" == auditzoo/core/* ]]; then
+                INSIDE_CORE=$((INSIDE_CORE + 1))
+                FILES_INSIDE="$FILES_INSIDE  - $file"$'\n'
+              else
+                OUTSIDE_CORE=$((OUTSIDE_CORE + 1))
+                FILES_OUTSIDE="$FILES_OUTSIDE  - $file"$'\n'
+              fi
+            done <<< "$FILES"
+
+            # Check if we have cross-boundary changes
+            if [ $INSIDE_CORE -gt 0 ] && [ $OUTSIDE_CORE -gt 0 ]; then
+              echo "❌ ERROR: Cross-boundary commit detected!"
+              echo ""
+              echo "Files inside core/:"
+              echo "$FILES_INSIDE"
+              echo "Files outside core/:"
+              echo "$FILES_OUTSIDE"
+              echo ""
+              FAILED=1
+            else
+              if [ $INSIDE_CORE -gt 0 ]; then
+                echo "✓ OK: All changes inside core/ ($INSIDE_CORE files)"
+              elif [ $OUTSIDE_CORE -gt 0 ]; then
+                echo "✓ OK: All changes outside core/ ($OUTSIDE_CORE files)"
+              fi
+              echo ""
+            fi
+          done
+
+          if [ $FAILED -eq 1 ]; then
+            echo "================================================"
+            echo ""
+            echo "❌ PR REJECTED: One or more commits have cross-boundary changes"
+            echo ""
+            echo "Please split your changes into separate commits:"
+            echo "  - Commits with changes only inside core/"
+            echo "  - Commits with changes only outside core/"
+            echo ""
+            exit 1
+          fi
+
+          echo "================================================"
+          echo "✓ All commits respect core/ boundary"
+
+      - name: Comment on PR if failed
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '❌ **Cross-boundary commit detected**\n\nThis PR contains one or more commits with changes both inside and outside `core/`.\n\nPlease split your changes into separate commits:\n- Commits with changes only inside `core/`\n- Commits with changes only outside `core/`\n\nSee the workflow run for details about which commits failed.'
+            })
