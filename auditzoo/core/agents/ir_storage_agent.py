@@ -226,6 +226,7 @@ class IRStorageAgent(BaseAgent):
         Returns:
             Response from IR handling logic
         """
+        # TODO (ZZ): We should have lock here to prevent race conditions on IRView
         try:
             # Validate request payload if schema exists
             request_type = message.type.removeprefix("ir.")
