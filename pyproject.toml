@@ -36,6 +36,7 @@ dependencies = [
     "dataclasses-json>=0.6.0",
     "aiofiles>=23.0.0",
     "rich>=14.2.0",
+    "jsonschema>=4.25.0",
 ]
 
 [project.optional-dependencies]
