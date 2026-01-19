@@ -61,21 +61,9 @@ asyncio.run(main())
 
 ### Creating Custom Analysis Agents
 
-AuditZoo allows you to create custom analysis agents that can query the IR and perform complex analyses:
-
 ```python
 from autogen_core import MessageContext, AgentId
 from auditzoo import BaseAnalysisAgent, Request, Response
-from pydantic import TypeAdapter
-from typing_extensions import TypedDict
-
-# Define response schema using TypeAdapter and TypedDict
-MY_RESPONSE_SCHEMA = TypeAdapter(TypedDict(
-    "MyAnalysisResponse",
-    {
-        "results": list[str],
-    },
-)).json_schema()
 
 class MyAnalysisAgent(BaseAnalysisAgent):
     def __init__(self):
@@ -85,57 +73,34 @@ class MyAnalysisAgent(BaseAnalysisAgent):
         if message.type != "task.my_analysis":
             return Response.fail("Unknown task type")
 
-        # Use sugar methods to access IR
         functions = await self.get_functions(ctx)
-
-        # Perform analysis...
-        results = []
-        for func in functions:
-            callers = await self.get_callers(func.id, ctx)
-            # ... analyze ...
-
+        results = [f.name for f in functions]
         return Response.ok(data={"results": results})
 
-# Register and use the agent
+# Register and use
 async with AnalysisRuntime(config) as runtime:
-    await runtime.register_agent(
-        agent_type=MyAnalysisAgent,
-        agent_name="my_analyzer",
-        agent_factory=lambda: MyAnalysisAgent()
-    )
+    await runtime.register_agent(MyAnalysisAgent, "my_analyzer", lambda: MyAnalysisAgent())
     runtime.start()
 
-    # Send task to your agent
     response = await runtime.send_message(
-        Request(
-            type="task.my_analysis",
-            payload={},
-            response_schema=MY_RESPONSE_SCHEMA,
-        ),
+        Request(type="task.my_analysis", payload={}),
         AgentId("my_analyzer", "default")
     )
 ```
 
-See [examples/find_callers.py](examples/find_callers.py) for a complete working example.
+See [examples/find_callers.py](examples/find_callers.py) for complete examples.
 
 ## Key Concepts
 
-- **Runtime**: Manages backend connections, IR storage, and agent lifecycle
-- **Agents**: Lightweight workers that handle specific analysis tasks
-  - `IRStorageAgent`: Manages the IR graph (CRUD operations)
-  - `BaseAnalysisAgent`: Base class for custom analysis agents
-- **Protocol**: Request/Response messaging for agent communication
-  - `Request`: Universal message class with flexible payloads
-    - IR operations: type="ir.*" (get units, relations, facts)
-    - Analysis tasks: type="task.*" (performed by custom agents)
-    - Queries: type="query.*" (quick searches and lookups)
-  - `Response`: Contains success status and data (any type) or error
-  - Response schemas: Use `TypeAdapter` with `TypedDict` for validation
-- **IR Model**: Code representation built on Code Property Graphs
-  - `CodeUnit`: Represents code at any granularity (file, function, statement, etc.)
-  - `CodeUnitRelation`: Relationships between units (calls, contains, etc.)
-  - `Facts`: Analysis results attached to units or relations
-- **Exception Handling**: Agents catch all exceptions and return `Response.fail()`
+- **Runtime**: Manages backend, IR, and agent lifecycle
+- **Agents**: Lightweight workers for analysis tasks
+- **Protocol**: Request/Response messaging
+  - `Request`: type (e.g., "ir.*", "task.*"), payload (dict)
+  - `Response`: success, data (any type), error
+- **IR Model**: Code representation via Code Property Graphs
+  - `CodeUnit`: Code at any granularity (file, function, statement, etc.)
+  - `CodeUnitRelation`: Relationships (calls, contains, etc.)
+  - `Facts`: Analysis results attached to units/relations
 
 ## Development
 

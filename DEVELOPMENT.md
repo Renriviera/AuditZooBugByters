@@ -510,15 +510,26 @@ config = auto_detect_backend(
 
 Analysis agents live in `auditzoo/agents/` and implement specific analysis tasks.
 
-### Directory Structure
-```
-auditzoo/agents/
-├── __init__.py          # Agent registry
-├── my_agent.py          # Custom analysis agent
-└── ...
+### Adding New Agents
+
+**Singleton agents**: Place directly under `auditzoo/agents/{category}/` (e.g., `auditzoo/agents/utility/my_agent.py`)
+
+**Multi-agent systems with single exposed agent**: Create subdirectory under `auditzoo/agents/{category}/`, expose main agent, and override `register_all()` classmethod to register internal agents:
+
+```python
+# auditzoo/agents/myanalysis/system/main_agent.py
+class MainAgent(BaseAnalysisAgent):
+    @classmethod
+    async def register_all(cls, runtime: AgentRuntime, type: str, factory, **kwargs):
+        # Register internal agents first
+        await HelperAgent1.register_all(runtime, "helper1", lambda: HelperAgent1())
+        await HelperAgent2.register_all(runtime, "helper2", lambda: HelperAgent2())
+
+        # Register self
+        return await super().register_all(runtime, type, factory, **kwargs)
 ```
 
-> **Note**: The `auditzoo/agents/` directory is currently empty but is the designated location for analysis agent implementations. Analysis agents are separate from the core infrastructure to maintain clean separation between framework and applications.
+See [auditzoo/agents/README.md](auditzoo/agents/README.md) for available agents.
 
 ## Advanced Topics
 
