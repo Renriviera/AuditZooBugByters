@@ -49,3 +49,16 @@ def to_dict_for_validation(o) -> dict[str, Any]:
     """
 
     return cast(dict[str, Any], json.loads(to_json_for_validation(o)))
+
+
+def to_schema(ty: type) -> dict[str, Any]:
+    """Generate a JSON schema from a Pydantic-compatible type.
+
+    Args:
+        ty: The type to generate the schema for.
+
+    Returns:
+        JSON schema dictionary.
+    """
+
+    return TypeAdapter(ty).json_schema()

@@ -72,13 +72,13 @@ Example:
 from typing import Any, cast
 
 from autogen_core import AgentId, MessageContext
-from pydantic import TypeAdapter
 
 from auditzoo.core.agents.base import BaseAgent
 from auditzoo.core.ir.model import RKRegistry, UKRegistry
 from auditzoo.core.ir.model.base import CodeUnit, CodeUnitRelation
 from auditzoo.core.protocol.requests import Request
 from auditzoo.core.protocol.responses import Response
+from auditzoo.core.protocol.utils import to_schema
 
 
 class BaseAnalysisAgent(BaseAgent):
@@ -155,7 +155,7 @@ class BaseAnalysisAgent(BaseAgent):
         request = Request(
             type="ir.get_all_units_by_kind",
             payload={"kind": UKRegistry.Function()},
-            response_schema=TypeAdapter(list[CodeUnit]).json_schema(),
+            response_schema=to_schema(list[CodeUnit]),
         )
         response = await self.send_message(request, self._ir_agent_id)
 
@@ -184,7 +184,7 @@ class BaseAnalysisAgent(BaseAgent):
         request = Request(
             type="ir.get_all_units_by_kind",
             payload={"kind": UKRegistry.File()},
-            response_schema=TypeAdapter(list[CodeUnit]).json_schema(),
+            response_schema=to_schema(list[CodeUnit]),
         )
         response = await self.send_message(request, self._ir_agent_id)
 
@@ -214,7 +214,7 @@ class BaseAnalysisAgent(BaseAgent):
         request = Request(
             type="ir.get_all_units_by_kind",
             payload={"kind": UKRegistry.Repository()},
-            response_schema=TypeAdapter(list[CodeUnit]).json_schema(),
+            response_schema=to_schema(list[CodeUnit]),
         )
         response = await self.send_message(request, self._ir_agent_id)
 
@@ -251,9 +251,7 @@ class BaseAnalysisAgent(BaseAgent):
                 "kind": RKRegistry.Calls(),
                 "direction": "in",  # Incoming calls = callers
             },
-            response_schema=TypeAdapter(
-                list[tuple[CodeUnit, str, CodeUnitRelation]]
-            ).json_schema(),
+            response_schema=to_schema(list[tuple[CodeUnit, str, CodeUnitRelation]]),
         )
         response = await self.send_message(request, self._ir_agent_id)
 
@@ -290,9 +288,7 @@ class BaseAnalysisAgent(BaseAgent):
                 "kind": RKRegistry.Calls(),
                 "direction": "out",  # Outgoing calls = callees
             },
-            response_schema=TypeAdapter(
-                list[tuple[CodeUnit, str, CodeUnitRelation]]
-            ).json_schema(),
+            response_schema=to_schema(list[tuple[CodeUnit, str, CodeUnitRelation]]),
         )
         response = await self.send_message(request, self._ir_agent_id)
 
@@ -323,7 +319,7 @@ class BaseAnalysisAgent(BaseAgent):
         request = Request(
             type="ir.get_unit",
             payload={"unit_id": unit_id},
-            response_schema=TypeAdapter(CodeUnit).json_schema(),
+            response_schema=to_schema(CodeUnit),
         )
         response = await self.send_message(request, self._ir_agent_id)
 

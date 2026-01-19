@@ -10,7 +10,6 @@ CRUD operations on the code property graph stored in IRView.
 from typing import Any
 
 from autogen_core import MessageContext
-from pydantic import TypeAdapter
 from typing_extensions import NotRequired, TypedDict
 
 from auditzoo.core.agents.base import BaseAgent
@@ -22,13 +21,14 @@ from auditzoo.core.ir.model import (
 from auditzoo.core.ir.view import IRView
 from auditzoo.core.protocol.requests import Request
 from auditzoo.core.protocol.responses import Response
+from auditzoo.core.protocol.utils import to_schema
 
 # JSON schemas for request validation
 REQUEST_SCHEMAS = {
-    "query": TypeAdapter(
+    "query": to_schema(
         TypedDict("QueryPayload", {"query": str, "response_ty": str})  # type: ignore
-    ).json_schema(),
-    "fetch_unit": TypeAdapter(
+    ),
+    "fetch_unit": to_schema(
         TypedDict(
             "FetchUnitPayload",
             {
@@ -38,8 +38,8 @@ REQUEST_SCHEMAS = {
                 "column_start": NotRequired[int],
             },
         )  # type: ignore
-    ).json_schema(),
-    "get_unit": TypeAdapter(
+    ),
+    "get_unit": to_schema(
         TypedDict(
             "GetUnitPayload",
             {
@@ -47,8 +47,8 @@ REQUEST_SCHEMAS = {
                 "fetch_backend": NotRequired[bool],
             },
         )  # type: ignore
-    ).json_schema(),
-    "has_unit": TypeAdapter(
+    ),
+    "has_unit": to_schema(
         TypedDict(
             "HasUnitPayload",
             {
@@ -56,8 +56,8 @@ REQUEST_SCHEMAS = {
                 "fetch_backend": NotRequired[bool],
             },
         )  # type: ignore
-    ).json_schema(),
-    "get_all_units_by_kind": TypeAdapter(
+    ),
+    "get_all_units_by_kind": to_schema(
         TypedDict(
             "GetAllUnitsByKindPayload",
             {
@@ -65,8 +65,8 @@ REQUEST_SCHEMAS = {
                 "fetch_backend": NotRequired[bool],
             },
         )  # type: ignore
-    ).json_schema(),
-    "get_all_relations_by_kind": TypeAdapter(
+    ),
+    "get_all_relations_by_kind": to_schema(
         TypedDict(
             "GetAllRelationsByKindPayload",
             {
@@ -74,8 +74,8 @@ REQUEST_SCHEMAS = {
                 "fetch_backend": NotRequired[bool],
             },
         )  # type: ignore
-    ).json_schema(),
-    "get_related_units": TypeAdapter(
+    ),
+    "get_related_units": to_schema(
         TypedDict(
             "GetRelatedUnitsPayload",
             {
@@ -85,8 +85,8 @@ REQUEST_SCHEMAS = {
                 "fetch_backend": NotRequired[bool],
             },
         )  # type: ignore
-    ).json_schema(),
-    "get_unit_facts": TypeAdapter(
+    ),
+    "get_unit_facts": to_schema(
         TypedDict(
             "GetUnitFactsPayload",
             {
@@ -95,24 +95,24 @@ REQUEST_SCHEMAS = {
                 "fetch_backend": NotRequired[bool],
             },
         )  # type: ignore
-    ).json_schema(),
-    "get_relation_facts": TypeAdapter(
+    ),
+    "get_relation_facts": to_schema(
         TypedDict(
             "GetRelationFactsPayload",
             {
                 "fact_cls": NotRequired[str],
             },
         )  # type: ignore
-    ).json_schema(),
-    "filter_graph": TypeAdapter(
+    ),
+    "filter_graph": to_schema(
         TypedDict(
             "FilterGraphPayload",
             {
                 "filter_expr": str,
             },
         )  # type: ignore
-    ).json_schema(),
-    "get_reachable_units": TypeAdapter(
+    ),
+    "get_reachable_units": to_schema(
         TypedDict(
             "GetReachableUnitsPayload",
             {
@@ -121,8 +121,8 @@ REQUEST_SCHEMAS = {
                 "max_depth": NotRequired[int | None],
             },
         )  # type: ignore
-    ).json_schema(),
-    "find_shortest_path": TypeAdapter(
+    ),
+    "find_shortest_path": to_schema(
         TypedDict(
             "FindShortestPathPayload",
             {
@@ -131,7 +131,7 @@ REQUEST_SCHEMAS = {
                 "filter_expr": str,
             },
         )  # type: ignore
-    ).json_schema(),
+    ),
 }
 
 
