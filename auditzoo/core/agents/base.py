@@ -5,8 +5,11 @@ It handles message routing and optional response validation.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 
-from autogen_core import MessageContext, RoutedAgent, message_handler
+from autogen_core import AgentRuntime, MessageContext, RoutedAgent, message_handler
+from autogen_core._agent_type import AgentType
+from typing_extensions import Self
 
 from auditzoo.core.protocol.errors import ProtocolValidationError
 from auditzoo.core.protocol.requests import Request
@@ -85,6 +88,30 @@ class BaseAgent(RoutedAgent, ABC):
             description: Human-readable description of this agent's purpose
         """
         super().__init__(description=description)
+
+    @classmethod
+    async def register_all(
+        cls,
+        runtime: AgentRuntime,
+        type: str,
+        factory: Callable[[], Self | Awaitable[Self]],
+        *,
+        skip_class_subscriptions: bool = False,
+        skip_direct_message_subscription: bool = False,
+    ) -> AgentType:
+        """
+        This function supports register all sub-agents that will be used by
+        the current agent.
+
+        By default, it will only register the agent itself.
+        """
+        return await super().register(
+            runtime,
+            type,
+            factory,
+            skip_class_subscriptions=skip_class_subscriptions,
+            skip_direct_message_subscription=skip_direct_message_subscription,
+        )
 
     @message_handler
     async def handle_message(self, message: Request, ctx: MessageContext) -> Response:

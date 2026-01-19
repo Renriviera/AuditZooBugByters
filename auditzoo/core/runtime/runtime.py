@@ -267,8 +267,11 @@ class AnalysisRuntime:
         if self._ir_agent_id is None:
             raise AnalysisRuntimeError("IRStorageAgent ID not registered.")
 
-        if agent_name in self._registered_agents:
-            raise ValueError(f"Agent '{agent_name}' already registered")
+        if (
+            agent_name in self._registered_agents
+            and self._registered_agents[agent_name] != agent_type
+        ):
+            raise AnalysisRuntimeError(f"Agent '{agent_name}' already registered")
 
         # Capture IR agent ID for injection into agent
         ir_agent_id = self._ir_agent_id
@@ -283,9 +286,9 @@ class AnalysisRuntime:
 
             return agent
 
-        # Register with AutoGen using agent class's own register method
+        # Register with AutoGen using agent class's own register_all method
         # This ensures agent's message handlers are properly registered
-        await agent_type.register(self._runtime, agent_name, factory_wrapper)
+        await agent_type.register_all(self._runtime, agent_name, factory_wrapper)
 
         # Track this agent (agent_name -> agent_type mapping)
         self._registered_agents[agent_name] = agent_type
