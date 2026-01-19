@@ -95,7 +95,7 @@ class BaseAgent(RoutedAgent, ABC):
         runtime: AgentRuntime,
         type: str,
         factory: Callable[[], Self | Awaitable[Self]],
-        *,
+        *args,
         skip_class_subscriptions: bool = False,
         skip_direct_message_subscription: bool = False,
     ) -> AgentType:
