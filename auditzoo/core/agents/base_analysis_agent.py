@@ -1,72 +1,7 @@
-"""Base Analysis Agent - Foundation for all analysis agents.
+"""Base class for analysis agents.
 
-This is the base class for all analysis agents in the system. It provides syntactic
-sugar methods for common IR operations by sending Request messages to the IRStorageAgent.
-
-Subclasses should:
-1. Inherit from BaseAnalysisAgent
-2. Implement _handle_request for their specific task types
-3. Use the provided sugar methods (get_functions, get_callers, etc.) to access IR data
-4. Define custom data structures in payload (dataclasses, TypedDicts, plain dicts)
-5. Optionally define response schemas for type awareness on caller side
-6. Optionally integrate LLM for complex analysis tasks
-
-Important Notes:
-- BaseAnalysisAgent does NOT implement _handle_request - this is left abstract
-  for subclasses to implement. Each analysis agent defines its own task handling.
-- Do NOT use @message_handler on _handle_request in subclasses (handled by BaseAgent)
-- Do NOT inherit from Request to create custom request types (AutoGen doesn't support it)
-- Instead, put your custom data structures in the payload dict
-
-Response Schema Best Practice:
-- Define response schemas as module-level constants in your agent file
-- Callers import these schemas to understand expected response structure
-- Schemas provide runtime validation and documentation
-- Only define schemas when no circular import would occur
-
-Example:
-    # In your agent file
-    from dataclasses import dataclass, asdict
-
-    # Define custom payload structure
-    @dataclass
-    class TaintParams:
-        source: str
-        sink: str
-        max_depth: int = 10
-
-    # Define response schema (optional but recommended)
-    TAINT_RESPONSE_SCHEMA = {
-        "type": "object",
-        "properties": {
-            "paths": {"type": "array"},
-            "vulnerable": {"type": "boolean"}
-        },
-        "required": ["paths", "vulnerable"]
-    }
-
-    class TaintAnalyzer(BaseAnalysisAgent):
-        async def _handle_request(self, message: Request, ctx: MessageContext):
-            if message.type != "task.taint_analysis":
-                return Response.fail("Unknown task")
-
-            # Extract structured data from payload
-            params = TaintParams(**message.payload)
-
-            # Use sugar methods
-            functions = await self.get_functions(ctx)
-            # ... analysis logic ...
-
-            return Response.ok(data={"paths": [...], "vulnerable": True})
-
-    # Caller code
-    from my_agent import TAINT_RESPONSE_SCHEMA
-
-    request = Request(
-        type="task.taint_analysis",
-        payload=asdict(TaintParams(source="user_input", sink="sql_query")),
-        response_schema=TAINT_RESPONSE_SCHEMA  # Optional validation
-    )
+Provides helper methods for IR access via IRStorageAgent. Subclasses implement
+_handle_request and handle task.* messages.
 """
 
 from typing import Any, cast
@@ -84,32 +19,7 @@ from auditzoo.core.protocol.utils import to_schema
 class BaseAnalysisAgent(BaseAgent):
     """Base class for all analysis agents.
 
-    Provides syntactic sugar methods for common IR operations. Analysis agents
-    send Request messages to the IRStorageAgent and receive responses.
-
-    Subclasses must implement _handle_request for their specific analyses
-    (e.g., taint analysis, vulnerability scanning).
-
-    Note:
-        This class does NOT implement _handle_request - it remains abstract.
-        Each analysis agent subclass must provide its own implementation.
-
-    Example:
-        class TaintAnalysisAgent(BaseAnalysisAgent):
-            async def _handle_request(
-                self, message: Request, ctx: MessageContext
-            ) -> Response:
-                if message.type != "task.taint_analysis":
-                    return Response.fail("Unknown task type")
-
-                # Use sugar methods to access IR
-                functions = await self.get_functions(ctx)
-
-                for func in functions:
-                    callers = await self.get_callers(func.id, ctx)
-                    # ... perform taint analysis ...
-
-                return Response.ok(data={"vulnerabilities": [...]})
+    Subclasses implement _handle_request for their analyses.
     """
 
     def __init__(
@@ -120,7 +30,6 @@ class BaseAnalysisAgent(BaseAgent):
 
         Args:
             description: Description of this agent's purpose
-            ir_storage_agent_id: AgentId of the IRStorageAgent to send requests to
         """
         super().__init__(description=description)
         self._ir_agent_id: AgentId | None = None
@@ -138,17 +47,7 @@ class BaseAnalysisAgent(BaseAgent):
     # ============================================
 
     async def get_functions(self, ctx: MessageContext) -> list[CodeUnit]:
-        """Get all functions from the IR.
-
-        Args:
-            ctx: Message context from autogen
-
-        Returns:
-            List of function dictionaries with id, name, code, etc.
-
-        Raises:
-            RuntimeError: If IR request fails
-        """
+        """Get all function units from the IR."""
         if self._ir_agent_id is None:
             raise RuntimeError("IRStorageAgent ID not registered")
 
@@ -166,18 +65,8 @@ class BaseAnalysisAgent(BaseAgent):
 
         return cast(list[CodeUnit], response.data)
 
-    async def get_files(self, ctx: MessageContext) -> list[dict[str, Any]]:
-        """Get all files from the IR.
-
-        Args:
-            ctx: Message context from autogen
-
-        Returns:
-            List of file dictionaries with id, name, code, etc.
-
-        Raises:
-            RuntimeError: If IR request fails
-        """
+    async def get_files(self, ctx: MessageContext) -> list[CodeUnit]:
+        """Get all file units from the IR."""
         if self._ir_agent_id is None:
             raise RuntimeError("IRStorageAgent ID not registered")
 
@@ -195,18 +84,8 @@ class BaseAnalysisAgent(BaseAgent):
 
         return response.data if response.data else []
 
-    async def get_repo_structure(self, ctx: MessageContext) -> dict[str, Any] | None:
-        """Get repository structure from the IR.
-
-        Args:
-            ctx: Message context from autogen
-
-        Returns:
-            Repository structure data, or None if not found
-
-        Raises:
-            RuntimeError: If IR request fails
-        """
+    async def get_repo_structure(self, ctx: MessageContext) -> CodeUnit | None:
+        """Get the repository unit from the IR, if present."""
         if self._ir_agent_id is None:
             raise RuntimeError("IRStorageAgent ID not registered")
 
@@ -229,18 +108,7 @@ class BaseAnalysisAgent(BaseAgent):
     async def get_callers(
         self, function_id: str, ctx: MessageContext
     ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
-        """Get all functions that call the specified function.
-
-        Args:
-            ctx: Message context from autogen
-            function_id: ID of the function to get callers for
-
-        Returns:
-            List of caller function dictionaries
-
-        Raises:
-            RuntimeError: If IR request fails
-        """
+        """Get callers for a function."""
         if self._ir_agent_id is None:
             raise RuntimeError("IRStorageAgent ID not registered")
 
@@ -266,18 +134,7 @@ class BaseAnalysisAgent(BaseAgent):
     async def get_callees(
         self, function_id: str, ctx: MessageContext
     ) -> list[tuple[CodeUnit, CodeUnitRelation]]:
-        """Get all functions called by the specified function.
-
-        Args:
-            ctx: Message context from autogen
-            function_id: ID of the function to get callees for
-
-        Returns:
-            List of callee function dictionaries
-
-        Raises:
-            RuntimeError: If IR request fails
-        """
+        """Get callees for a function."""
         if self._ir_agent_id is None:
             raise RuntimeError("IRStorageAgent ID not registered")
 
@@ -301,18 +158,7 @@ class BaseAnalysisAgent(BaseAgent):
         return [(callee_unit, relation) for callee_unit, _, relation in neighbors]
 
     async def get_unit(self, unit_id: str, ctx: MessageContext) -> CodeUnit | None:
-        """Get a specific code unit by ID.
-
-        Args:
-            ctx: Message context from autogen
-            unit_id: ID of the unit to retrieve
-
-        Returns:
-            Code unit dictionary, or None if not found
-
-        Raises:
-            RuntimeError: If IR request fails
-        """
+        """Get a code unit by ID."""
         if self._ir_agent_id is None:
             raise RuntimeError("IRStorageAgent ID not registered")
 
@@ -333,22 +179,9 @@ class BaseAnalysisAgent(BaseAgent):
         return cast(CodeUnit, response.data)
 
     async def query_ir(self, query: str, response_ty: str, ctx: MessageContext) -> Any:
+        """Execute a raw backend query via IRStorageAgent."""
         if self._ir_agent_id is None:
             raise RuntimeError("IRStorageAgent ID not registered")
-
-        """Execute a raw query against the IR backend.
-
-        Args:
-            ctx: Message context from autogen
-            query: Query string in backend query language
-            response_ty: Expected response type (default: "json")
-
-        Returns:
-            Query results
-
-        Raises:
-            RuntimeError: If query fails
-        """
         request = Request(
             type="ir.query", payload={"query": query, "response_ty": response_ty}
         )

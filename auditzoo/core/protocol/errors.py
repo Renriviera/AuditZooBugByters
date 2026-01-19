@@ -17,3 +17,9 @@ class ProtocolRuntimeError(ProtocolError):
     """Error raised during protocol message processing at runtime."""
 
     pass
+
+
+class ProtocolInheritanceError(ProtocolError):
+    """Error raised when there is an issue with protocol class inheritance."""
+
+    pass

@@ -1,10 +1,6 @@
-"""IR Storage Agent - Provides direct access to all IRView operations.
+"""IRStorageAgent exposes IRView operations over the request/response protocol.
 
-This agent is the sole handler for IRRequest messages. It exposes ALL IRView
-operations via the request/response protocol with full parameter support.
-
-This agent does NOT use LLM - it's purely deterministic, providing complete
-CRUD operations on the code property graph stored in IRView.
+It handles all ir.* requests and performs deterministic IR CRUD/query work.
 """
 
 from typing import Any, Literal
@@ -101,75 +97,9 @@ REQUEST_SCHEMAS = {
 
 
 class IRStorageAgent(BaseAgent):
-    """Agent providing complete access to all IRView operations.
+    """Agent providing full access to IRView via ir.* requests.
 
-    Handles all IRRequest messages (ir.*) and provides full CRUD operations on the
-    code property graph. This agent has direct access to the IRView instance
-    and exposes ALL its operations through the request/response protocol.
-
-    All requests are validated using JSON Schema before processing.
-
-    Supported request types:
-        ## Backend Queries
-        - ir.query: Execute raw backend query
-
-        ## Unit Management
-        - ir.fetch_unit: Fetch unit by source location
-        - ir.get_unit: Get a code unit by ID
-        - ir.has_unit: Check if unit exists
-        - ir.get_all_units_by_kind: Get all units of specific kind
-        - ir.get_all_units: Get all units in graph (no backend fetch)
-
-        ## Relation Management
-        - ir.get_all_relations_by_kind: Get all relations of specific kind
-        - ir.get_related_units: Get related units (callers, callees, etc.)
-        - ir.get_all_relations: Get all relations (no backend fetch)
-
-        ## Graph Queries (no backend fetch)
-        - ir.filter_graph: Create filtered subgraph
-        - ir.get_reachable_units: Get transitively reachable units
-        - ir.find_shortest_path: Find shortest path between units
-
-        ## Fact Management
-        - ir.add_unit_fact: Add a fact to a code unit
-        - ir.add_relation_fact: Add a relation fact
-        - ir.get_unit_facts: Get facts for a unit
-        - ir.get_relation_facts: Get all relation facts
-        - ir.load_facts: Load all facts from backend
-
-        ## Sync & Cache
-        - ir.preload_from_backend: Preload common data
-        - ir.sync_backend: Sync all facts to backend
-        - ir.get_graph_stats: Get graph statistics
-        - ir.reload: Reload from backend
-        - ir.cleanup: Cleanup graph
-
-    Example:
-        from auditzoo.core.ir.model import UKRegistry, RKRegistry
-
-        # Get a code unit
-        request = Request(type="ir.get_unit", payload={"unit_id": "func_123"})
-        response = await runtime.send_message(request, IRStorageAgent)
-
-        # Get all functions - pass CodeUnitKind instance directly
-        request = Request(
-            type="ir.get_all_units_by_kind",
-            payload={
-                "kind": UKRegistry.Function(),  # Direct Python object
-                "fetch_backend": True
-            }
-        )
-
-        # Get callers with full parameters - pass RelationKind instance directly
-        request = Request(
-            type="ir.get_related_units",
-            payload={
-                "unit_id": "func_123",
-                "kind": RKRegistry.Calls(),  # Direct Python object
-                "direction": "in",
-                "fetch_backend": True
-            }
-        )
+    Requests are validated with JSON Schema when a schema is available.
     """
 
     def __init__(self, ir_view: IRView) -> None:
@@ -182,15 +112,7 @@ class IRStorageAgent(BaseAgent):
         self._ir_view = ir_view
 
     async def _handle_request(self, message: Request, ctx: MessageContext) -> Response:
-        """Implement abstract method - delegates to handle_ir_request.
-
-        Args:
-            message: Request message (should be IRRequest)
-            ctx: Message context from autogen
-
-        Returns:
-            Response from IR handling logic
-        """
+        """Route ir.* requests to the matching handler."""
         # TODO (ZZ): We should have lock here to prevent race conditions on IRView
         try:
             # Validate request payload if schema exists
