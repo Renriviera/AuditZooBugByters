@@ -16,39 +16,26 @@ Example:
 
 import asyncio
 import sys
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from autogen_core import AgentId, MessageContext
+from autogen_core import AgentId, AgentRuntime, AgentType, MessageContext
 from autogen_core.models import ChatCompletionClient, UserMessage
 from autogen_ext.models.openai import OpenAIChatCompletionClient
-from pydantic import TypeAdapter
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import Self
 
-from auditzoo.agents.utility.human_interaction_agent import HumanInteractionAgent
+from auditzoo.agents.utility.human_interaction_agent import (
+    HumanInteractionAgent,
+    human_interaction_request,
+)
 from auditzoo.backends.ingestion import auto_detect_backend
 from auditzoo.core.agents import BaseAnalysisAgent
 from auditzoo.core.ir.model.base import CodeUnit
 from auditzoo.core.protocol.requests import Request
 from auditzoo.core.protocol.responses import Response
+from auditzoo.core.protocol.utils import to_schema, typed_dict
 from auditzoo.core.runtime import AnalysisRuntime
-
-
-class CallerInfo(TypedDict):
-    caller_name: str
-    callsite: NotRequired[str]
-
-
-class FunctionCallersResult(TypedDict):
-    function_name: str
-    summary: str
-    callers: list[CallerInfo]
-    label: Literal["Good", "Bad", "Unknown"]
-
-
-class FindCallersResponse(TypedDict):
-    results: list[FunctionCallersResult]
-    message: NotRequired[str]
 
 
 class FunctionSummaryAgent(BaseAnalysisAgent):
@@ -92,6 +79,55 @@ class CallerFinderAgent(BaseAnalysisAgent):
         Note: ir_storage_agent_id is injected by runtime during registration.
         """
         super().__init__("Finds all callers of a given function")
+
+    @classmethod
+    async def register_all(
+        cls,
+        runtime: AgentRuntime,
+        type: str,
+        factory: Callable[[], Self | Awaitable[Self]],
+        *args,
+        skip_class_subscriptions: bool = False,
+        skip_direct_message_subscription: bool = False,
+    ) -> AgentType:
+        """
+        This function supports register all sub-agents that will be used by
+        the current agent.
+
+        By default, it will only register the agent itself.
+        """
+        # Register FunctionSummaryAgent as a sub-agent
+        print("Registering SubAgent FunctionSummaryAgent...")
+        model_client = OpenAIChatCompletionClient(
+            model="gpt-4o-mini",
+        )
+
+        await FunctionSummaryAgent.register_all(
+            runtime,
+            "function_summarizer",
+            lambda: FunctionSummaryAgent(model_client),
+            *args,
+            skip_class_subscriptions=skip_class_subscriptions,
+            skip_direct_message_subscription=skip_direct_message_subscription,
+        )
+
+        print("Registering SubAgent HumanInteractionAgent...")
+        await HumanInteractionAgent.register_all(
+            runtime,
+            "human_interactor",
+            lambda: HumanInteractionAgent(model_client),
+            *args,
+            skip_class_subscriptions=skip_class_subscriptions,
+            skip_direct_message_subscription=skip_direct_message_subscription,
+        )
+
+        return await super().register(
+            runtime,
+            type,
+            factory,
+            skip_class_subscriptions=skip_class_subscriptions,
+            skip_direct_message_subscription=skip_direct_message_subscription,
+        )
 
     async def _handle_request(self, message: Request, ctx: MessageContext) -> Response:
         """Handle find_callers task requests.
@@ -150,26 +186,23 @@ class CallerFinderAgent(BaseAnalysisAgent):
         request = Request(
             type="task.summarize_function",
             payload={"unit": function},
-            response_schema=TypeAdapter(str).json_schema(),
+            response_schema=to_schema(str),
         )
+
         summary_response: Response = await self.send_message(
             message=request,
             recipient=AgentId("function_summarizer", function.id),
         )
 
         user_label: Response = await self.send_message(
-            message=Request(
-                type="human.ask",
-                payload={
-                    "question": f"I have got the summary for function {function.name}, how will you label it? Good, Bad or Unknown?\n\nSummary: {summary_response.data if summary_response.success else 'N/A'}"
-                },
-                response_schema=TypeAdapter(
-                    TypedDict(  # type: ignore
-                        "Result",
-                        {"label": Literal["Good", "Bad", "Unknown"]},
+            message=human_interaction_request(
+                f"I have got the summary for function {function.name}, how will you label it? Good, Bad or Unknown?\n\nSummary: {summary_response.data if summary_response.success else 'N/A'}",
+                response_schema=to_schema(
+                    typed_dict(
+                        label=Literal["Good", "Bad", "Unknown"],
                         total=False,
                     )
-                ).json_schema(),
+                ),
             ),
             recipient=AgentId("human_interactor", "default"),
         )
@@ -281,28 +314,11 @@ async def main(project_path: str, function_name: str) -> None:
         print("Runtime initialized successfully!")
 
         # Register our custom agents
-        print("Registering CallerFinderAgent...")
+        print("Registering Entrypoint CallerFinderAgent...")
         await runtime.register_agent(
             agent_type=CallerFinderAgent,
             agent_name="caller_finder",
             agent_factory=lambda: CallerFinderAgent(),
-        )
-
-        print("Registering FunctionSummaryAgent...")
-        model_client = OpenAIChatCompletionClient(
-            model="gpt-4o-mini",
-        )
-        await runtime.register_agent(
-            agent_type=FunctionSummaryAgent,
-            agent_name="function_summarizer",
-            agent_factory=lambda: FunctionSummaryAgent(model_client),
-        )
-
-        print("Registrating HumanInteractionAgent...")
-        await runtime.register_agent(
-            agent_type=HumanInteractionAgent,
-            agent_name="human_interactor",
-            agent_factory=lambda: HumanInteractionAgent(model_client),
         )
 
         # start the runtime
@@ -316,7 +332,20 @@ async def main(project_path: str, function_name: str) -> None:
             request=Request(
                 type="task.find_callers",
                 payload={"function_name": function_name},
-                response_schema=TypeAdapter(FindCallersResponse).json_schema(),
+                # response_schema=to_schema(
+                #     typed_dict(
+                #         results=list[typed_dict(
+                #             function_name=str,
+                #             summary=str,
+                #             callers=list[typed_dict(
+                #                 caller_name=str,
+                #                 callsite=NotRequired[str],
+                #             )],
+                #             label=Literal["Good", "Bad", "Unknown"],
+                #         )],
+                #         message=NotRequired[str],
+                #     )
+                # ),
             ),
             target=AgentId("caller_finder", "default"),
         )

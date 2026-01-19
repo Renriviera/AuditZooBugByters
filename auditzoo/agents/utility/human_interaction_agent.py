@@ -105,6 +105,22 @@ def _human_interaction_server(port: int, stop_event: threading.Event) -> None:
         server_socket.close()
 
 
+def human_interaction_request(question: str, **kwargs) -> Request:
+    """Create a human interaction request.
+
+    Args:
+        question: Question to ask the human
+
+    Returns:
+        Request object with type "human.ask" and payload containing the question
+    """
+    return Request(
+        type="human.ask",
+        payload={"question": question},
+        **kwargs,
+    )
+
+
 class HumanInteractionAgent(BaseAnalysisAgent):
     """Agent that delegates questions to a human via IPC server.
 
@@ -248,6 +264,7 @@ class HumanInteractionAgent(BaseAnalysisAgent):
         Returns:
             Response with human's answer or error
         """
+
         async with self._lock:
             if message.type != "human.ask":
                 return Response.fail(f"Unknown task type: {message.type}")
