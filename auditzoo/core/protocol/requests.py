@@ -96,7 +96,7 @@ from auditzoo.core.protocol.errors import ProtocolValidationError
 from auditzoo.core.protocol.utils import to_dict_for_validation
 
 
-@dataclass
+@dataclass(frozen=True)
 class Request:
     """Universal request message for agent communication.
 

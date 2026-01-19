@@ -12,7 +12,7 @@ from auditzoo.core.protocol.errors import ProtocolRuntimeError, ProtocolValidati
 from auditzoo.core.protocol.utils import to_dict_for_validation
 
 
-@dataclass
+@dataclass(frozen=True)
 class Response:
     """Universal response message for agent communication.
 
