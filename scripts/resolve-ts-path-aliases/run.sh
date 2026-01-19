@@ -53,7 +53,7 @@ echo -e "${GREEN}Checking dependencies...${NC}"
 cd "$SCRIPT_DIR"
 if [ ! -d "node_modules" ]; then
     echo -e "${YELLOW}Installing dependencies (ts-morph, typescript)...${NC}"
-    npm i -D ts-morph typescript
+    npm install --no-save ts-morph typescript
     echo -e "${GREEN}✓ Dependencies installed${NC}"
 else
     echo -e "${GREEN}✓ Dependencies already installed${NC}"
