@@ -164,8 +164,8 @@ class Request:
     type: str
     payload: dict[str, Any]
     request_id: str = field(default_factory=lambda: str(uuid4()))
-    metadata: dict[str, Any] = field(default_factory=dict)
     response_schema: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert request to dictionary for serialization.
@@ -216,7 +216,5 @@ class Request:
                 instance=to_dict_for_validation(self.payload), schema=schema
             )
             return True
-        except Exception as e:  # MDZZ
-            raise ProtocolValidationError(
-                f"JSON Schema validation failed: {e}\nMDZZ 1 {self}"
-            ) from e
+        except jsonschema.ValidationError as e:
+            raise ProtocolValidationError(f"JSON Schema validation failed: {e}") from e

@@ -185,7 +185,5 @@ class Response:
                 instance=to_dict_for_validation(self.data), schema=schema
             )
             return True
-        except Exception as e:  # MDZZ
-            raise ProtocolValidationError(
-                f"JSON Schema validation failed: {e}MDZZ 1 {self}"
-            ) from e
+        except jsonschema.ValidationError as e:
+            raise ProtocolValidationError(f"JSON Schema validation failed: {e}") from e
