@@ -81,7 +81,7 @@ class CallerFinderAgent(BaseAnalysisAgent):
         super().__init__("Finds all callers of a given function")
 
     @classmethod
-    async def register_all(
+    async def register_all(  # pyright: ignore[reportIncompatibleMethodOverride]
         cls,
         runtime: AgentRuntime,
         type: str,
