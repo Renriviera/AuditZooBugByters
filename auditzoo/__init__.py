@@ -1,27 +1,11 @@
-"""AuditZoo: Pluggable, agent-based program analysis framework.
-
-AuditZoo provides a unified infrastructure for building and composing
-program analyses using AutoGen-Core agents.
-
-Key Components:
-    - Runtime: AnalysisRuntime for managing backend and agents
-    - Agents: BaseAnalysisAgent, IRStorageAgent for IR access
-    - Protocol: Request/Response messaging
-    - IR Model: CodeUnit, Relations, Facts
-    - Backends: Joern, and more
+"""AuditZoo: agent-based program analysis framework.
 
 Quick Start:
-    from auditzoo import AnalysisRuntime, BaseAnalysisAgent
-    from auditzoo.core.protocol import TaskRequest, Response
+    from auditzoo import AnalysisRuntime
     from auditzoo.backends.ingestion import auto_detect_backend
 
-    # Create runtime
     config = auto_detect_backend("./my_project")
     async with AnalysisRuntime(config) as runtime:
-        # Register custom agent
-        await runtime.register_agent(...)
-
-        # Send analysis request
         response = await runtime.send_message(...)
 """
 

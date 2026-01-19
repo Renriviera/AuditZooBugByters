@@ -34,8 +34,8 @@ The installation script will:
 
 ```python
 import asyncio
-from auditzoo import AnalysisRuntime, UKRegistry, auto_detect_backend, Request
-from pydantic import TypeAdapter
+from auditzoo import AnalysisRuntime, UKRegistry, auto_detect_backend, Request, CodeUnit
+from auditzoo.core.protocol.utils import to_schema
 
 async def main():
     # Auto-detect backend configuration
@@ -48,7 +48,7 @@ async def main():
             Request(
                 type="ir.get_all_units_by_kind",
                 payload={"kind": UKRegistry.Function()},
-                response_schema=TypeAdapter(list[CodeUnit]).json_schema(),
+                response_schema=to_schema(list[CodeUnit]),
             ),
             runtime.ir_agent_id
         )
@@ -97,6 +97,7 @@ See [examples/find_callers.py](examples/find_callers.py) for complete examples.
 - **Protocol**: Request/Response messaging
   - `Request`: type (e.g., "ir.*", "task.*"), payload (dict)
   - `Response`: success, data (any type), error
+  - `Request`/`Response` are sealed; do not subclass
 - **IR Model**: Code representation via Code Property Graphs
   - `CodeUnit`: Code at any granularity (file, function, statement, etc.)
   - `CodeUnitRelation`: Relationships (calls, contains, etc.)

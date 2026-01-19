@@ -10,7 +10,7 @@ This document describes the architecture and internals of AuditZoo for contribut
 - [IR Model](#ir-model)
 - [Backend System](#backend-system)
 - [Analysis Agents](#analysis-agents)
-- [Schema Patterns with TypeAdapter and TypedDict](#schema-patterns-with-typeadapter-and-typeddict)
+- [Schema Patterns with to_schema and typed_dict](#schema-patterns-with-to_schema-and-typed_dict)
 - [Advanced Topics](#advanced-topics)
 - [Contributing](#contributing)
 
@@ -158,16 +158,10 @@ Facts support:
 
 All agent communication uses structured messages defined in the protocol layer.
 
-**Design Philosophy:**
-- **Single Request class**:
-  - Reason: AutoGen's `@message_handler` doesn't support inheritance
-  - Message routing breaks when handlers are in subclasses
-- **Flexible payloads**: Use `dict[str, Any]` to allow any data structure
-  - Put dataclasses, TypedDicts, or plain dicts in the payload
-  - No need to modify core protocol for new data types
-- **Optional validation**: `response_schema` field for runtime type checking
-  - Purpose: Help callers understand expected response structure
-  - Best practice: Define schemas in callee agent files, import in callers
+**Protocol basics:**
+- **Single Request and Response classes** (sealed; no subclasses)
+- **Flexible payloads**: `payload` is `dict[str, Any]`
+- **Optional validation**: `response_schema` can validate `Response.data`
 
 #### Request Class ([`protocol/requests.py`](auditzoo/core/protocol/requests.py))
 
@@ -175,7 +169,7 @@ All agent communication uses structured messages defined in the protocol layer.
 @dataclass
 class Request:
     type: str                           # Dot-notation type (e.g., "ir.get_unit", "task.analysis")
-    payload: dict[str, Any]             # Request data (any JSON-serializable structure)
+    payload: dict[str, Any]             # Request data (JSON-serializable recommended)
     request_id: str                     # Auto-generated UUID
     metadata: dict[str, Any]            # Optional metadata
     response_schema: dict[str, Any]     # Optional JSON schema for response validation
@@ -186,7 +180,7 @@ class Request:
 1. **IR Operations** (prefix: `ir.`)
    - Direct IR operations (CRUD on units/relations)
    - Handled by `IRStorageAgent`
-   - Examples: `ir.get_unit`, `ir.get_related_units`, `ir.add_fact`
+   - Examples: `ir.get_unit`, `ir.get_related_units`, `ir.get_graph_stats`
 
 2. **Analysis Tasks** (prefix: `task.`)
    - Long-running analysis tasks
@@ -198,7 +192,7 @@ class Request:
    - Handled by `IRStorageAgent` or query processors
    - Examples: `query.search`, `query.pattern_match`
 
-**Payload Flexibility**: Put your own data structures in the payload dict:
+**Payload example**:
 ```python
 from dataclasses import dataclass, asdict
 
@@ -210,8 +204,26 @@ class TaintParams:
 params = TaintParams(source="user_input", sink="sql_query")
 request = Request(
     type="task.taint_analysis",
-    payload=asdict(params)  # Convert your dataclass to dict
+    payload=asdict(params)
 )
+```
+
+**Agent-specific request helpers**:
+Request is sealed, so define small helper functions to construct agent-specific
+requests instead of subclassing. This keeps call sites consistent and documents
+payload shape in one place (see `auditzoo/agents/utility/human_interaction_agent.py`).
+
+```python
+from auditzoo.core.protocol.requests import Request
+from auditzoo.core.protocol.utils import to_schema, typed_dict
+
+def my_agent_request(query: str, **kwargs) -> Request:
+    return Request(
+        type="task.my_agent",
+        payload={"query": query},
+        response_schema=to_schema(typed_dict(results=list[str])),
+        **kwargs,
+    )
 ```
 
 #### Response Class ([`protocol/responses.py`](auditzoo/core/protocol/responses.py))
@@ -220,12 +232,12 @@ request = Request(
 @dataclass
 class Response:
     success: bool
-    data: Any = None              # Can be ANY type, not just dict!
+    data: Any = None              # Any type
     error: str | None = None
     metadata: dict = {}
 
 # Convenience constructors
-Response.ok(data=[...])           # data can be list, dict, dataclass, etc.
+Response.ok(data=[...])
 Response.fail(error="Error message")
 
 # Unwrapping
@@ -233,7 +245,7 @@ result = response.unwrap()        # Raises if failed
 result = response.unwrap_or(default=[])
 ```
 
-**Important**: Response.data is NOT restricted to dict - it can be any type (list, dataclass, primitive, etc.)
+**Note**: `Response.data` can be any type (list, dataclass, primitive, etc.).
 
 ### 4. Agent System (`auditzoo/core/agents/`)
 
@@ -268,21 +280,22 @@ class BaseAgent(RoutedAgent, ABC):
 - `handle_message`: Entry point with `@message_handler`, handles validation and exceptions
 - `_handle_request`: Abstract method for subclasses to implement (NO `@message_handler`)
 - ANY exception in an agent is caught and returned as `Response.fail()`
+- Override `register_all()` to register sub-agents; the runtime calls it.
 
 #### IRStorageAgent ([`agents/ir_storage_agent.py`](auditzoo/core/agents/ir_storage_agent.py))
 - Built-in agent that manages the IR graph
-- Handles all IR-related `Request` messages
-- Provides CRUD operations on units, relations, and facts
+- Handles all `ir.*` requests
 - Automatically registered by `AnalysisRuntime`
 
-**Supported operations:**
-- `ir.get_unit` - Get a code unit by ID
-- `ir.get_all_units_by_kind` - Get all units of a specific kind
-- `ir.get_related_units` - Get units related by a specific relation kind
-- `ir.add_unit` - Add a new code unit
-- `ir.add_relation` - Add a relation between units
-- `ir.add_fact` - Attach a fact to a unit or relation
-- `ir.query` - Execute backend-specific queries
+**Common operations:**
+- `ir.query`, `ir.fetch_unit`, `ir.get_unit`, `ir.has_unit`
+- `ir.get_all_units_by_kind`, `ir.get_all_units`
+- `ir.get_all_relations_by_kind`, `ir.get_all_relations`, `ir.get_related_units`
+- `ir.get_graph_stats`, `ir.load_facts`, `ir.preload_from_backend`, `ir.sync_backend`, `ir.reload`, `ir.cleanup`
+
+**Not implemented (returns failure today):**
+- `ir.filter_graph`, `ir.get_reachable_units`, `ir.find_shortest_path`
+- `ir.add_unit_fact`, `ir.add_relation_fact`, `ir.get_unit_facts`, `ir.get_relation_facts`
 
 #### BaseAnalysisAgent ([`agents/base_analysis_agent.py`](auditzoo/core/agents/base_analysis_agent.py))
 - Base class for all custom analysis agents
@@ -296,17 +309,13 @@ class BaseAgent(RoutedAgent, ABC):
 
 **Creating custom agents:**
 ```python
-from pydantic import TypeAdapter
-from typing_extensions import TypedDict
+from auditzoo.core.protocol.utils import to_schema, typed_dict
 
 # Define response schema in your agent file (recommended)
-MY_TASK_RESPONSE_SCHEMA = TypeAdapter(TypedDict(
-    "MyTaskResponse",
-    {
-        "results": list[str],
-        "confidence": float,
-    },
-)).json_schema()
+MY_TASK_RESPONSE_SCHEMA = to_schema(typed_dict(
+    results=list[str],
+    confidence=float,
+))
 
 class MyAgent(BaseAnalysisAgent):
     def __init__(self):
@@ -329,27 +338,23 @@ class MyAgent(BaseAnalysisAgent):
 - Define response schemas as module constants for callers to import
 - BaseAnalysisAgent does NOT implement `_handle_request` - it remains abstract
 
-## Schema Patterns with TypeAdapter and TypedDict
+## Schema Patterns with to_schema and typed_dict
 
-AuditZoo uses `TypeAdapter` from Pydantic with `TypedDict` to generate JSON schemas for response validation.
+AuditZoo uses `to_schema` and `typed_dict` helpers to generate JSON schemas for response validation.
 
-Note that schema validation is **optional*.
+Schema validation is optional.
 
 ### Basic Pattern
 
 ```python
-from pydantic import TypeAdapter
-from typing_extensions import TypedDict, NotRequired
+from auditzoo.core.protocol.utils import to_schema, typed_dict
+from typing_extensions import NotRequired
 
-# Define schema using TypedDict
-RESPONSE_SCHEMA = TypeAdapter(TypedDict(
-    "ResponseData",
-    {
-        "required_field": str,
-        "optional_field": NotRequired[int],
-        "nested_list": list[dict[str, str]],
-    },
-)).json_schema()
+RESPONSE_SCHEMA = to_schema(typed_dict(
+    required_field=str,
+    optional_field=NotRequired[int],
+    nested_list=list[dict[str, str]],
+))
 
 # Use in request
 request = Request(
@@ -363,8 +368,8 @@ request = Request(
 
 ```python
 from dataclasses import dataclass
-from pydantic import TypeAdapter
-from typing_extensions import TypedDict
+from auditzoo.core.protocol.utils import to_schema, typed_dict
+from typing_extensions import NotRequired
 
 # When response contains dataclasses, use dataclass types directly
 @dataclass
@@ -372,13 +377,10 @@ class FunctionInfo:
     name: str
     callers: list[str]
 
-RESPONSE_SCHEMA = TypeAdapter(TypedDict(
-    "FindCallersResponse",
-    {
-        "results": list[FunctionInfo],  # TypeAdapter handles dataclass conversion
-        "message": NotRequired[str],
-    },
-)).json_schema()
+RESPONSE_SCHEMA = to_schema(typed_dict(
+    results=list[FunctionInfo],
+    message=NotRequired[str],
+))
 ```
 
 ### Best Practices
@@ -386,7 +388,7 @@ RESPONSE_SCHEMA = TypeAdapter(TypedDict(
 1. **Define schemas in callee agent files**:
 ```python
 # In my_agent.py (where handler is implemented)
-MY_RESPONSE_SCHEMA = TypeAdapter(TypedDict(...)).json_schema()
+MY_RESPONSE_SCHEMA = to_schema(typed_dict(...))
 
 class MyAgent(BaseAnalysisAgent):
     async def _handle_request(self, message: Request, ctx: MessageContext) -> Response:
@@ -408,13 +410,10 @@ request = Request(
 
 3. **Use NotRequired for optional fields**:
 ```python
-TypeAdapter(TypedDict(
-    "MyResponse",
-    {
-        "required": str,
-        "optional": NotRequired[int],
-    },
-)).json_schema()
+to_schema(typed_dict(
+    required=str,
+    optional=NotRequired[int],
+))
 ```
 
 4. **All nested structures must be dataclasses**:
@@ -423,12 +422,9 @@ TypeAdapter(TypedDict(
 class NestedData:
     field: str
 
-RESPONSE_SCHEMA = TypeAdapter(TypedDict(
-    "Response",
-    {
-        "nested": NestedData,  # Dataclass in response
-    },
-)).json_schema()
+RESPONSE_SCHEMA = to_schema(typed_dict(
+    nested=NestedData,
+))
 ```
 
 ### Real-World Example
@@ -437,22 +433,16 @@ See [`auditzoo/core/agents/ir_storage_agent.py`](auditzoo/core/agents/ir_storage
 
 ```python
 REQUEST_SCHEMAS = {
-    "get_unit": TypeAdapter(TypedDict(
-        "GetUnitPayload",
-        {
-            "unit_id": str,
-            "fetch_backend": NotRequired[bool],
-        },
-    )).json_schema(),
-    "get_related_units": TypeAdapter(TypedDict(
-        "GetRelatedUnitsPayload",
-        {
-            "unit_id": str,
-            "kind": RelationKind,
-            "direction": str,
-            "fetch_backend": NotRequired[bool],
-        },
-    )).json_schema(),
+    "get_unit": to_schema(typed_dict(
+        unit_id=str,
+        fetch_backend=NotRequired[bool],
+    )),
+    "get_related_units": to_schema(typed_dict(
+        unit_id=str,
+        kind=RelationKind,
+        direction=str,
+        fetch_backend=NotRequired[bool],
+    )),
 }
 ```
 
@@ -514,7 +504,7 @@ Analysis agents live in `auditzoo/agents/` and implement specific analysis tasks
 
 **Singleton agents**: Place directly under `auditzoo/agents/{category}/` (e.g., `auditzoo/agents/utility/my_agent.py`)
 
-**Multi-agent systems with single exposed agent**: Create subdirectory under `auditzoo/agents/{category}/`, expose main agent, and override `register_all()` classmethod to register internal agents:
+**Multi-agent systems with a single exposed agent**: Override `register_all()` to register internal agents so the runtime can register them implicitly.
 
 ```python
 # auditzoo/agents/myanalysis/system/main_agent.py

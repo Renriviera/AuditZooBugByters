@@ -15,6 +15,6 @@ payload: {
 response_schema: {...}  # Optional: LLM formats human's answer to match schema
 ```
 
-**Response**: Human's answer (string or formatted JSON if schema provided)
+**Response**: `Response.data` is the human's answer (string or formatted JSON if schema provided)
 
 **Location**: [auditzoo/agents/utility/human_interaction_agent.py](utility/human_interaction_agent.py)

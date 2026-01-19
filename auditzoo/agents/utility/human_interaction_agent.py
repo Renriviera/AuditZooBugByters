@@ -141,7 +141,7 @@ class HumanInteractionAgent(BaseAnalysisAgent):
         On first instantiation, spawns the IPC server process.
 
         Args:
-            description: Agent description
+            model_client: Optional model client for schema formatting
         """
         super().__init__(description="Human interaction agent")
 

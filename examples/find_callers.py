@@ -90,12 +90,7 @@ class CallerFinderAgent(BaseAnalysisAgent):
         skip_class_subscriptions: bool = False,
         skip_direct_message_subscription: bool = False,
     ) -> AgentType:
-        """
-        This function supports register all sub-agents that will be used by
-        the current agent.
-
-        By default, it will only register the agent itself.
-        """
+        """Register sub-agents before registering the parent agent."""
         # Register FunctionSummaryAgent as a sub-agent
         print("Registering SubAgent FunctionSummaryAgent...")
         model_client = OpenAIChatCompletionClient(
