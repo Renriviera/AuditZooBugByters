@@ -17,7 +17,7 @@ Example:
 import asyncio
 import sys
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from autogen_core import AgentId, MessageContext
 from autogen_core.models import ChatCompletionClient, UserMessage
@@ -25,6 +25,7 @@ from autogen_ext.models.openai import OpenAIChatCompletionClient
 from pydantic import TypeAdapter
 from typing_extensions import NotRequired, TypedDict
 
+from auditzoo.agents.utility.human_interaction_agent import HumanInteractionAgent
 from auditzoo.backends.ingestion import auto_detect_backend
 from auditzoo.core.agents import BaseAnalysisAgent
 from auditzoo.core.ir.model.base import CodeUnit
@@ -42,6 +43,7 @@ class FunctionCallersResult(TypedDict):
     function_name: str
     summary: str
     callers: list[CallerInfo]
+    label: Literal["Good", "Bad", "Unknown"]
 
 
 class FindCallersResponse(TypedDict):
@@ -120,12 +122,8 @@ class CallerFinderAgent(BaseAnalysisAgent):
         ]
 
         if not matching_functions:
-            return Response.ok(
-                data={
-                    "function_name": function_name,
-                    "matches": [],
-                    "message": f"No functions found matching '{function_name}'",
-                }
+            return Response.fail(
+                f"No functions found matching '{function_name}'",
             )
 
         # Step 3: For each matching function, find its callers
@@ -154,22 +152,41 @@ class CallerFinderAgent(BaseAnalysisAgent):
             payload={"unit": function},
             response_schema=TypeAdapter(str).json_schema(),
         )
-        summary_response = await self.send_message(
+        summary_response: Response = await self.send_message(
             message=request,
             recipient=AgentId("function_summarizer", function.id),
         )
 
-        if summary_response.success:
+        user_label: Response = await self.send_message(
+            message=Request(
+                type="human.ask",
+                payload={
+                    "question": f"I have got the summary for function {function.name}, how will you label it? Good, Bad or Unknown?\n\nSummary: {summary_response.data if summary_response.success else 'N/A'}"
+                },
+                response_schema=TypeAdapter(
+                    TypedDict(  # type: ignore
+                        "Result",
+                        {"label": Literal["Good", "Bad", "Unknown"]},
+                        total=False,
+                    )
+                ).json_schema(),
+            ),
+            recipient=AgentId("human_interactor", "default"),
+        )
+
+        if summary_response.success and user_label.success:
             return {
                 "function_name": function.name,
                 "callers": caller_infos,
                 "summary": summary_response.data,
+                "label": user_label.data["label"],
             }
         else:
             return {
                 "function_name": function.name,
                 "callers": caller_infos,
                 "summary": "Summary generation failed.",
+                "label": "Unknown",
             }
 
 
@@ -209,6 +226,7 @@ def format_results(response_data: dict[str, Any] | None) -> None:
         # Function header
         print(f"\n[{idx}] Function: {function_name}")
         print(f"    Summary: {result['summary']}")
+        print(f"    Label: {result['label']}")
         print(f"    Callers: {len(callers)}")
 
         if callers:
@@ -278,6 +296,13 @@ async def main(project_path: str, function_name: str) -> None:
             agent_type=FunctionSummaryAgent,
             agent_name="function_summarizer",
             agent_factory=lambda: FunctionSummaryAgent(model_client),
+        )
+
+        print("Registrating HumanInteractionAgent...")
+        await runtime.register_agent(
+            agent_type=HumanInteractionAgent,
+            agent_name="human_interactor",
+            agent_factory=lambda: HumanInteractionAgent(model_client),
         )
 
         # start the runtime
