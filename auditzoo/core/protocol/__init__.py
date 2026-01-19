@@ -3,7 +3,7 @@
 from .errors import ProtocolError, ProtocolRuntimeError, ProtocolValidationError
 from .requests import Request
 from .responses import Response
-from .utils import to_schema
+from .utils import to_schema, typed_dict
 
 __all__ = [
     "Request",
@@ -12,4 +12,5 @@ __all__ = [
     "ProtocolValidationError",
     "ProtocolRuntimeError",
     "to_schema",
+    "typed_dict",
 ]

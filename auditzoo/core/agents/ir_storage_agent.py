@@ -7,10 +7,10 @@ This agent does NOT use LLM - it's purely deterministic, providing complete
 CRUD operations on the code property graph stored in IRView.
 """
 
-from typing import Any
+from typing import Any, Literal
 
 from autogen_core import MessageContext
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import NotRequired
 
 from auditzoo.core.agents.base import BaseAgent
 from auditzoo.core.ir.model import (
@@ -21,116 +21,81 @@ from auditzoo.core.ir.model import (
 from auditzoo.core.ir.view import IRView
 from auditzoo.core.protocol.requests import Request
 from auditzoo.core.protocol.responses import Response
-from auditzoo.core.protocol.utils import to_schema
+from auditzoo.core.protocol.utils import to_schema, typed_dict
 
 # JSON schemas for request validation
 REQUEST_SCHEMAS = {
-    "query": to_schema(
-        TypedDict("QueryPayload", {"query": str, "response_ty": str})  # type: ignore
-    ),
+    "query": to_schema(typed_dict(query=str, response_ty=str)),
     "fetch_unit": to_schema(
-        TypedDict(
-            "FetchUnitPayload",
-            {
-                "file_path": str,
-                "line_start": int,
-                "line_end": int,
-                "column_start": NotRequired[int],
-            },
-        )  # type: ignore
+        typed_dict(
+            file_path=str,
+            line_start=int,
+            line_end=int,
+            column_start=NotRequired[int],
+        )
     ),
     "get_unit": to_schema(
-        TypedDict(
-            "GetUnitPayload",
-            {
-                "unit_id": str,
-                "fetch_backend": NotRequired[bool],
-            },
-        )  # type: ignore
+        typed_dict(
+            unit_id=str,
+            fetch_backend=NotRequired[bool],
+        )
     ),
     "has_unit": to_schema(
-        TypedDict(
-            "HasUnitPayload",
-            {
-                "unit_id": str,
-                "fetch_backend": NotRequired[bool],
-            },
-        )  # type: ignore
+        typed_dict(
+            unit_id=str,
+            fetch_backend=NotRequired[bool],
+        )
     ),
     "get_all_units_by_kind": to_schema(
-        TypedDict(
-            "GetAllUnitsByKindPayload",
-            {
-                "kind": CodeUnitKind,
-                "fetch_backend": NotRequired[bool],
-            },
-        )  # type: ignore
+        typed_dict(
+            kind=CodeUnitKind,
+            fetch_backend=NotRequired[bool],
+        )
     ),
     "get_all_relations_by_kind": to_schema(
-        TypedDict(
-            "GetAllRelationsByKindPayload",
-            {
-                "kind": RelationKind,
-                "fetch_backend": NotRequired[bool],
-            },
-        )  # type: ignore
+        typed_dict(
+            kind=RelationKind,
+            fetch_backend=NotRequired[bool],
+        )
     ),
     "get_related_units": to_schema(
-        TypedDict(
-            "GetRelatedUnitsPayload",
-            {
-                "unit_id": str,
-                "kind": RelationKind,
-                "direction": str,  # Literal["in", "out", "both"] if you want to be more specific
-                "fetch_backend": NotRequired[bool],
-            },
-        )  # type: ignore
+        typed_dict(
+            unit_id=str,
+            kind=RelationKind,
+            direction=Literal["in", "out", "both"],
+            fetch_backend=NotRequired[bool],
+        )
     ),
     "get_unit_facts": to_schema(
-        TypedDict(
-            "GetUnitFactsPayload",
-            {
-                "unit_id": str,
-                "fact_cls": NotRequired[str],
-                "fetch_backend": NotRequired[bool],
-            },
-        )  # type: ignore
+        typed_dict(
+            unit_id=str,
+            fact_cls=NotRequired[str],
+            fetch_backend=NotRequired[bool],
+        )
     ),
     "get_relation_facts": to_schema(
-        TypedDict(
-            "GetRelationFactsPayload",
-            {
-                "fact_cls": NotRequired[str],
-            },
-        )  # type: ignore
+        typed_dict(
+            fact_cls=NotRequired[str],
+        )
     ),
     "filter_graph": to_schema(
-        TypedDict(
-            "FilterGraphPayload",
-            {
-                "filter_expr": str,
-            },
-        )  # type: ignore
+        typed_dict(
+            filter_expr=str,
+        )
     ),
     "get_reachable_units": to_schema(
-        TypedDict(
-            "GetReachableUnitsPayload",
-            {
-                "unit_id": str,
-                "filter_expr": str,
-                "max_depth": NotRequired[int | None],
-            },
-        )  # type: ignore
+        typed_dict(
+            unit_id=str,
+            filter_expr=str,
+            max_depth=NotRequired[int | None],
+        )
     ),
     "find_shortest_path": to_schema(
-        TypedDict(
-            "FindShortestPathPayload",
-            {
-                "from_unit_id": str,
-                "to_unit_id": str,
-                "filter_expr": str,
-            },
-        )  # type: ignore
+        typed_dict(
+            from_unit_id=str,
+            to_unit_id=str,
+            filter_expr=str,
+        )
     ),
 }
 

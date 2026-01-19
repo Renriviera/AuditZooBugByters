@@ -5,6 +5,7 @@ from dataclasses import is_dataclass
 from typing import Any, cast
 
 from pydantic import TypeAdapter
+from typing_extensions import TypedDict
 
 
 def pydantic_default(o: Any):
@@ -62,3 +63,16 @@ def to_schema(ty: type) -> dict[str, Any]:
     """
 
     return TypeAdapter(ty).json_schema()
+
+
+def typed_dict(**kwargs) -> type:
+    """Generate a TypedDict type from a metadata dictionary.
+
+    Args:
+        **kwargs: Keyword arguments where keys are field names and values are field types.
+
+    Returns:
+        Generated TypedDict type.
+    """
+
+    return TypedDict("_GeneratedTypedDict", **kwargs)  # type: ignore
