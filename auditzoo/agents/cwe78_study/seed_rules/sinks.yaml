@@ -1,0 +1,51 @@
+# Command-execution sink APIs for CWE-78 detection (15 APIs).
+
+sinks:
+  - api: "os.system"
+    severity: critical
+    shell_param: false        # always shell
+  - api: "os.popen"
+    severity: critical
+    shell_param: false
+  - api: "os.execvp"
+    severity: high
+    shell_param: false
+  - api: "os.execvpe"
+    severity: high
+    shell_param: false
+  - api: "subprocess.run"
+    severity: critical
+    shell_param: true         # dangerous when shell=True
+  - api: "subprocess.call"
+    severity: critical
+    shell_param: true
+  - api: "subprocess.Popen"
+    severity: critical
+    shell_param: true
+  - api: "subprocess.check_output"
+    severity: high
+    shell_param: true
+  - api: "subprocess.check_call"
+    severity: high
+    shell_param: true
+  - api: "subprocess.getoutput"
+    severity: high
+    shell_param: false
+  - api: "subprocess.getstatusoutput"
+    severity: high
+    shell_param: false
+  - api: "commands.getoutput"
+    severity: high
+    shell_param: false
+    legacy: true
+  - api: "commands.getstatusoutput"
+    severity: high
+    shell_param: false
+    legacy: true
+  - api: "pty.spawn"
+    severity: high
+    shell_param: false
+  - api: "fabric.run"
+    severity: medium
+    shell_param: false
+    framework: fabric

@@ -1,0 +1,616 @@
+diff --git a/docs/tools/exec-approvals.md b/docs/tools/exec-approvals.md
+index e57c738b8d7d4..eacc482bd3040 100644
+--- a/docs/tools/exec-approvals.md
++++ b/docs/tools/exec-approvals.md
+@@ -124,6 +124,10 @@ are treated as allowlisted on nodes (macOS node or headless node host). This use
+ `tools.exec.safeBins` defines a small list of **stdin-only** binaries (for example `jq`)
+ that can run in allowlist mode **without** explicit allowlist entries. Safe bins reject
+ positional file args and path-like tokens, so they can only operate on the incoming stream.
++Treat this as a narrow fast-path for stream filters, not a general trust list.
++Do **not** add interpreter or runtime binaries (for example `python3`, `node`, `ruby`, `bash`, `sh`, `zsh`) to `safeBins`.
++If a command can evaluate code, execute subcommands, or read files by design, prefer explicit allowlist entries and keep approval prompts enabled.
++Custom safe bins must define an explicit profile in `tools.exec.safeBinProfiles.<bin>`.
+ Validation is deterministic from argv shape only (no host filesystem existence checks), which
+ prevents file-existence oracle behavior from allow/deny differences.
+ File-oriented options are denied for default safe bins (for example `sort -o`, `sort --output`,
+@@ -165,6 +169,42 @@ their non-stdin workflows.
+ For `grep` in safe-bin mode, provide the pattern with `-e`/`--regexp`; positional pattern form is
+ rejected so file operands cannot be smuggled as ambiguous positionals.
+ 
++### Safe bins versus allowlist
++
++| Topic            | `tools.exec.safeBins`                                  | Allowlist (`exec-approvals.json`)                            |
++| ---------------- | ------------------------------------------------------ | ------------------------------------------------------------ |
++| Goal             | Auto-allow narrow stdin filters                        | Explicitly trust specific executables                        |
++| Match type       | Executable name + safe-bin argv policy                 | Resolved executable path glob pattern                        |
++| Argument scope   | Restricted by safe-bin profile and literal-token rules | Path match only; arguments are otherwise your responsibility |
++| Typical examples | `jq`, `head`, `tail`, `wc`                             | `python3`, `node`, `ffmpeg`, custom CLIs                     |
++| Best use         | Low-risk text transforms in pipelines                  | Any tool with broader behavior or side effects               |
++
++Configuration location:
++
++- `safeBins` comes from config (`tools.exec.safeBins` or per-agent `agents.list[].tools.exec.safeBins`).
++- `safeBinProfiles` comes from config (`tools.exec.safeBinProfiles` or per-agent `agents.list[].tools.exec.safeBinProfiles`). Per-agent profile keys override global keys.
++- allowlist entries live in host-local `~/.openclaw/exec-approvals.json` under `agents.<id>.allowlist` (or via Control UI / `openclaw approvals allowlist ...`).
++
++Custom profile example:
++
++```json5
++{
++  tools: {
++    exec: {
++      safeBins: ["jq", "myfilter"],
++      safeBinProfiles: {
++        myfilter: {
++          minPositional: 0,
++          maxPositional: 0,
++          allowedValueFlags: ["-n", "--limit"],
++          deniedFlags: ["-f", "--file", "-c", "--command"],
++        },
++      },
++    },
++  },
++}
++```
++
+ ## Control UI editing
+ 
+ Use the **Control UI → Nodes → Exec approvals** card to edit defaults, per‑agent
+diff --git a/docs/tools/exec.md b/docs/tools/exec.md
+index 3712b5507d888..ef24f3d7cd91e 100644
+--- a/docs/tools/exec.md
++++ b/docs/tools/exec.md
+@@ -55,6 +55,7 @@ Notes:
+ - `tools.exec.node` (default: unset)
+ - `tools.exec.pathPrepend`: list of directories to prepend to `PATH` for exec runs (gateway + sandbox only).
+ - `tools.exec.safeBins`: stdin-only safe binaries that can run without explicit allowlist entries. For behavior details, see [Safe bins](/tools/exec-approvals#safe-bins-stdin-only).
++- `tools.exec.safeBinProfiles`: optional custom argv policy per safe bin (`minPositional`, `maxPositional`, `allowedValueFlags`, `deniedFlags`).
+ 
+ Example:
+ 
+@@ -126,6 +127,16 @@ allowlisted or a safe bin. Chaining (`;`, `&&`, `||`) and redirections are rejec
+ allowlist mode unless every top-level segment satisfies the allowlist (including safe bins).
+ Redirections remain unsupported.
+ 
++Use the two controls for different jobs:
++
++- `tools.exec.safeBins`: small, stdin-only stream filters.
++- `tools.exec.safeBinProfiles`: explicit argv policy for custom safe bins.
++- allowlist: explicit trust for executable paths.
++
++Do not treat `safeBins` as a generic allowlist, and do not add interpreter/runtime binaries (for example `python3`, `node`, `ruby`, `bash`). If you need those, use explicit allowlist entries and keep approval prompts enabled.
++
++For full policy details and examples, see [Exec approvals](/tools/exec-approvals#safe-bins-stdin-only) and [Safe bins versus allowlist](/tools/exec-approvals#safe-bins-versus-allowlist).
++
+ ## Examples
+ 
+ Foreground:
+diff --git a/src/agents/bash-tools.exec-host-gateway.ts b/src/agents/bash-tools.exec-host-gateway.ts
+index 7e069816988dd..f742ee3862a8f 100644
+--- a/src/agents/bash-tools.exec-host-gateway.ts
++++ b/src/agents/bash-tools.exec-host-gateway.ts
+@@ -14,6 +14,7 @@ import {
+   resolveAllowAlwaysPatterns,
+   resolveExecApprovals,
+ } from "../infra/exec-approvals.js";
++import type { SafeBinProfile } from "../infra/exec-safe-bin-policy.js";
+ import { markBackgrounded, tail } from "./bash-process-registry.js";
+ import { requestExecApprovalDecision } from "./bash-tools.exec-approval-request.js";
+ import {
+@@ -36,6 +37,7 @@ export type ProcessGatewayAllowlistParams = {
+   security: ExecSecurity;
+   ask: ExecAsk;
+   safeBins: Set<string>;
++  safeBinProfiles: Readonly<Record<string, SafeBinProfile>>;
+   agentId?: string;
+   sessionKey?: string;
+   scopeKey?: string;
+@@ -69,6 +71,7 @@ export async function processGatewayAllowlist(
+     command: params.command,
+     allowlist: approvals.allowlist,
+     safeBins: params.safeBins,
++    safeBinProfiles: params.safeBinProfiles,
+     cwd: params.workdir,
+     env: params.env,
+     platform: process.platform,
+diff --git a/src/agents/bash-tools.exec-types.ts b/src/agents/bash-tools.exec-types.ts
+index 9a94f45543d3c..b6947de79bf86 100644
+--- a/src/agents/bash-tools.exec-types.ts
++++ b/src/agents/bash-tools.exec-types.ts
+@@ -1,4 +1,5 @@
+ import type { ExecAsk, ExecHost, ExecSecurity } from "../infra/exec-approvals.js";
++import type { SafeBinProfileFixture } from "../infra/exec-safe-bin-policy.js";
+ import type { BashSandboxConfig } from "./bash-tools.shared.js";
+ 
+ export type ExecToolDefaults = {
+@@ -8,6 +9,7 @@ export type ExecToolDefaults = {
+   node?: string;
+   pathPrepend?: string[];
+   safeBins?: string[];
++  safeBinProfiles?: Record<string, SafeBinProfileFixture>;
+   agentId?: string;
+   backgroundMs?: number;
+   timeoutSec?: number;
+diff --git a/src/agents/bash-tools.exec.ts b/src/agents/bash-tools.exec.ts
+index 8ee8aa9466bc0..cb29e26184117 100644
+--- a/src/agents/bash-tools.exec.ts
++++ b/src/agents/bash-tools.exec.ts
+@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
+ import path from "node:path";
+ import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
+ import { type ExecHost, maxAsk, minSecurity, resolveSafeBins } from "../infra/exec-approvals.js";
++import { resolveSafeBinProfiles } from "../infra/exec-safe-bin-policy.js";
+ import { getTrustedSafeBinDirs } from "../infra/exec-safe-bin-trust.js";
+ import {
+   getShellPathFromLoginShell,
+@@ -164,6 +165,13 @@ export function createExecTool(
+       : 1800;
+   const defaultPathPrepend = normalizePathPrepend(defaults?.pathPrepend);
+   const safeBins = resolveSafeBins(defaults?.safeBins);
++  const safeBinProfiles = resolveSafeBinProfiles(defaults?.safeBinProfiles);
++  const unprofiledSafeBins = Array.from(safeBins).filter((entry) => !safeBinProfiles[entry]);
++  if (unprofiledSafeBins.length > 0) {
++    logInfo(
++      `exec: ignoring unprofiled safeBins entries (${unprofiledSafeBins.toSorted().join(", ")}); use allowlist or define tools.exec.safeBinProfiles.<bin>`,
++    );
++  }
+   const trustedSafeBinDirs = getTrustedSafeBinDirs();
+   const notifyOnExit = defaults?.notifyOnExit !== false;
+   const notifyOnExitEmptySuccess = defaults?.notifyOnExitEmptySuccess === true;
+@@ -404,6 +412,7 @@ export function createExecTool(
+           security,
+           ask,
+           safeBins,
++          safeBinProfiles,
+           agentId,
+           sessionKey: defaults?.sessionKey,
+           scopeKey: defaults?.scopeKey,
+diff --git a/src/agents/pi-tools.safe-bins.test.ts b/src/agents/pi-tools.safe-bins.test.ts
+index 551d18e137403..7f0b99555c945 100644
+--- a/src/agents/pi-tools.safe-bins.test.ts
++++ b/src/agents/pi-tools.safe-bins.test.ts
+@@ -4,6 +4,7 @@ import path from "node:path";
+ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+ import type { OpenClawConfig } from "../config/config.js";
+ import type { ExecApprovalsResolved } from "../infra/exec-approvals.js";
++import type { SafeBinProfileFixture } from "../infra/exec-safe-bin-policy.js";
+ import { captureEnv } from "../test-utils/env.js";
+ 
+ const bundledPluginsDirSnapshot = captureEnv(["OPENCLAW_BUNDLED_PLUGINS_DIR"]);
+@@ -86,6 +87,7 @@ type ExecTool = {
+ async function createSafeBinsExecTool(params: {
+   tmpPrefix: string;
+   safeBins: string[];
++  safeBinProfiles?: Record<string, SafeBinProfileFixture>;
+   files?: Array<{ name: string; contents: string }>;
+ }): Promise<{ tmpDir: string; execTool: ExecTool }> {
+   const { createOpenClawCodingTools } = await import("./pi-tools.js");
+@@ -101,6 +103,7 @@ async function createSafeBinsExecTool(params: {
+         security: "allowlist",
+         ask: "off",
+         safeBins: params.safeBins,
++        safeBinProfiles: params.safeBinProfiles,
+       },
+     },
+   };
+@@ -139,6 +142,9 @@ describe("createOpenClawCodingTools safeBins", () => {
+       {
+         tmpPrefix: "openclaw-safe-bins-",
+         safeBins: ["echo"],
++        safeBinProfiles: {
++          echo: { maxPositional: 1 },
++        },
+       },
+       async ({ tmpDir, execTool }) => {
+         const marker = `safe-bins-${Date.now()}`;
+@@ -155,6 +161,23 @@ describe("createOpenClawCodingTools safeBins", () => {
+     );
+   });
+ 
++  it("rejects unprofiled custom safe-bin entries", async () => {
++    await withSafeBinsExecTool(
++      {
++        tmpPrefix: "openclaw-safe-bins-unprofiled-",
++        safeBins: ["echo"],
++      },
++      async ({ tmpDir, execTool }) => {
++        await expect(
++          execTool.execute("call1", {
++            command: "echo hello",
++            workdir: tmpDir,
++          }),
++        ).rejects.toThrow("exec denied: allowlist miss");
++      },
++    );
++  });
++
+   it("does not allow env var expansion to smuggle file args via safeBins", async () => {
+     await withSafeBinsExecTool(
+       {
+diff --git a/src/agents/pi-tools.ts b/src/agents/pi-tools.ts
+index 187e4ffc5310c..ef1653365e42a 100644
+--- a/src/agents/pi-tools.ts
++++ b/src/agents/pi-tools.ts
+@@ -97,6 +97,13 @@ function resolveExecConfig(params: { cfg?: OpenClawConfig; agentId?: string }) {
+   const globalExec = cfg?.tools?.exec;
+   const agentExec =
+     cfg && params.agentId ? resolveAgentConfig(cfg, params.agentId)?.tools?.exec : undefined;
++  const mergedSafeBinProfiles =
++    globalExec?.safeBinProfiles || agentExec?.safeBinProfiles
++      ? {
++          ...globalExec?.safeBinProfiles,
++          ...agentExec?.safeBinProfiles,
++        }
++      : undefined;
+   return {
+     host: agentExec?.host ?? globalExec?.host,
+     security: agentExec?.security ?? globalExec?.security,
+@@ -104,6 +111,7 @@ function resolveExecConfig(params: { cfg?: OpenClawConfig; agentId?: string }) {
+     node: agentExec?.node ?? globalExec?.node,
+     pathPrepend: agentExec?.pathPrepend ?? globalExec?.pathPrepend,
+     safeBins: agentExec?.safeBins ?? globalExec?.safeBins,
++    safeBinProfiles: mergedSafeBinProfiles,
+     backgroundMs: agentExec?.backgroundMs ?? globalExec?.backgroundMs,
+     timeoutSec: agentExec?.timeoutSec ?? globalExec?.timeoutSec,
+     approvalRunningNoticeMs:
+@@ -361,6 +369,7 @@ export function createOpenClawCodingTools(options?: {
+     node: options?.exec?.node ?? execConfig.node,
+     pathPrepend: options?.exec?.pathPrepend ?? execConfig.pathPrepend,
+     safeBins: options?.exec?.safeBins ?? execConfig.safeBins,
++    safeBinProfiles: options?.exec?.safeBinProfiles ?? execConfig.safeBinProfiles,
+     agentId,
+     cwd: workspaceRoot,
+     allowBackground,
+diff --git a/src/config/schema.help.ts b/src/config/schema.help.ts
+index 144a72ecd236a..f883d57a032fe 100644
+--- a/src/config/schema.help.ts
++++ b/src/config/schema.help.ts
+@@ -94,6 +94,8 @@ export const FIELD_HELP: Record<string, string> = {
+   "tools.exec.pathPrepend": "Directories to prepend to PATH for exec runs (gateway/sandbox).",
+   "tools.exec.safeBins":
+     "Allow stdin-only safe binaries to run without explicit allowlist entries.",
++  "tools.exec.safeBinProfiles":
++    "Optional per-binary safe-bin profiles (positional limits + allowed/denied flags).",
+   "tools.fs.workspaceOnly":
+     "Restrict filesystem tools (read/write/edit/apply_patch) to the workspace directory (default: false).",
+   "tools.sessions.visibility":
+diff --git a/src/config/schema.labels.ts b/src/config/schema.labels.ts
+index 1a7ab498e7d3f..0563341dc1899 100644
+--- a/src/config/schema.labels.ts
++++ b/src/config/schema.labels.ts
+@@ -92,6 +92,7 @@ export const FIELD_LABELS: Record<string, string> = {
+   "tools.exec.node": "Exec Node Binding",
+   "tools.exec.pathPrepend": "Exec PATH Prepend",
+   "tools.exec.safeBins": "Exec Safe Bins",
++  "tools.exec.safeBinProfiles": "Exec Safe Bin Profiles",
+   "tools.message.allowCrossContextSend": "Allow Cross-Context Messaging",
+   "tools.message.crossContext.allowWithinProvider": "Allow Cross-Context (Same Provider)",
+   "tools.message.crossContext.allowAcrossProviders": "Allow Cross-Context (Across Providers)",
+diff --git a/src/config/types.tools.ts b/src/config/types.tools.ts
+index bdfde820902ac..1cf81f771ac54 100644
+--- a/src/config/types.tools.ts
++++ b/src/config/types.tools.ts
+@@ -1,4 +1,5 @@
+ import type { ChatType } from "../channels/chat-type.js";
++import type { SafeBinProfileFixture } from "../infra/exec-safe-bin-policy.js";
+ import type { AgentElevatedAllowFromConfig, SessionSendPolicyAction } from "./types.base.js";
+ 
+ export type MediaUnderstandingScopeMatch = {
+@@ -190,6 +191,8 @@ export type ExecToolConfig = {
+   pathPrepend?: string[];
+   /** Safe stdin-only binaries that can run without allowlist entries. */
+   safeBins?: string[];
++  /** Optional custom safe-bin profiles for entries in tools.exec.safeBins. */
++  safeBinProfiles?: Record<string, SafeBinProfileFixture>;
+   /** Default time (ms) before an exec command auto-backgrounds. */
+   backgroundMs?: number;
+   /** Default timeout (seconds) before auto-killing exec commands. */
+diff --git a/src/config/zod-schema.agent-runtime.ts b/src/config/zod-schema.agent-runtime.ts
+index 6e0a92cfd6801..f3f5a8b7a6075 100644
+--- a/src/config/zod-schema.agent-runtime.ts
++++ b/src/config/zod-schema.agent-runtime.ts
+@@ -337,6 +337,15 @@ const ToolExecApplyPatchSchema = z
+   .strict()
+   .optional();
+ 
++const ToolExecSafeBinProfileSchema = z
++  .object({
++    minPositional: z.number().int().nonnegative().optional(),
++    maxPositional: z.number().int().nonnegative().optional(),
++    allowedValueFlags: z.array(z.string()).optional(),
++    deniedFlags: z.array(z.string()).optional(),
++  })
++  .strict();
++
+ const ToolExecBaseShape = {
+   host: z.enum(["sandbox", "gateway", "node"]).optional(),
+   security: z.enum(["deny", "allowlist", "full"]).optional(),
+@@ -344,6 +353,7 @@ const ToolExecBaseShape = {
+   node: z.string().optional(),
+   pathPrepend: z.array(z.string()).optional(),
+   safeBins: z.array(z.string()).optional(),
++  safeBinProfiles: z.record(z.string(), ToolExecSafeBinProfileSchema).optional(),
+   backgroundMs: z.number().int().positive().optional(),
+   timeoutSec: z.number().int().positive().optional(),
+   cleanupMs: z.number().int().positive().optional(),
+diff --git a/src/infra/exec-approvals-allowlist.ts b/src/infra/exec-approvals-allowlist.ts
+index 147905522647f..c039c6fc0c3cd 100644
+--- a/src/infra/exec-approvals-allowlist.ts
++++ b/src/infra/exec-approvals-allowlist.ts
+@@ -11,7 +11,6 @@ import {
+ } from "./exec-approvals-analysis.js";
+ import type { ExecAllowlistEntry } from "./exec-approvals.js";
+ import {
+-  SAFE_BIN_GENERIC_PROFILE,
+   SAFE_BIN_PROFILES,
+   type SafeBinProfile,
+   validateSafeBinArgv,
+@@ -41,7 +40,6 @@ export function isSafeBinUsage(params: {
+   platform?: string | null;
+   trustedSafeBinDirs?: ReadonlySet<string>;
+   safeBinProfiles?: Readonly<Record<string, SafeBinProfile>>;
+-  safeBinGenericProfile?: SafeBinProfile;
+   isTrustedSafeBinPathFn?: typeof isTrustedSafeBinPath;
+ }): boolean {
+   // Windows host exec uses PowerShell, which has different parsing/expansion rules.
+@@ -75,8 +73,10 @@ export function isSafeBinUsage(params: {
+   }
+   const argv = params.argv.slice(1);
+   const safeBinProfiles = params.safeBinProfiles ?? SAFE_BIN_PROFILES;
+-  const genericSafeBinProfile = params.safeBinGenericProfile ?? SAFE_BIN_GENERIC_PROFILE;
+-  const profile = safeBinProfiles[execName] ?? genericSafeBinProfile;
++  const profile = safeBinProfiles[execName];
++  if (!profile) {
++    return false;
++  }
+   return validateSafeBinArgv(argv, profile);
+ }
+ 
+@@ -93,6 +93,7 @@ function evaluateSegments(
+   params: {
+     allowlist: ExecAllowlistEntry[];
+     safeBins: Set<string>;
++    safeBinProfiles?: Readonly<Record<string, SafeBinProfile>>;
+     cwd?: string;
+     platform?: string | null;
+     trustedSafeBinDirs?: ReadonlySet<string>;
+@@ -122,6 +123,7 @@ function evaluateSegments(
+       argv: segment.argv,
+       resolution: segment.resolution,
+       safeBins: params.safeBins,
++      safeBinProfiles: params.safeBinProfiles,
+       platform: params.platform,
+       trustedSafeBinDirs: params.trustedSafeBinDirs,
+     });
+@@ -147,6 +149,7 @@ export function evaluateExecAllowlist(params: {
+   analysis: ExecCommandAnalysis;
+   allowlist: ExecAllowlistEntry[];
+   safeBins: Set<string>;
++  safeBinProfiles?: Readonly<Record<string, SafeBinProfile>>;
+   cwd?: string;
+   platform?: string | null;
+   trustedSafeBinDirs?: ReadonlySet<string>;
+@@ -165,6 +168,7 @@ export function evaluateExecAllowlist(params: {
+       const result = evaluateSegments(chainSegments, {
+         allowlist: params.allowlist,
+         safeBins: params.safeBins,
++        safeBinProfiles: params.safeBinProfiles,
+         cwd: params.cwd,
+         platform: params.platform,
+         trustedSafeBinDirs: params.trustedSafeBinDirs,
+@@ -184,6 +188,7 @@ export function evaluateExecAllowlist(params: {
+   const result = evaluateSegments(params.analysis.segments, {
+     allowlist: params.allowlist,
+     safeBins: params.safeBins,
++    safeBinProfiles: params.safeBinProfiles,
+     cwd: params.cwd,
+     platform: params.platform,
+     trustedSafeBinDirs: params.trustedSafeBinDirs,
+@@ -354,6 +359,7 @@ export function evaluateShellAllowlist(params: {
+   command: string;
+   allowlist: ExecAllowlistEntry[];
+   safeBins: Set<string>;
++  safeBinProfiles?: Readonly<Record<string, SafeBinProfile>>;
+   cwd?: string;
+   env?: NodeJS.ProcessEnv;
+   trustedSafeBinDirs?: ReadonlySet<string>;
+@@ -384,6 +390,7 @@ export function evaluateShellAllowlist(params: {
+       analysis,
+       allowlist: params.allowlist,
+       safeBins: params.safeBins,
++      safeBinProfiles: params.safeBinProfiles,
+       cwd: params.cwd,
+       platform: params.platform,
+       trustedSafeBinDirs: params.trustedSafeBinDirs,
+@@ -419,6 +426,7 @@ export function evaluateShellAllowlist(params: {
+       analysis,
+       allowlist: params.allowlist,
+       safeBins: params.safeBins,
++      safeBinProfiles: params.safeBinProfiles,
+       cwd: params.cwd,
+       platform: params.platform,
+       trustedSafeBinDirs: params.trustedSafeBinDirs,
+diff --git a/src/infra/exec-approvals.test.ts b/src/infra/exec-approvals.test.ts
+index bd2c0db3fa0c3..5afb0e7be460d 100644
+--- a/src/infra/exec-approvals.test.ts
++++ b/src/infra/exec-approvals.test.ts
+@@ -29,7 +29,11 @@ import {
+   type ExecAllowlistEntry,
+   type ExecApprovalsFile,
+ } from "./exec-approvals.js";
+-import { SAFE_BIN_PROFILE_FIXTURES, SAFE_BIN_PROFILES } from "./exec-safe-bin-policy.js";
++import {
++  SAFE_BIN_PROFILE_FIXTURES,
++  SAFE_BIN_PROFILES,
++  resolveSafeBinProfiles,
++} from "./exec-safe-bin-policy.js";
+ 
+ function makePathEnv(binDir: string): NodeJS.ProcessEnv {
+   if (process.platform !== "win32") {
+@@ -798,6 +802,53 @@ describe("exec approvals safe bins", () => {
+     expect(defaults.has("grep")).toBe(false);
+   });
+ 
++  it("does not auto-allow unprofiled safe-bin entries", () => {
++    if (process.platform === "win32") {
++      return;
++    }
++    const result = evaluateShellAllowlist({
++      command: "python3 -c \"print('owned')\"",
++      allowlist: [],
++      safeBins: normalizeSafeBins(["python3"]),
++      cwd: "/tmp",
++    });
++    expect(result.analysisOk).toBe(true);
++    expect(result.allowlistSatisfied).toBe(false);
++  });
++
++  it("allows caller-defined custom safe-bin profiles", () => {
++    if (process.platform === "win32") {
++      return;
++    }
++    const safeBinProfiles = resolveSafeBinProfiles({
++      echo: {
++        maxPositional: 1,
++      },
++    });
++    const allow = isSafeBinUsage({
++      argv: ["echo", "hello"],
++      resolution: {
++        rawExecutable: "echo",
++        resolvedPath: "/bin/echo",
++        executableName: "echo",
++      },
++      safeBins: normalizeSafeBins(["echo"]),
++      safeBinProfiles,
++    });
++    const deny = isSafeBinUsage({
++      argv: ["echo", "hello", "world"],
++      resolution: {
++        rawExecutable: "echo",
++        resolvedPath: "/bin/echo",
++        executableName: "echo",
++      },
++      safeBins: normalizeSafeBins(["echo"]),
++      safeBinProfiles,
++    });
++    expect(allow).toBe(true);
++    expect(deny).toBe(false);
++  });
++
+   it("blocks sort output flags independent of file existence", () => {
+     if (process.platform === "win32") {
+       return;
+diff --git a/src/infra/exec-safe-bin-policy.ts b/src/infra/exec-safe-bin-policy.ts
+index fc40f9b9be853..79548738de965 100644
+--- a/src/infra/exec-safe-bin-policy.ts
++++ b/src/infra/exec-safe-bin-policy.ts
+@@ -37,6 +37,8 @@ export type SafeBinProfileFixture = {
+   deniedFlags?: readonly string[];
+ };
+ 
++export type SafeBinProfileFixtures = Readonly<Record<string, SafeBinProfileFixture>>;
++
+ const NO_FLAGS: ReadonlySet<string> = new Set();
+ 
+ const toFlagSet = (flags?: readonly string[]): ReadonlySet<string> => {
+@@ -63,8 +65,6 @@ function compileSafeBinProfiles(
+   ) as Record<string, SafeBinProfile>;
+ }
+ 
+-export const SAFE_BIN_GENERIC_PROFILE_FIXTURE: SafeBinProfileFixture = {};
+-
+ export const SAFE_BIN_PROFILE_FIXTURES: Record<string, SafeBinProfileFixture> = {
+   jq: {
+     maxPositional: 1,
+@@ -184,11 +184,49 @@ export const SAFE_BIN_PROFILE_FIXTURES: Record<string, SafeBinProfileFixture> =
+   },
+ };
+ 
+-export const SAFE_BIN_GENERIC_PROFILE = compileSafeBinProfile(SAFE_BIN_GENERIC_PROFILE_FIXTURE);
+-
+ export const SAFE_BIN_PROFILES: Record<string, SafeBinProfile> =
+   compileSafeBinProfiles(SAFE_BIN_PROFILE_FIXTURES);
+ 
++function normalizeSafeBinProfileName(raw: string): string | null {
++  const name = raw.trim().toLowerCase();
++  return name.length > 0 ? name : null;
++}
++
++function normalizeSafeBinProfileFixtures(
++  fixtures?: SafeBinProfileFixtures | null,
++): Record<string, SafeBinProfileFixture> {
++  const normalized: Record<string, SafeBinProfileFixture> = {};
++  if (!fixtures) {
++    return normalized;
++  }
++  for (const [rawName, fixture] of Object.entries(fixtures)) {
++    const name = normalizeSafeBinProfileName(rawName);
++    if (!name) {
++      continue;
++    }
++    normalized[name] = {
++      minPositional: fixture.minPositional,
++      maxPositional: fixture.maxPositional,
++      allowedValueFlags: fixture.allowedValueFlags,
++      deniedFlags: fixture.deniedFlags,
++    };
++  }
++  return normalized;
++}
++
++export function resolveSafeBinProfiles(
++  fixtures?: SafeBinProfileFixtures | null,
++): Record<string, SafeBinProfile> {
++  const normalizedFixtures = normalizeSafeBinProfileFixtures(fixtures);
++  if (Object.keys(normalizedFixtures).length === 0) {
++    return SAFE_BIN_PROFILES;
++  }
++  return {
++    ...SAFE_BIN_PROFILES,
++    ...compileSafeBinProfiles(normalizedFixtures),
++  };
++}
++
+ export function resolveSafeBinDeniedFlags(
+   fixtures: Readonly<Record<string, SafeBinProfileFixture>> = SAFE_BIN_PROFILE_FIXTURES,
+ ): Record<string, string[]> {
+diff --git a/src/node-host/invoke-system-run.ts b/src/node-host/invoke-system-run.ts
+index 8bac68d9a73e8..7d6747e15f091 100644
+--- a/src/node-host/invoke-system-run.ts
++++ b/src/node-host/invoke-system-run.ts
+@@ -18,6 +18,7 @@ import {
+   type ExecSecurity,
+ } from "../infra/exec-approvals.js";
+ import type { ExecHostRequest, ExecHostResponse, ExecHostRunResult } from "../infra/exec-host.js";
++import { resolveSafeBinProfiles } from "../infra/exec-safe-bin-policy.js";
+ import { getTrustedSafeBinDirs } from "../infra/exec-safe-bin-trust.js";
+ import { sanitizeSystemRunEnvOverrides } from "../infra/host-env-security.js";
+ import { resolveSystemRunCommand } from "../infra/system-run-command.js";
+@@ -116,6 +117,10 @@ export async function handleSystemRunInvoke(opts: {
+   });
+   const env = opts.sanitizeEnv(envOverrides);
+   const safeBins = resolveSafeBins(agentExec?.safeBins ?? cfg.tools?.exec?.safeBins);
++  const safeBinProfiles = resolveSafeBinProfiles({
++    ...cfg.tools?.exec?.safeBinProfiles,
++    ...agentExec?.safeBinProfiles,
++  });
+   const trustedSafeBinDirs = getTrustedSafeBinDirs();
+   const bins = autoAllowSkills ? await opts.skillBins.current() : new Set<string>();
+   let analysisOk = false;
+@@ -127,6 +132,7 @@ export async function handleSystemRunInvoke(opts: {
+       command: shellCommand,
+       allowlist: approvals.allowlist,
+       safeBins,
++      safeBinProfiles,
+       cwd: opts.params.cwd ?? undefined,
+       env,
+       trustedSafeBinDirs,
+@@ -145,6 +151,7 @@ export async function handleSystemRunInvoke(opts: {
+       analysis,
+       allowlist: approvals.allowlist,
+       safeBins,
++      safeBinProfiles,
+       cwd: opts.params.cwd ?? undefined,
+       trustedSafeBinDirs,
+       skillBins: bins,

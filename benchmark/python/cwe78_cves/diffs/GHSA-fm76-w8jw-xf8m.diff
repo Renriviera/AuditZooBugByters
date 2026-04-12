@@ -1,0 +1,60 @@
+diff --git a/packages/plugins-loader/download_utils.js b/packages/plugins-loader/download_utils.js
+index c77d2b74f35e..0846ab527e5d 100644
+--- a/packages/plugins-loader/download_utils.js
++++ b/packages/plugins-loader/download_utils.js
+@@ -2,7 +2,7 @@ const fs = require("fs");
+ const { rm } = require("fs").promises;
+ const { mkdir, pathExists } = require("fs-extra");
+ const { tmpName } = require("tmp-promise");
+-const { execSync } = require("child_process");
++const { execFileSync } = require("child_process");
+ const { extract } = require("tar");
+ const { join } = require("path");
+ const { createWriteStream, unlink } = require("fs");
+@@ -93,7 +93,10 @@ const loadTarball = (rootFolder, url, name) => {
+  */
+ const gitPullOrClone = async (plugin, pluginDir) => {
+   let keyfnm,
+-    setKey = `-c core.sshCommand="ssh -oBatchMode=yes -o 'StrictHostKeyChecking no'" `;
++    setKey = [
++      "-c",
++      `core.sshCommand="ssh -oBatchMode=yes -o 'StrictHostKeyChecking no'"`,
++    ];
+   if (plugin.deploy_private_key) {
+     keyfnm = await tmpName();
+     await fs.promises.writeFile(
+@@ -104,12 +107,15 @@ const gitPullOrClone = async (plugin, pluginDir) => {
+         encoding: "ascii",
+       }
+     );
+-    setKey = `-c core.sshCommand="ssh -oBatchMode=yes -o 'StrictHostKeyChecking no' -i ${keyfnm}" `;
++    setKey = [
++      "-c",
++      `core.sshCommand="ssh -oBatchMode=yes -o 'StrictHostKeyChecking no' -i ${keyfnm}"`,
++    ];
+   }
+   if (fs.existsSync(pluginDir)) {
+-    execSync(`git ${setKey} -C ${pluginDir} pull`);
++    execFileSync("git", [...setKey, "-C", pluginDir, "pull"]);
+   } else {
+-    execSync(`git ${setKey} clone ${plugin.location} ${pluginDir}`);
++    execFileSync("git", [...setKey, "clone", plugin.location, pluginDir]);
+   }
+   if (plugin.deploy_private_key && keyfnm) await fs.promises.unlink(keyfnm);
+ };
+diff --git a/packages/server/routes/admin.js b/packages/server/routes/admin.js
+index 5609a5712f35..13ad78c58ed9 100644
+--- a/packages/server/routes/admin.js
++++ b/packages/server/routes/admin.js
+@@ -673,7 +673,10 @@ router.get(
+     const backup_file_prefix = getState().getConfig("backup_file_prefix");
+     if (
+       !isRoot ||
+-      !(filename.startsWith(backup_file_prefix) && filename.endsWith(".zip"))
++      !(
++        path.resolve(filename).startsWith(backup_file_prefix) &&
++        filename.endsWith(".zip")
++      )
+     ) {
+       res.redirect("/admin/backup");
+       return;

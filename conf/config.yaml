@@ -1,0 +1,18 @@
+pipeline:
+  name: cwe78_two_arm_study
+  seed: 235711
+  max_iterations: 3        # k in {0, 1, 2, 3}
+  context_lines: 10
+  max_context_tokens: 2000
+  arms: [semgrep, joern]   # can run one or both
+
+llm:
+  base_url: "http://localhost:8000/v1"
+  model: "Qwen/Qwen2.5-Coder-7B-Instruct"
+  temperature: 0.1
+  api_key: "not-needed"
+
+joern:
+  port: 12345
+  call_graph_depth: 3
+  timeout_s: 120

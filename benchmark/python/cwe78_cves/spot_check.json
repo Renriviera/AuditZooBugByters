@@ -1,0 +1,82 @@
+[
+  {
+    "cve_id": "CVE-2015-8557",
+    "package": "Pygments",
+    "sink_api": "call",
+    "repo_url": "https://github.com/pygments/pygments",
+    "patch_commit": "db6dd826f8624179e563aaded391efe824462f51",
+    "manual_review_status": "pending"
+  },
+  {
+    "cve_id": "CVE-2026-27602",
+    "package": "modoboa",
+    "sink_api": "unknown",
+    "repo_url": "https://github.com/modoboa/modoboa",
+    "patch_commit": "27a7aa133d3608fe8c25ae39125d1012c333cbfa",
+    "manual_review_status": "pending"
+  },
+  {
+    "cve_id": "CVE-2026-33718",
+    "package": "openhands",
+    "sink_api": "run",
+    "repo_url": "https://github.com/OpenHands/OpenHands",
+    "patch_commit": "698cfc2520cdc50eac5fa869c6c1ba5c8fee9e13",
+    "manual_review_status": "pending"
+  },
+  {
+    "cve_id": "CVE-2023-22884",
+    "package": "apache-airflow",
+    "sink_api": "call",
+    "repo_url": "https://github.com/apache/airflow",
+    "patch_commit": "45dd0c484e16ff56800cc9c047f56b4a909d2d0d",
+    "manual_review_status": "pending"
+  },
+  {
+    "cve_id": "CVE-2026-33482",
+    "package": "wwbn/avideo",
+    "sink_api": "unknown",
+    "repo_url": "https://github.com/WWBN/AVideo",
+    "patch_commit": "25c8ab90269e3a01fb4cf205b40a373487f022e1",
+    "manual_review_status": "pending"
+  },
+  {
+    "cve_id": "CVE-2025-67511",
+    "package": "cai-framework",
+    "sink_api": "unknown",
+    "repo_url": "https://github.com/aliasrobotics/cai",
+    "patch_commit": "09ccb6e0baccf56c40e6cb429c698750843a999c",
+    "manual_review_status": "pending"
+  },
+  {
+    "cve_id": "CVE-2023-4033",
+    "package": "mlflow",
+    "sink_api": "unknown",
+    "repo_url": "https://github.com/mlflow/mlflow",
+    "patch_commit": "6dde93758d42455cb90ef324407919ed67668b9b",
+    "manual_review_status": "pending"
+  },
+  {
+    "cve_id": "CVE-2021-32849",
+    "package": "gerapy",
+    "sink_api": "unknown",
+    "repo_url": "https://github.com/Gerapy/Gerapy",
+    "patch_commit": "157fe7966876640414efbf126edddfcfb1ab6dfd",
+    "manual_review_status": "pending"
+  },
+  {
+    "cve_id": "CVE-2025-62703",
+    "package": "fugue",
+    "sink_api": "unknown",
+    "repo_url": "https://github.com/fugue-project/fugue",
+    "patch_commit": "6f25326779fd1f528198098d6287c5a863176fc0",
+    "manual_review_status": "pending"
+  },
+  {
+    "cve_id": "CVE-2025-54941",
+    "package": "apache-airflow",
+    "sink_api": "unknown",
+    "repo_url": "https://github.com/apache/airflow",
+    "patch_commit": "c8f60cc2f1cd8064ea1806bde1ed6726191c60d5",
+    "manual_review_status": "pending"
+  }
+]

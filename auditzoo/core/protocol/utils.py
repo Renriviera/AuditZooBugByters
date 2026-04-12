@@ -75,4 +75,4 @@ def typed_dict(**kwargs) -> type:
         Generated TypedDict type.
     """
 
-    return TypedDict("_GeneratedTypedDict", **kwargs)  # type: ignore
+    return TypedDict("_GeneratedTypedDict", kwargs)  # type: ignore

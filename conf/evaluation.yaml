@@ -1,0 +1,8 @@
+evaluation:
+  dataset_path: benchmark/python/cwe78_cves/metadata.json
+  output_dir: results
+  line_tolerance: 5
+  variance_n_repos: 20
+  variance_seeds: [235711, 123456, 654321, 111111, 999999]
+  clone_dir: /tmp/auditzoo_eval
+  skip_empty_ground_truth: true

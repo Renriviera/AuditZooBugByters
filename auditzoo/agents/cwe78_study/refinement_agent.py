@@ -1,0 +1,118 @@
+"""LLM Call 1 — Rule refinement (Semgrep) / Helper identification (Joern).
+
+Shared logic with tool-specific system prompts and output schemas.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from .llm_client import LLMClient
+from .prompts import (
+    SYSTEM_PROMPT_A_JOERN,
+    SYSTEM_PROMPT_A_SEMGREP,
+    build_user_prompt_call1_joern,
+    build_user_prompt_call1_semgrep,
+)
+from .schemas import (
+    HelperRole,
+    JoernHelperClassification,
+    RefinementAction,
+    SemgrepRefinement,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class RefinementAgent:
+    """LLM Call 1 for both arms.
+
+    * **Semgrep mode**: evaluates findings + triage feedback, proposes
+      keep / refine / add_rule actions with updated YAML.
+    * **Joern mode**: classifies call-graph neighbors as source-wrapper,
+      sink-wrapper, transformer, sanitizer, or unrelated.
+    """
+
+    def __init__(self, llm: LLMClient) -> None:
+        self._llm = llm
+
+    # ------------------------------------------------------------------
+    # Semgrep refinement
+    # ------------------------------------------------------------------
+
+    async def refine_semgrep(
+        self,
+        *,
+        rule_yaml: str,
+        file_path: str,
+        line_number: int,
+        code_snippet: str,
+        triage_summary: dict[str, int],
+        common_fp_pattern: str = "",
+    ) -> SemgrepRefinement:
+        """Ask the LLM to evaluate a Semgrep rule and suggest refinement."""
+        user_prompt = build_user_prompt_call1_semgrep(
+            rule_yaml=rule_yaml,
+            file_path=file_path,
+            line_number=line_number,
+            code_snippet=code_snippet,
+            triage_summary=triage_summary,
+            common_fp_pattern=common_fp_pattern,
+        )
+        try:
+            data = await self._llm.chat_json(
+                SYSTEM_PROMPT_A_SEMGREP, user_prompt
+            )
+        except (ValueError, Exception) as exc:
+            logger.warning("Semgrep refinement LLM call failed: %s", exc)
+            return SemgrepRefinement(action=RefinementAction.KEEP)
+
+        action_str = data.get("action", "keep").lower()
+        try:
+            action = RefinementAction(action_str)
+        except ValueError:
+            action = RefinementAction.KEEP
+
+        return SemgrepRefinement(
+            action=action,
+            rule_yaml=data.get("rule_yaml", ""),
+            target_rule_id=data.get("target_rule_id", ""),
+        )
+
+    # ------------------------------------------------------------------
+    # Joern helper identification
+    # ------------------------------------------------------------------
+
+    async def classify_helpers_joern(
+        self,
+        *,
+        call_graph_neighborhood: list[dict[str, Any]],
+        current_sources: list[str],
+        current_sinks: list[str],
+        current_sanitizers: list[str],
+    ) -> JoernHelperClassification:
+        """Classify call-graph neighbors for taint-spec expansion."""
+        user_prompt = build_user_prompt_call1_joern(
+            call_graph_neighborhood=call_graph_neighborhood,
+            current_sources=current_sources,
+            current_sinks=current_sinks,
+            current_sanitizers=current_sanitizers,
+        )
+        try:
+            data = await self._llm.chat_json(
+                SYSTEM_PROMPT_A_JOERN, user_prompt
+            )
+        except (ValueError, Exception) as exc:
+            logger.warning("Joern helper-ID LLM call failed: %s", exc)
+            return JoernHelperClassification()
+
+        raw_classes = data.get("classifications", {})
+        classifications: dict[str, HelperRole] = {}
+        for func_name, role_str in raw_classes.items():
+            try:
+                classifications[func_name] = HelperRole(role_str)
+            except ValueError:
+                classifications[func_name] = HelperRole.UNRELATED
+
+        return JoernHelperClassification(classifications=classifications)

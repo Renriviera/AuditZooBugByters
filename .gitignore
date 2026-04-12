@@ -21,6 +21,7 @@ wheels/
 
 # Virtual environments
 venv/
+.venv/
 ENV/
 env/
 
@@ -64,3 +65,13 @@ node_modules/
 
 # Claude code cache
 .claude/
+
+# Environment secrets
+.env
+
+# Dataset collection intermediates
+data/raw/
+data/advisory-database/
+
+# Shallow repo clones used during dataset collection
+benchmark/python/cwe78_cves/repos/

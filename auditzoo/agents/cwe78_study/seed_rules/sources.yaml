@@ -1,0 +1,41 @@
+# Taint sources for CWE-78 detection (12 patterns).
+# These represent entry points where attacker-controlled data enters the program.
+
+sources:
+  # CLI / environment
+  - pattern: "sys.argv"
+    category: cli
+  - pattern: "input"
+    category: cli
+  - pattern: "os.environ"
+    category: environment
+  - pattern: "os.getenv"
+    category: environment
+
+  # Flask HTTP accessors
+  - pattern: "request.args"
+    category: http
+    framework: flask
+  - pattern: "request.form"
+    category: http
+    framework: flask
+  - pattern: "request.values"
+    category: http
+    framework: flask
+  - pattern: "request.get_json"
+    category: http
+    framework: flask
+  - pattern: "request.data"
+    category: http
+    framework: flask
+  - pattern: "request.headers"
+    category: http
+    framework: flask
+
+  # Django HTTP accessors
+  - pattern: "request.GET"
+    category: http
+    framework: django
+  - pattern: "request.POST"
+    category: http
+    framework: django

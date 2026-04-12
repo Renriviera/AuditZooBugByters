@@ -1,0 +1,13 @@
+# Known sanitizers / mitigations for CWE-78.
+
+sanitizers:
+  - api: "shlex.quote"
+    description: "Shell-escapes a single argument"
+  - api: "shlex.split"
+    description: "Splits command string into safe list form"
+  - api: "pipes.quote"
+    description: "Legacy shell quoting (Python 2 compat)"
+
+structural_mitigations:
+  - pattern: "shell=False with list argument"
+    description: "Passing a list to subprocess with shell=False prevents injection"

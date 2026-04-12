@@ -1,0 +1,24 @@
+dataset:
+  target_n: 100
+  seed: 235711
+
+  # NVD API rate-limit delay (seconds between requests).
+  # null = auto-detect: 0.7s with API key, 6.5s without.
+  nvd_delay_s: null
+
+  # Stratified sampling: minimum samples per LOC bin
+  # Bins: small (<100), medium (100-500), large (500-2000), very_large (>2000)
+  min_per_loc_bin: 10
+
+  # Minimum samples per sink API type before random fill
+  min_per_sink: 3
+
+  # Minimum samples per CVSS severity bucket before random fill
+  min_per_severity: 3
+
+  # Inclusion criteria thresholds
+  filters:
+    require_python_file: true
+    require_patch_commit: true
+    require_diff: true
+    require_cwe78_confirmed: true

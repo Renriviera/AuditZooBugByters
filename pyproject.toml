@@ -42,6 +42,17 @@ dependencies = [
     "pydantic>=2.12.0",
     "openai>=2.15.0",
     "tiktoken>=0.12.0",
+    "chromadb>=0.4.0",
+    "sentence-transformers>=2.2.0",
+    "tree-sitter-python>=0.23.0",
+    "hydra-core>=1.3.0",
+    "omegaconf>=2.3.0",
+    "pyyaml>=6.0",
+    "semgrep",
+    "psutil>=5.9.0",
+    "seaborn>=0.13.0",
+    "scipy>=1.11.0",
+    "matplotlib>=3.8.0",
 ]
 
 [project.optional-dependencies]
@@ -71,11 +82,12 @@ Documentation = "https://github.com/Biscope-AI/auditzoo/blob/main/README.md"
 Repository = "https://github.com/Biscope-AI/auditzoo"
 Issues = "https://github.com/Biscope-AI/auditzoo/issues"
 
-[tool.setuptools]
-packages = ["auditzoo"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["auditzoo*"]
 
 [tool.setuptools.package-data]
-auditzoo = ["py.typed"]
+auditzoo = ["py.typed", "agents/cwe78_study/seed_rules/*.yaml"]
 
 # Black configuration
 [tool.black]

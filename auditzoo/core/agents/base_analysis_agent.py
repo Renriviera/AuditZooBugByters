@@ -192,4 +192,4 @@ class BaseAnalysisAgent(BaseAgent):
                 f"IR query failed: {response.error if isinstance(response, Response) else 'Unknown error'}"
             )
 
-        return response.data.get("result") if response.data else None
+        return response.data
