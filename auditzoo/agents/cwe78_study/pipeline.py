@@ -7,11 +7,14 @@ Collects per-iteration metrics for downstream evaluation.
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import logging
 import time
+from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from autogen_core import AgentId, MessageContext
 
@@ -37,6 +40,181 @@ from .triage_agent import TriageAgent
 logger = logging.getLogger(__name__)
 
 
+# ----------------------------------------------------------------------
+# Phase-timing helpers
+# ----------------------------------------------------------------------
+
+_PHASE_KEYS: tuple[str, ...] = (
+    "cpg_build_s",
+    "scan_s",
+    "llm_triage_s",
+    "llm_refinement_s",
+    "call_graph_s",
+)
+
+
+@contextmanager
+def _stopwatch() -> Iterator[list[float]]:
+    """Context manager yielding a 1-element list holding elapsed seconds.
+
+    The elapsed time is written into ``holder[0]`` on exit so it can be
+    inspected after the ``with`` block.  Using a list keeps the caller code
+    readable without relying on closure tricks::
+
+        with _stopwatch() as t:
+            ...work...
+        scan_s = t[0]
+    """
+    holder: list[float] = [0.0]
+    start = time.perf_counter()
+    try:
+        yield holder
+    finally:
+        holder[0] = time.perf_counter() - start
+
+
+def _llm_tokens_delta(before: dict[str, int], after: dict[str, int]) -> int:
+    """Return the total-token delta between two ``LLMUsage.to_dict()`` snapshots."""
+    return int(after.get("total_tokens", 0)) - int(before.get("total_tokens", 0))
+
+
+def _stable_hash(payload: str) -> str:
+    """Short, stable SHA-256 prefix for audit fingerprints (not security-critical)."""
+    return hashlib.sha256(payload.encode("utf-8", errors="replace")).hexdigest()[:16]
+
+
+def _findings_hash(findings: list[Finding]) -> str:
+    """Hash the sorted ``(file, line, rule_id, sink_api)`` tuples of *findings*.
+
+    Used to quantify whether consecutive k iterations produce identical
+    candidate sets (which would prove refinement never moved the needle).
+    """
+    keys = sorted(
+        f"{f.file_path}:{f.line_start}:{f.rule_id}:{f.sink_api}" for f in findings
+    )
+    return _stable_hash("\n".join(keys))
+
+
+async def _connect_joern_with_retry(
+    backend_cfg: Any,
+    *,
+    max_retries: int = 1,
+    retry_delay_s: float = 5.0,
+):
+    """Enter :class:`AnalysisRuntime` with one retry on transient errors.
+
+    The full-run log from 20260419_135557 shows 100% of Joern arms failing
+    with ``Port localhost:12345 is already in use`` because the previous
+    CVE's JVM had not released the port yet.  Retrying once after a short
+    pause converts most of those into successful CPG builds; the rest
+    surface as an explicit ``cpg_build_failed`` column on the iteration
+    instead of silently aggregating to ``tp/fp/fn = 0``.
+
+    Returns ``(runtime_cm, runtime, last_error)`` where ``runtime`` is
+    ``None`` on failure.
+    """
+    last_exc: BaseException | None = None
+    runtime_cm: Any = None
+    for attempt in range(max_retries + 1):
+        runtime_cm = AnalysisRuntime(backend_cfg)
+        try:
+            runtime = await runtime_cm.__aenter__()
+            return runtime_cm, runtime, None
+        except Exception as exc:
+            last_exc = exc
+            logger.warning(
+                "Joern CPG connect attempt %d/%d failed: %s",
+                attempt + 1, max_retries + 1, exc,
+            )
+            try:
+                await runtime_cm.stop()
+            except Exception:
+                logger.exception("Cleanup during Joern retry failed")
+            if attempt < max_retries:
+                await asyncio.sleep(retry_delay_s)
+    return runtime_cm, None, last_exc
+
+
+def _joern_catalog_snapshot(joern: Any) -> dict[str, list[str]]:
+    """Snapshot a :class:`JoernArm`'s source/sink/sanitizer catalogs for audit."""
+    return {
+        "sources": list(getattr(joern, "sources", []) or []),
+        "sinks": list(getattr(joern, "sinks", []) or []),
+        "sanitizers": list(getattr(joern, "sanitizers", []) or []),
+    }
+
+
+def build_phase_metrics(
+    *,
+    wall_clock_s: float,
+    n_findings: int,
+    n_tp: int,
+    n_fp: int,
+    n_uncertain: int,
+    llm_usage: dict[str, int],
+    cpg_build_s: float = 0.0,
+    scan_s: float = 0.0,
+    llm_triage_s: float = 0.0,
+    llm_refinement_s: float = 0.0,
+    call_graph_s: float = 0.0,
+    llm_tokens_triage: int = 0,
+    llm_tokens_refinement: int = 0,
+) -> dict[str, Any]:
+    """Build the per-iteration metrics dict with phase-level attribution.
+
+    ``overhead_s`` captures residual wall time (Python glue, context
+    loading, snippet enrichment, agent-message marshalling) not attributed
+    to any named phase; it is clamped to zero to hide minor clock skew.
+
+    All phase timings are in seconds. Token counts are cumulative totals
+    for the iteration; ``llm_tokens_triage`` and ``llm_tokens_refinement``
+    are the subtotals used by the triage and refinement LLM calls
+    respectively.
+    """
+    attributed = cpg_build_s + scan_s + llm_triage_s + llm_refinement_s + call_graph_s
+    overhead_s = max(0.0, wall_clock_s - attributed)
+    return {
+        "wall_clock_s": wall_clock_s,
+        "cpg_build_s": cpg_build_s,
+        "scan_s": scan_s,
+        "llm_triage_s": llm_triage_s,
+        "llm_refinement_s": llm_refinement_s,
+        "call_graph_s": call_graph_s,
+        "overhead_s": overhead_s,
+        "n_findings": n_findings,
+        "n_tp": n_tp,
+        "n_fp": n_fp,
+        "n_uncertain": n_uncertain,
+        "llm_usage": llm_usage,
+        "llm_tokens_triage": llm_tokens_triage,
+        "llm_tokens_refinement": llm_tokens_refinement,
+    }
+
+
+def _log_phase_breakdown(
+    *, cve_id: str, arm: str, k: int, metrics: dict[str, Any]
+) -> None:
+    """Emit a compact INFO line summarising phase timings for one iteration."""
+    logger.info(
+        "[%s | %s k=%d] cpg=%.2fs scan=%.2fs triage=%.2fs refine=%.2fs "
+        "cg=%.2fs overhead=%.2fs total=%.2fs findings=%d "
+        "tok_triage=%d tok_refine=%d",
+        cve_id or "-",
+        arm,
+        k,
+        metrics["cpg_build_s"],
+        metrics["scan_s"],
+        metrics["llm_triage_s"],
+        metrics["llm_refinement_s"],
+        metrics["call_graph_s"],
+        metrics["overhead_s"],
+        metrics["wall_clock_s"],
+        metrics["n_findings"],
+        metrics["llm_tokens_triage"],
+        metrics["llm_tokens_refinement"],
+    )
+
+
 class PipelineConfig:
     """Pipeline configuration (typically populated from Hydra YAML)."""
 
@@ -54,6 +232,7 @@ class PipelineConfig:
         llm_api_key: str = "not-needed",
         joern_port: int = 12345,
         call_graph_depth: int = 3,
+        llm_log_io_path: str | None = None,
     ) -> None:
         self.max_iterations = max_iterations
         self.seed = seed
@@ -66,6 +245,7 @@ class PipelineConfig:
         self.llm_api_key = llm_api_key
         self.joern_port = joern_port
         self.call_graph_depth = call_graph_depth
+        self.llm_log_io_path = llm_log_io_path
 
 
 class Pipeline:
@@ -80,6 +260,7 @@ class Pipeline:
                 temperature=config.llm_temperature,
                 api_key=config.llm_api_key,
                 seed=config.seed,
+                log_io_path=config.llm_log_io_path,
             )
         )
         self._triage = TriageAgent(self._llm)
@@ -91,11 +272,11 @@ class Pipeline:
         result = RunResult(repo_path=repo_path, cve_id=cve_id)
 
         if "semgrep" in self._cfg.arms:
-            semgrep_iters = await self._run_semgrep_arm(repo_path)
+            semgrep_iters = await self._run_semgrep_arm(repo_path, cve_id=cve_id)
             result.iterations.extend(semgrep_iters)
 
         if "joern" in self._cfg.arms:
-            joern_iters = await self._run_joern_arm(repo_path)
+            joern_iters = await self._run_joern_arm(repo_path, cve_id=cve_id)
             result.iterations.extend(joern_iters)
 
         result.metadata["llm_usage"] = self._llm.usage.to_dict()
@@ -105,7 +286,9 @@ class Pipeline:
     # Semgrep arm iterations
     # ------------------------------------------------------------------
 
-    async def _run_semgrep_arm(self, repo_path: str) -> list[IterationResult]:
+    async def _run_semgrep_arm(
+        self, repo_path: str, *, cve_id: str = ""
+    ) -> list[IterationResult]:
         arm = SemgrepArm(context_lines=self._cfg.context_lines)
         results: list[IterationResult] = []
 
@@ -113,33 +296,80 @@ class Pipeline:
             t0 = time.perf_counter()
             self._llm.reset_usage()
 
-            findings = arm.scan(repo_path)
-            findings = arm.get_findings_with_context(findings)
+            rules_yaml_pre = arm.rules_yaml
+            rules_hash_pre = _stable_hash(rules_yaml_pre)
 
-            triage_results = await self._triage.triage_batch(findings)
+            with _stopwatch() as scan_t:
+                findings = arm.scan(repo_path)
+                findings = arm.get_findings_with_context(findings)
+
+            tokens_before_triage = self._llm.usage.to_dict()
+            with _stopwatch() as triage_t:
+                triage_results = await self._triage.triage_batch(findings)
+            tokens_after_triage = self._llm.usage.to_dict()
+            llm_tokens_triage = _llm_tokens_delta(
+                tokens_before_triage, tokens_after_triage
+            )
 
             refinement_actions: list[dict[str, Any]] = []
+            refinement_s = 0.0
+            llm_tokens_refinement = 0
             if k < self._cfg.max_iterations and findings:
                 triage_summary = _triage_summary(triage_results)
 
-                fp_findings = [
-                    (f, t)
-                    for f, t in zip(findings, triage_results)
-                    if t.verdict == Verdict.FALSE_POSITIVE
-                ]
-                if fp_findings:
-                    sample_fp, _ = fp_findings[0]
+                # Previously refinement only fired when at least one triage
+                # verdict was FALSE_POSITIVE.  Because the triage LLM almost
+                # always returned UNCERTAIN (see Phase-A audit) that gate
+                # was effectively dead and Semgrep rules never mutated
+                # across k=0..3.  We now always invoke refinement with the
+                # full triage batch; the LLM itself decides between
+                # ``keep`` / ``refine`` / ``add_rule`` and ``keep`` remains
+                # the safe default on any parsing error
+                # (see RefinementAgent.refine_semgrep).
+                sample = _pick_refinement_target(findings, triage_results)
+                tokens_before_ref = self._llm.usage.to_dict()
+                with _stopwatch() as refine_t:
                     ref = await self._refinement.refine_semgrep(
                         rule_yaml=arm.rules_yaml,
-                        file_path=sample_fp.file_path,
-                        line_number=sample_fp.line_start,
-                        code_snippet=sample_fp.surrounding_context or sample_fp.code_snippet,
+                        file_path=sample.file_path,
+                        line_number=sample.line_start,
+                        code_snippet=sample.surrounding_context or sample.code_snippet,
                         triage_summary=triage_summary,
                     )
-                    refinement_actions.append(asdict(ref))
-                    arm.apply_refinement(ref.action.value, ref.rule_yaml, ref.target_rule_id)
+                    apply_status = arm.apply_refinement(
+                        ref.action.value, ref.rule_yaml, ref.target_rule_id
+                    )
+                    action_dict = asdict(ref)
+                    action_dict["apply_status"] = apply_status
+                    refinement_actions.append(action_dict)
+                refinement_s = refine_t[0]
+                llm_tokens_refinement = _llm_tokens_delta(
+                    tokens_before_ref, self._llm.usage.to_dict()
+                )
 
             elapsed = time.perf_counter() - t0
+
+            metrics = build_phase_metrics(
+                wall_clock_s=elapsed,
+                scan_s=scan_t[0],
+                llm_triage_s=triage_t[0],
+                llm_refinement_s=refinement_s,
+                n_findings=len(findings),
+                n_tp=sum(1 for t in triage_results if t.verdict == Verdict.TRUE_POSITIVE),
+                n_fp=sum(1 for t in triage_results if t.verdict == Verdict.FALSE_POSITIVE),
+                n_uncertain=sum(1 for t in triage_results if t.verdict == Verdict.UNCERTAIN),
+                llm_usage=self._llm.usage.to_dict(),
+                llm_tokens_triage=llm_tokens_triage,
+                llm_tokens_refinement=llm_tokens_refinement,
+            )
+            rules_yaml_post = arm.rules_yaml
+            metrics["rules_hash_pre"] = rules_hash_pre
+            metrics["rules_hash_post"] = _stable_hash(rules_yaml_post)
+            metrics["rules_yaml_bytes_pre"] = len(rules_yaml_pre)
+            metrics["rules_yaml_bytes_post"] = len(rules_yaml_post)
+            metrics["rules_yaml_changed"] = rules_yaml_pre != rules_yaml_post
+            metrics["findings_hash"] = _findings_hash(findings)
+            _log_phase_breakdown(cve_id=cve_id, arm="semgrep", k=k, metrics=metrics)
 
             results.append(
                 IterationResult(
@@ -148,14 +378,7 @@ class Pipeline:
                     findings=findings,
                     triage_results=triage_results,
                     refinement_actions=refinement_actions,
-                    metrics={
-                        "wall_clock_s": elapsed,
-                        "n_findings": len(findings),
-                        "n_tp": sum(1 for t in triage_results if t.verdict == Verdict.TRUE_POSITIVE),
-                        "n_fp": sum(1 for t in triage_results if t.verdict == Verdict.FALSE_POSITIVE),
-                        "n_uncertain": sum(1 for t in triage_results if t.verdict == Verdict.UNCERTAIN),
-                        "llm_usage": self._llm.usage.to_dict(),
-                    },
+                    metrics=metrics,
                 )
             )
 
@@ -165,29 +388,79 @@ class Pipeline:
     # Joern arm iterations
     # ------------------------------------------------------------------
 
-    async def _run_joern_arm(self, repo_path: str) -> list[IterationResult]:
+    async def _run_joern_arm(
+        self, repo_path: str, *, cve_id: str = ""
+    ) -> list[IterationResult]:
         backend_cfg = auto_detect_backend(
             repo_path, port=self._cfg.joern_port
         )
         results: list[IterationResult] = []
 
+        # CPG construction happens inside AnalysisRuntime.__aenter__
+        # (backend.connect -> joern import + workspace load).  We time it
+        # directly with perf_counter so the failure path still reports a
+        # meaningful partial duration.  On transient failures (notably
+        # "port already in use" when the previous CVE's JVM was still
+        # releasing the port) we retry once after a short pause.
+        cpg_start = time.perf_counter()
+        runtime_cm, runtime, cpg_error = await _connect_joern_with_retry(
+            backend_cfg
+        )
+        if runtime is None:
+            cpg_build_s_total = time.perf_counter() - cpg_start
+            logger.error(
+                "Joern arm failed during CPG build after %.2fs (with retry): %s",
+                cpg_build_s_total, cpg_error, exc_info=cpg_error is not None,
+            )
+            if runtime_cm is not None:
+                try:
+                    await runtime_cm.stop()
+                except Exception:
+                    logger.exception("AnalysisRuntime cleanup after __aenter__ failure failed")
+            return [
+                IterationResult(
+                    arm=ToolArm.JOERN,
+                    iteration=0,
+                    metrics={
+                        "error": str(cpg_error) if cpg_error else "unknown CPG error",
+                        "error_type": (
+                            type(cpg_error).__name__ if cpg_error else "unknown"
+                        ),
+                        "cpg_build_s": cpg_build_s_total,
+                        "cpg_build_failed": True,
+                    },
+                )
+            ]
+        cpg_build_s_total = time.perf_counter() - cpg_start
+
         try:
-            async with AnalysisRuntime(backend_cfg) as runtime:
-                joern = JoernArm(
+            joern_holder: list[JoernArm] = []
+
+            def _joern_factory() -> JoernArm:
+                inst = JoernArm(
                     context_lines=self._cfg.context_lines,
                     call_graph_depth=self._cfg.call_graph_depth,
                 )
-                await runtime.register_agent(
-                    agent_type=JoernArm,
-                    agent_name="joern_arm",
-                    agent_factory=lambda: joern,
-                )
-                runtime.start()
+                joern_holder.append(inst)
+                return inst
 
-                for k in range(self._cfg.max_iterations + 1):
-                    t0 = time.perf_counter()
-                    self._llm.reset_usage()
+            await runtime.register_agent(
+                agent_type=JoernArm,
+                agent_name="joern_arm",
+                agent_factory=_joern_factory,
+            )
+            runtime.start()
 
+            for k in range(self._cfg.max_iterations + 1):
+                t0 = time.perf_counter()
+                self._llm.reset_usage()
+                # CPG build cost is a one-shot, amortise onto k=0 only.
+                cpg_build_s = cpg_build_s_total if k == 0 else 0.0
+
+                joern = joern_holder[0] if joern_holder else None
+                catalog_pre = _joern_catalog_snapshot(joern) if joern else {}
+
+                with _stopwatch() as scan_t:
                     scan_resp = await runtime.send_message(
                         Request(type="task.joern_scan", payload={}),
                         AgentId("joern_arm", "default"),
@@ -197,66 +470,105 @@ class Pipeline:
                         Finding(**f) if isinstance(f, dict) else f
                         for f in raw_findings
                     ]
+                    joern = joern_holder[0]
                     findings = joern.get_findings_with_context(findings, repo_path)
 
+                tokens_before_triage = self._llm.usage.to_dict()
+                with _stopwatch() as triage_t:
                     triage_results = await self._triage.triage_batch(findings)
+                llm_tokens_triage = _llm_tokens_delta(
+                    tokens_before_triage, self._llm.usage.to_dict()
+                )
 
-                    refinement_actions: list[dict[str, Any]] = []
-                    if k < self._cfg.max_iterations:
-                        for f in findings:
-                            if f.sink_api:
-                                cg_resp = await runtime.send_message(
-                                    Request(
-                                        type="task.joern_call_graph",
-                                        payload={"sink_method": f.sink_api},
-                                    ),
-                                    AgentId("joern_arm", "default"),
-                                )
-                                neighbors = cg_resp.data if cg_resp.success else []
-                                if neighbors:
-                                    classification = await self._refinement.classify_helpers_joern(
-                                        call_graph_neighborhood=neighbors,
-                                        current_sources=joern.sources,
-                                        current_sinks=joern.sinks,
-                                        current_sanitizers=joern.sanitizers,
-                                    )
-                                    refinement_actions.append(asdict(classification))
-                                    new_sources = [
-                                        n for n, r in classification.classifications.items()
-                                        if r == HelperRole.SOURCE_WRAPPER
-                                    ]
-                                    new_sinks = [
-                                        n for n, r in classification.classifications.items()
-                                        if r == HelperRole.SINK_WRAPPER
-                                    ]
-                                    new_sanitizers = [
-                                        n for n, r in classification.classifications.items()
-                                        if r == HelperRole.SANITIZER
-                                    ]
-                                    joern.expand_sources(new_sources)
-                                    joern.expand_sinks(new_sinks)
-                                    joern.expand_sanitizers(new_sanitizers)
-                                    break  # one expansion per iteration
+                refinement_actions: list[dict[str, Any]] = []
+                call_graph_s = 0.0
+                refinement_s = 0.0
+                llm_tokens_refinement = 0
 
-                    elapsed = time.perf_counter() - t0
-
-                    results.append(
-                        IterationResult(
-                            arm=ToolArm.JOERN,
-                            iteration=k,
-                            findings=findings,
-                            triage_results=triage_results,
-                            refinement_actions=refinement_actions,
-                            metrics={
-                                "wall_clock_s": elapsed,
-                                "n_findings": len(findings),
-                                "n_tp": sum(1 for t in triage_results if t.verdict == Verdict.TRUE_POSITIVE),
-                                "n_fp": sum(1 for t in triage_results if t.verdict == Verdict.FALSE_POSITIVE),
-                                "n_uncertain": sum(1 for t in triage_results if t.verdict == Verdict.UNCERTAIN),
-                                "llm_usage": self._llm.usage.to_dict(),
-                            },
+                if k < self._cfg.max_iterations:
+                    for f in findings:
+                        if not f.sink_api:
+                            continue
+                        with _stopwatch() as cg_t:
+                            cg_resp = await runtime.send_message(
+                                Request(
+                                    type="task.joern_call_graph",
+                                    payload={"sink_method": f.sink_api},
+                                ),
+                                AgentId("joern_arm", "default"),
+                            )
+                        call_graph_s += cg_t[0]
+                        neighbors = cg_resp.data if cg_resp.success else []
+                        if not neighbors:
+                            continue
+                        tokens_before_ref = self._llm.usage.to_dict()
+                        with _stopwatch() as refine_t:
+                            classification = await self._refinement.classify_helpers_joern(
+                                call_graph_neighborhood=neighbors,
+                                current_sources=joern.sources,
+                                current_sinks=joern.sinks,
+                                current_sanitizers=joern.sanitizers,
+                            )
+                            refinement_actions.append(asdict(classification))
+                            new_sources = [
+                                n for n, r in classification.classifications.items()
+                                if r == HelperRole.SOURCE_WRAPPER
+                            ]
+                            new_sinks = [
+                                n for n, r in classification.classifications.items()
+                                if r == HelperRole.SINK_WRAPPER
+                            ]
+                            new_sanitizers = [
+                                n for n, r in classification.classifications.items()
+                                if r == HelperRole.SANITIZER
+                            ]
+                            joern.expand_sources(new_sources)
+                            joern.expand_sinks(new_sinks)
+                            joern.expand_sanitizers(new_sanitizers)
+                        refinement_s += refine_t[0]
+                        llm_tokens_refinement += _llm_tokens_delta(
+                            tokens_before_ref, self._llm.usage.to_dict()
                         )
+                        break  # one expansion per iteration
+
+                elapsed = time.perf_counter() - t0
+
+                metrics = build_phase_metrics(
+                    wall_clock_s=elapsed + cpg_build_s,
+                    cpg_build_s=cpg_build_s,
+                    scan_s=scan_t[0],
+                    llm_triage_s=triage_t[0],
+                    llm_refinement_s=refinement_s,
+                    call_graph_s=call_graph_s,
+                    n_findings=len(findings),
+                    n_tp=sum(1 for t in triage_results if t.verdict == Verdict.TRUE_POSITIVE),
+                    n_fp=sum(1 for t in triage_results if t.verdict == Verdict.FALSE_POSITIVE),
+                    n_uncertain=sum(1 for t in triage_results if t.verdict == Verdict.UNCERTAIN),
+                    llm_usage=self._llm.usage.to_dict(),
+                    llm_tokens_triage=llm_tokens_triage,
+                    llm_tokens_refinement=llm_tokens_refinement,
+                )
+                catalog_post = _joern_catalog_snapshot(joern)
+                metrics["joern_catalog_pre"] = catalog_pre
+                metrics["joern_catalog_post"] = catalog_post
+                metrics["joern_catalog_grew"] = (
+                    len(catalog_post.get("sources", [])) > len(catalog_pre.get("sources", []))
+                    or len(catalog_post.get("sinks", [])) > len(catalog_pre.get("sinks", []))
+                    or len(catalog_post.get("sanitizers", [])) > len(catalog_pre.get("sanitizers", []))
+                )
+                metrics["findings_hash"] = _findings_hash(findings)
+                _log_phase_breakdown(cve_id=cve_id, arm="joern", k=k, metrics=metrics)
+
+                results.append(
+                    IterationResult(
+                        arm=ToolArm.JOERN,
+                        iteration=k,
+                        findings=findings,
+                        triage_results=triage_results,
+                        refinement_actions=refinement_actions,
+                        metrics=metrics,
                     )
+                )
 
         except Exception as exc:
             logger.error("Joern arm failed: %s", exc, exc_info=True)
@@ -265,9 +577,14 @@ class Pipeline:
                     IterationResult(
                         arm=ToolArm.JOERN,
                         iteration=0,
-                        metrics={"error": str(exc)},
+                        metrics={"error": str(exc), "cpg_build_s": cpg_build_s_total},
                     )
                 )
+        finally:
+            try:
+                await runtime_cm.__aexit__(None, None, None)
+            except Exception:  # pragma: no cover - best-effort cleanup
+                logger.exception("AnalysisRuntime cleanup failed")
 
         return results
 
@@ -282,3 +599,26 @@ def _triage_summary(triage_results: list[Any]) -> dict[str, int]:
         else:
             summary["uncertain"] += 1
     return summary
+
+
+def _pick_refinement_target(
+    findings: list[Finding], triage_results: list[Any],
+) -> Finding:
+    """Choose the most informative finding to anchor LLM refinement.
+
+    Priority order (falls through to the next if none match):
+
+      1. A ``FALSE_POSITIVE`` — the LLM already flagged it, so refining
+         the rule around it directly improves precision.
+      2. An ``UNCERTAIN`` — ambiguous cases benefit most from rule
+         tightening / widening.
+      3. Any ``TRUE_POSITIVE`` — expose the rule to a known-good match so
+         the LLM can propose complementary ``add_rule`` suggestions.
+      4. First finding as an unconditional fallback.
+    """
+    pairs = list(zip(findings, triage_results))
+    for verdict in (Verdict.FALSE_POSITIVE, Verdict.UNCERTAIN, Verdict.TRUE_POSITIVE):
+        for f, t in pairs:
+            if t.verdict == verdict:
+                return f
+    return findings[0]

@@ -15,11 +15,15 @@ Higher-level analyses (e.g., caller/callee analysis, data flow analysis, taint a
 are built on top of this core graph abstraction and provided in a separate agent layer.
 """
 
+import logging
+import os
 from collections import defaultdict
 from collections.abc import Callable
 from typing import Any, Literal
 
 import networkx as nx
+
+logger = logging.getLogger(__name__)
 
 from auditzoo.core.ir.backend_api import CPGBackend
 from auditzoo.core.ir.facts import (
@@ -691,13 +695,35 @@ class IRView:
     async def preload_from_backend(self) -> None:
         """Preload common units and relations from the backend into the IRView.
         This can be used to eagerly load frequently accessed data.
-        """
 
+        Environment toggles (useful for large repos where the per-method call
+        preload overwhelms the Joern Scala REPL):
+
+        * ``AUDITZOO_SKIP_PRELOAD_CALLS=1`` - skip the O(n_methods) ``Calls``
+          relation preload.  The call graph is then fetched lazily via
+          :meth:`get_all_relations_by_kind` when (and if) a consumer asks for
+          it.  Callers that never touch the IR call graph (e.g. the CWE-78
+          JoernArm which queries the backend directly) are unaffected.
+        * ``AUDITZOO_SKIP_PRELOAD_FACTS=1`` - skip the per-unit facts preload.
+        """
         await self.get_all_units_by_kind(UKRegistry.Function(), fetch_backend=True)
         await self.get_all_units_by_kind(UKRegistry.File(), fetch_backend=True)
-        await self.get_all_relations_by_kind(RKRegistry.Calls(), fetch_backend=True)
 
-        await self.load_facts()
+        if os.environ.get("AUDITZOO_SKIP_PRELOAD_CALLS", "").lower() not in {"1", "true", "yes"}:
+            await self.get_all_relations_by_kind(RKRegistry.Calls(), fetch_backend=True)
+        else:
+            logger.info(
+                "preload_from_backend: skipping Calls relation preload "
+                "(AUDITZOO_SKIP_PRELOAD_CALLS=1)"
+            )
+
+        if os.environ.get("AUDITZOO_SKIP_PRELOAD_FACTS", "").lower() not in {"1", "true", "yes"}:
+            await self.load_facts()
+        else:
+            logger.info(
+                "preload_from_backend: skipping per-unit facts preload "
+                "(AUDITZOO_SKIP_PRELOAD_FACTS=1)"
+            )
 
     async def _load_unit_facts_from_backend(self, unit: CodeUnit) -> None:
         """Load unit facts for a CodeUnit from the backend.

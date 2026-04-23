@@ -1,0 +1,11 @@
+{
+  "results_path": "/workspace/AuditZooBugByters/results/semgrep/20260422_195716/results.json",
+  "csv_path": "/workspace/AuditZooBugByters/results/semgrep/20260422_195716/rules_hash_summary.csv",
+  "n_semgrep_rows": 300,
+  "refine_actions_total": 105,
+  "refine_actions_no_op": 64,
+  "refine_no_op_rate": 0.6095238095238096,
+  "cves_in_audit": 75,
+  "cves_with_k_invariant_findings": 75,
+  "findings_invariance_frac": 1.0
+}

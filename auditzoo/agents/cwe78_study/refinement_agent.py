@@ -8,6 +8,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import yaml
+
 from .llm_client import LLMClient
 from .prompts import (
     SYSTEM_PROMPT_A_JOERN,
@@ -21,6 +23,29 @@ from .schemas import (
     RefinementAction,
     SemgrepRefinement,
 )
+
+
+def _extract_rule_id(rule_yaml: str) -> str:
+    """Best-effort extraction of the ``id:`` field from a rule YAML patch.
+
+    Used to back-fill ``target_rule_id`` when the LLM forgot to emit it
+    but did include a valid rule body in ``rule_yaml``.  Returns an empty
+    string on any parsing failure.
+    """
+    if not (rule_yaml or "").strip():
+        return ""
+    try:
+        loaded = yaml.safe_load(rule_yaml)
+    except yaml.YAMLError:
+        return ""
+    if isinstance(loaded, dict) and "rules" in loaded:
+        rules = loaded.get("rules") or []
+        loaded = rules[0] if rules else None
+    elif isinstance(loaded, list):
+        loaded = loaded[0] if loaded else None
+    if isinstance(loaded, dict):
+        return str(loaded.get("id", "") or "")
+    return ""
 
 logger = logging.getLogger(__name__)
 
@@ -68,16 +93,33 @@ class RefinementAgent:
             logger.warning("Semgrep refinement LLM call failed: %s", exc)
             return SemgrepRefinement(action=RefinementAction.KEEP)
 
-        action_str = data.get("action", "keep").lower()
+        action_str = str(data.get("action", "keep")).lower()
         try:
             action = RefinementAction(action_str)
         except ValueError:
             action = RefinementAction.KEEP
 
+        rule_yaml = str(data.get("rule_yaml", "") or "")
+        target_rule_id = str(data.get("target_rule_id", "") or "").strip()
+
+        # Back-fill ``target_rule_id`` from the YAML patch when the LLM
+        # emits action=refine with a valid rule body but forgets the id.
+        # The 20260422 sweep showed this happens in 100 % of refine calls,
+        # which silently no-ops ``SemgrepArm.apply_refinement`` and makes
+        # the k-loop cosmetic.
+        if action == RefinementAction.REFINE and not target_rule_id:
+            target_rule_id = _extract_rule_id(rule_yaml)
+            if target_rule_id:
+                logger.info(
+                    "refine_semgrep: back-filled target_rule_id=%r "
+                    "from rule_yaml (LLM omitted it)",
+                    target_rule_id,
+                )
+
         return SemgrepRefinement(
             action=action,
-            rule_yaml=data.get("rule_yaml", ""),
-            target_rule_id=data.get("target_rule_id", ""),
+            rule_yaml=rule_yaml,
+            target_rule_id=target_rule_id,
         )
 
     # ------------------------------------------------------------------

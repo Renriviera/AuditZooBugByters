@@ -68,12 +68,26 @@ class FindingWithContext(Finding):
 
 @dataclass
 class TriageResult:
-    """LLM Call 2 output: verdict on a single finding."""
+    """LLM Call 2 output: verdict on a single finding.
+
+    ``source_expr`` and ``sink_expr`` are verbatim substrings the LLM
+    extracts from the finding's snippet or structural evidence.  They are
+    the primary hallucination brake: if the LLM returns
+    ``true_positive`` but ``source_expr`` is missing or is not a literal
+    substring of the snippet, :class:`TriageAgent` downgrades the
+    verdict to ``UNCERTAIN`` and records the reason in
+    ``downgrade_reason``.  Downstream ``label_findings`` additionally
+    penalises any surviving TP whose ``source_expr`` is not present in
+    the snippet as ``fp_by_hallucinated_source``.
+    """
 
     verdict: Verdict
     confidence: float
     reasoning: str
     suggestion: str = ""
+    source_expr: str = ""
+    sink_expr: str = ""
+    downgrade_reason: str = ""
 
 
 @dataclass

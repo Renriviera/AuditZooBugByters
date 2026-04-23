@@ -110,9 +110,7 @@ class JoernArm(BaseAnalysisAgent):
 
     async def _run_taint_scan(self, ctx: MessageContext) -> list[Finding]:
         """Execute CPGQL taint queries and parse results into Findings."""
-        source_re = "|".join(self._sources)
-        sink_re = "|".join(self._sinks)
-        query = self._build_taint_query(source_re, sink_re)
+        query = self._build_taint_query(self._sources, self._sinks)
 
         try:
             raw = await self.query_ir(query, response_ty="json", ctx=ctx)
@@ -136,12 +134,13 @@ class JoernArm(BaseAnalysisAgent):
     async def _expand_call_graph(
         self, sink_method: str, depth: int, ctx: MessageContext
     ) -> list[dict[str, Any]]:
+        safe_name = sink_method.replace('"', '\\"')
         query = (
-            f'cpg.method.name("{sink_method}")'
-            f".repeat(_.caller)(_.times({depth})).l.map {{ m => "
+            f'cpg.method.name("{safe_name}")'
+            f".repeat(_.caller)(_.maxDepth({depth})).dedup.l.map {{ m => "
             f'Map("name" -> m.name, "filename" -> m.filename, '
             f'"lineNumber" -> m.lineNumber.getOrElse(-1).toString, '
-            f'"code" -> m.code.take(500)) }}'
+            f'"code" -> m.code.take(500).replace("\\n", " ")) }}.toJson'
         )
         try:
             raw = await self.query_ir(query, response_ty="json", ctx=ctx)
@@ -192,83 +191,100 @@ class JoernArm(BaseAnalysisAgent):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _build_taint_query(source_re: str, sink_re: str) -> str:
+    def _build_taint_query(sources: list[str], sinks: list[str]) -> str:
+        """Build a CPGQL taint-reachability query for the Python Joern frontend.
+
+        The Python frontend stores a call's short name in ``call.name`` (e.g.
+        ``"run"`` for ``subprocess.run(...)``) and the fully-qualified string
+        only in ``call.code``.  Sources like ``sys.argv`` or ``request.form``
+        are ``fieldAccess`` nodes, not calls.  So we:
+
+          * split sink catalog entries ``module.foo`` into a *name set*
+            (``{"foo"}``) and a qualified *prefix regex*; match calls whose
+            short name is in the set AND whose code starts with the qualified
+            form (e.g. ``subprocess.run(...)``).
+          * match sources as the union of ``fieldAccess.code`` (attribute
+            accesses) and ``call`` whose short name matches a tail token
+            (e.g. ``input``, ``getenv``).
+          * emit structured JSON records via ``.toJson`` so the backend's
+            JSON parser succeeds even for empty results (``"[]"``).
+        """
+        def _escape(s: str) -> str:
+            return s.replace("\\", "\\\\").replace("\"", "\\\"").replace(".", "\\.")
+
+        sink_names = sorted({s.rsplit(".", 1)[-1] for s in sinks if s})
+        sink_prefix_re = "(?s)^(" + "|".join(_escape(s) for s in sinks) + ")\\(.*"
+        sink_names_scala = ",".join(f'"{n}"' for n in sink_names)
+
+        source_tokens = [s for s in sources if s]
+        source_code_re = "(?s).*(" + "|".join(_escape(s) for s in source_tokens) + ").*"
+        # Calls whose *short* name matches the last segment of the source pattern.
+        # E.g. "input", "getenv" are callables; attribute reads remain field accesses.
+        source_call_tails = sorted({
+            s.rsplit(".", 1)[-1]
+            for s in source_tokens
+            if "." not in s or s.rsplit(".", 1)[-1] in {"getenv", "input"}
+        })
+        source_call_names_scala = ",".join(f'"{n}"' for n in source_call_tails)
+
+        # Single-expression query: the CPGQL server echoes *every* top-level
+        # val binding, so we inline everything into one chained call whose
+        # final result (a JSON string) is the only value the REPL prints.
         return (
-            f'def sources = cpg.call.name(".*({source_re}).*")\n'
-            f'def sinks = cpg.call.name(".*({sink_re}).*")\n'
-            "sinks.reachableByFlows(sources).p"
+            "cpg.call"
+            f".filter(c => Set({sink_names_scala}).contains(c.name))"
+            f'.code("""{sink_prefix_re}""").iterator'
+            ".reachableByFlows("
+            "(cpg.fieldAccess"
+            f'.code("""{source_code_re}""").l ++ '
+            "cpg.call"
+            f".filter(c => Set({source_call_names_scala}).contains(c.name)).l"
+            ").iterator"
+            ").l.map { f => Map("
+            '"sinkLine"   -> f.elements.last.lineNumber.getOrElse(-1).toString, '
+            '"sinkFile"   -> f.elements.last.file.name.headOption.getOrElse(""), '
+            '"sinkCode"   -> f.elements.last.code.take(300).replace("\\n", " "), '
+            '"sinkName"   -> (f.elements.last match { '
+            "case c: io.shiftleft.codepropertygraph.generated.nodes.Call => c.name; "
+            'case _ => "" }), '
+            '"sourceLine" -> f.elements.head.lineNumber.getOrElse(-1).toString, '
+            '"sourceFile" -> f.elements.head.file.name.headOption.getOrElse(""), '
+            '"sourceCode" -> f.elements.head.code.take(200).replace("\\n", " ")'
+            ") }.toJson"
         )
 
     @staticmethod
     def _parse_taint_results(raw: Any) -> list[Finding]:
-        """Convert Joern ``reachableByFlows`` output to Finding objects."""
-        if raw is None:
+        """Convert the JSON records produced by ``_build_taint_query`` to Findings."""
+        if not raw:
+            return []
+        if not isinstance(raw, list):
             return []
 
         findings: list[Finding] = []
-
-        if isinstance(raw, str):
-            for block in raw.split("\n\n"):
-                block = block.strip()
-                if not block:
-                    continue
-                lines = block.splitlines()
-                file_path = ""
-                line_start = 0
-                sink_api = ""
-                for line in lines:
-                    parts = line.split("|")
-                    if len(parts) >= 3:
-                        loc = parts[1].strip()
-                        if ":" in loc:
-                            fp, ln = loc.rsplit(":", 1)
-                            file_path = fp.strip()
-                            try:
-                                line_start = int(ln.strip())
-                            except ValueError:
-                                pass
-                if file_path:
-                    findings.append(
-                        Finding(
-                            file_path=file_path,
-                            line_start=line_start,
-                            line_end=line_start,
-                            rule_id="joern-taint-reachability",
-                            message="Taint flow from source to sink",
-                            code_snippet=block,
-                            sink_api=sink_api,
-                            arm=ToolArm.JOERN,
-                        )
-                    )
-
-        elif isinstance(raw, list):
-            for item in raw:
-                if isinstance(item, dict):
-                    fp = item.get("filename", item.get("file", ""))
-                    ls = item.get("lineNumber", item.get("line", 0))
-                    findings.append(
-                        Finding(
-                            file_path=str(fp),
-                            line_start=int(ls) if ls else 0,
-                            line_end=int(ls) if ls else 0,
-                            rule_id="joern-taint-reachability",
-                            message="Taint flow from source to sink",
-                            code_snippet=str(item),
-                            arm=ToolArm.JOERN,
-                            metadata=item,
-                        )
-                    )
-                elif isinstance(item, str):
-                    findings.append(
-                        Finding(
-                            file_path="",
-                            line_start=0,
-                            line_end=0,
-                            rule_id="joern-taint-reachability",
-                            message="Taint flow",
-                            code_snippet=item,
-                            arm=ToolArm.JOERN,
-                        )
-                    )
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            fp = str(item.get("sinkFile", ""))
+            try:
+                ls = int(item.get("sinkLine", 0))
+            except (TypeError, ValueError):
+                ls = 0
+            findings.append(
+                Finding(
+                    file_path=fp,
+                    line_start=ls,
+                    line_end=ls,
+                    rule_id="joern-taint-reachability",
+                    message=(
+                        f"Taint flow: {item.get('sourceCode', '')} "
+                        f"-> {item.get('sinkCode', '')}"
+                    ),
+                    code_snippet=str(item.get("sinkCode", "")),
+                    sink_api=str(item.get("sinkName", "")),
+                    arm=ToolArm.JOERN,
+                    metadata=item,
+                )
+            )
 
         return findings

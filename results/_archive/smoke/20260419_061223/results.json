@@ -1,0 +1,664 @@
+[
+  {
+    "cve_id": "CVE-2020-15271",
+    "repo_url": "https://github.com/d0c-s4vage/lookatme",
+    "loc": 3208,
+    "cvss_score": 9.3,
+    "arms": {
+      "semgrep_0": {
+        "tp": 0,
+        "fp": 1,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [
+          "fp_by_location"
+        ],
+        "fp_kloc": 0.31172069825436405,
+        "metrics": {
+          "wall_clock_s": 25.622706956230104,
+          "n_findings": 1,
+          "n_tp": 1,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 461,
+            "completion_tokens": 108,
+            "total_tokens": 569,
+            "call_count": 1
+          }
+        },
+        "n_candidates": 1,
+        "resource_delta": {
+          "peak_rss_mb": 11.44140625,
+          "cpu_user_s": 5.960308,
+          "cpu_sys_s": 1.6375469999999999
+        }
+      },
+      "semgrep_1": {
+        "tp": 0,
+        "fp": 1,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [
+          "fp_by_location"
+        ],
+        "fp_kloc": 0.31172069825436405,
+        "metrics": {
+          "wall_clock_s": 16.283425752073526,
+          "n_findings": 1,
+          "n_tp": 1,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 461,
+            "completion_tokens": 105,
+            "total_tokens": 566,
+            "call_count": 1
+          }
+        },
+        "n_candidates": 1,
+        "resource_delta": {
+          "peak_rss_mb": 11.44140625,
+          "cpu_user_s": 5.960308,
+          "cpu_sys_s": 1.6375469999999999
+        }
+      },
+      "semgrep_2": {
+        "tp": 0,
+        "fp": 1,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [
+          "fp_by_location"
+        ],
+        "fp_kloc": 0.31172069825436405,
+        "metrics": {
+          "wall_clock_s": 18.158484951592982,
+          "n_findings": 1,
+          "n_tp": 1,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 461,
+            "completion_tokens": 105,
+            "total_tokens": 566,
+            "call_count": 1
+          }
+        },
+        "n_candidates": 1,
+        "resource_delta": {
+          "peak_rss_mb": 11.44140625,
+          "cpu_user_s": 5.960308,
+          "cpu_sys_s": 1.6375469999999999
+        }
+      },
+      "semgrep_3": {
+        "tp": 0,
+        "fp": 1,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [
+          "fp_by_location"
+        ],
+        "fp_kloc": 0.31172069825436405,
+        "metrics": {
+          "wall_clock_s": 15.577273256145418,
+          "n_findings": 1,
+          "n_tp": 1,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 461,
+            "completion_tokens": 105,
+            "total_tokens": 566,
+            "call_count": 1
+          }
+        },
+        "n_candidates": 1,
+        "resource_delta": {
+          "peak_rss_mb": 11.44140625,
+          "cpu_user_s": 5.960308,
+          "cpu_sys_s": 1.6375469999999999
+        }
+      },
+      "joern_0": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "error": "'JoernArm' object has no attribute '_id'"
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 11.44140625,
+          "cpu_user_s": 5.960308,
+          "cpu_sys_s": 1.6375469999999999
+        }
+      },
+      "semgrep_0_patched": {
+        "n_findings_on_patched": 1,
+        "metrics": {
+          "wall_clock_s": 15.75140599347651,
+          "n_findings": 1,
+          "n_tp": 1,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 461,
+            "completion_tokens": 108,
+            "total_tokens": 569,
+            "call_count": 1
+          }
+        }
+      },
+      "semgrep_1_patched": {
+        "n_findings_on_patched": 1,
+        "metrics": {
+          "wall_clock_s": 15.82133556343615,
+          "n_findings": 1,
+          "n_tp": 1,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 461,
+            "completion_tokens": 108,
+            "total_tokens": 569,
+            "call_count": 1
+          }
+        }
+      },
+      "semgrep_2_patched": {
+        "n_findings_on_patched": 1,
+        "metrics": {
+          "wall_clock_s": 14.817085535265505,
+          "n_findings": 1,
+          "n_tp": 1,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 461,
+            "completion_tokens": 108,
+            "total_tokens": 569,
+            "call_count": 1
+          }
+        }
+      },
+      "semgrep_3_patched": {
+        "n_findings_on_patched": 1,
+        "metrics": {
+          "wall_clock_s": 15.837946889922023,
+          "n_findings": 1,
+          "n_tp": 1,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 461,
+            "completion_tokens": 108,
+            "total_tokens": 569,
+            "call_count": 1
+          }
+        }
+      },
+      "joern_0_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "error": "'JoernArm' object has no attribute '_id'"
+        }
+      }
+    }
+  },
+  {
+    "cve_id": "CVE-2021-38305",
+    "repo_url": "https://github.com/23andMe/Yamale",
+    "loc": 1628,
+    "cvss_score": 7.8,
+    "arms": {
+      "semgrep_0": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "wall_clock_s": 12.912766315042973,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          }
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 5.4222139999999985,
+          "cpu_sys_s": 1.3752839999999997
+        }
+      },
+      "semgrep_1": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "wall_clock_s": 11.909411784261465,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          }
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 5.4222139999999985,
+          "cpu_sys_s": 1.3752839999999997
+        }
+      },
+      "semgrep_2": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "wall_clock_s": 11.038003239780664,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          }
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 5.4222139999999985,
+          "cpu_sys_s": 1.3752839999999997
+        }
+      },
+      "semgrep_3": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "wall_clock_s": 11.286297794431448,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          }
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 5.4222139999999985,
+          "cpu_sys_s": 1.3752839999999997
+        }
+      },
+      "joern_0": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "error": "'JoernArm' object has no attribute '_id'"
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 5.4222139999999985,
+          "cpu_sys_s": 1.3752839999999997
+        }
+      },
+      "semgrep_0_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "wall_clock_s": 12.579427590593696,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          }
+        }
+      },
+      "semgrep_1_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "wall_clock_s": 12.68056102283299,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          }
+        }
+      },
+      "semgrep_2_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "wall_clock_s": 12.119645268656313,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          }
+        }
+      },
+      "semgrep_3_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "wall_clock_s": 9.040719377808273,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          }
+        }
+      },
+      "joern_0_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "error": "'JoernArm' object has no attribute '_id'"
+        }
+      }
+    }
+  },
+  {
+    "cve_id": "CVE-2021-39160",
+    "repo_url": "https://github.com/jupyterhub/nbgitpuller",
+    "loc": 1095,
+    "cvss_score": 9.6,
+    "arms": {
+      "semgrep_0": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 4,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "wall_clock_s": 11.662177092395723,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          }
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 4.5,
+          "cpu_user_s": 2.737666000000001,
+          "cpu_sys_s": 0.6682709999999998
+        }
+      },
+      "semgrep_1": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 4,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "wall_clock_s": 11.794294198043644,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          }
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 4.5,
+          "cpu_user_s": 2.737666000000001,
+          "cpu_sys_s": 0.6682709999999998
+        }
+      },
+      "semgrep_2": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 4,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "wall_clock_s": 12.371491531841457,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          }
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 4.5,
+          "cpu_user_s": 2.737666000000001,
+          "cpu_sys_s": 0.6682709999999998
+        }
+      },
+      "semgrep_3": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 4,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "wall_clock_s": 13.702061566524208,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          }
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 4.5,
+          "cpu_user_s": 2.737666000000001,
+          "cpu_sys_s": 0.6682709999999998
+        }
+      },
+      "joern_0": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 4,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "error": "'JoernArm' object has no attribute '_id'"
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 4.5,
+          "cpu_user_s": 2.737666000000001,
+          "cpu_sys_s": 0.6682709999999998
+        }
+      },
+      "semgrep_0_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "wall_clock_s": 12.438674204051495,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          }
+        }
+      },
+      "semgrep_1_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "wall_clock_s": 12.297152035869658,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          }
+        }
+      },
+      "semgrep_2_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "wall_clock_s": 12.067014683969319,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          }
+        }
+      },
+      "semgrep_3_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "wall_clock_s": 12.435027858242393,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          }
+        }
+      },
+      "joern_0_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "error": "'JoernArm' object has no attribute '_id'"
+        }
+      }
+    }
+  }
+]

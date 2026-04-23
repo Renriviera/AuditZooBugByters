@@ -1,0 +1,18 @@
+{
+  "dataset": "/workspace/AuditZooBugByters/benchmark/python/cwe78_cves/metadata.json",
+  "output": "/workspace/AuditZooBugByters/results",
+  "clone_dir": "/tmp/auditzoo_eval",
+  "max_k": 3,
+  "seed": 235711,
+  "llm_url": "http://localhost:8000/v1",
+  "llm_model": "Qwen/Qwen2.5-Coder-7B-Instruct",
+  "line_tolerance": 5,
+  "skip_empty_gt": true,
+  "skip_cves": [],
+  "only_cves": [],
+  "log_llm_io": null,
+  "joern_port": 12345,
+  "per_cve_timeout": 1800.0,
+  "run_patched": false,
+  "sweep": "joern"
+}

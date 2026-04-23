@@ -1,0 +1,66 @@
+[
+  {
+    "cve_id": "CVE-2020-11981",
+    "skipped": "explicit"
+  },
+  {
+    "cve_id": "CVE-2020-11978",
+    "skipped": "explicit"
+  },
+  {
+    "cve_id": "CVE-2020-15271",
+    "skipped": "explicit"
+  },
+  {
+    "cve_id": "CVE-2021-38305",
+    "skipped": "explicit"
+  },
+  {
+    "cve_id": "CVE-2021-39160",
+    "skipped": "explicit"
+  },
+  {
+    "cve_id": "CVE-2021-39159",
+    "skipped": "explicit"
+  },
+  {
+    "cve_id": "CVE-2021-23422",
+    "skipped": "explicit"
+  },
+  {
+    "cve_id": "CVE-2021-22557",
+    "skipped": "explicit"
+  },
+  {
+    "cve_id": "CVE-2021-41228",
+    "skipped": "explicit"
+  },
+  {
+    "cve_id": "CVE-2019-14904",
+    "skipped": "explicit"
+  },
+  {
+    "cve_id": "CVE-2026-25130",
+    "skipped": "explicit"
+  },
+  {
+    "cve_id": "CVE-2026-26331",
+    "skipped": "explicit"
+  },
+  {
+    "cve_id": "CVE-2026-34955",
+    "skipped": "explicit"
+  },
+  {
+    "cve_id": "CVE-2026-34935",
+    "skipped": "explicit"
+  },
+  {
+    "cve_id": "CVE-2026-35043",
+    "skipped": "explicit"
+  },
+  {
+    "cve_id": "CVE-2026-33641",
+    "skipped": "explicit"
+  }
+]

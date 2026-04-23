@@ -37,7 +37,11 @@ class JoernBackend(CPGBackend):
         """
         self.config = config
         self.client = JoernClient(
-            joern_path=config.joern_path, host=config.host, port=config.port
+            joern_path=config.joern_path,
+            host=config.host,
+            port=config.port,
+            jvm_stack_size=config.jvm_stack_size,
+            jvm_extra_opts=config.jvm_extra_opts or [],
         )
         self._connected = False
 

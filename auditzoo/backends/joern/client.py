@@ -3,7 +3,10 @@
 Low-level wrapper for interacting with Joern and querying the CPG.
 """
 
+import asyncio
+import logging
 import os
+import re
 import socket
 import subprocess  # nosec B404 - subprocess needed for Joern interaction
 import time
@@ -16,6 +19,37 @@ from rich.text import Text
 from auditzoo.backends.joern.utils import parse_joern_response
 from auditzoo.core.ir.backend_api import BackendConnectionError, BackendQueryError
 
+logger = logging.getLogger(__name__)
+
+# Regex for the Scala 3 compiler's transient "extension-method recursion limit"
+# output.  When the server hits this, the REPL's response "succeeds" but the
+# stdout is a compiler error buffer like:
+#     -- [E008] Not Found Error: -----
+#     1 |cpg.method.id(...).call.map {...}
+#       |^^^^^^^^^^
+#       |value method is not a member of io.shiftleft.codepropertygraph.generated.Cpg.
+#       |Extension methods were tried, but the search failed with:
+#       |    Recursion limit exceeded.
+# These are recoverable: a warm-up query plus -Xss=16m typically stops them
+# happening, and a single retry cleans up any stragglers where the first
+# invocation's implicit-search cache got into a bad state.
+_RECURSION_LIMIT_RE = re.compile(
+    r"Recursion limit exceeded", re.MULTILINE
+)
+
+
+def _looks_like_transient_compile_error(raw: str) -> bool:
+    """True iff *raw* is the Scala REPL emitting a recoverable compiler error."""
+    if not raw:
+        return False
+    if "Recursion limit exceeded" in raw:
+        return True
+    # Also treat the closely-related "Extension methods were tried, but the
+    # search failed" banner as transient — it is the same root cause.
+    if "Extension methods were tried" in raw and "search failed" in raw:
+        return True
+    return False
+
 
 class JoernClient:
     """Client for interacting with Joern CPG.
@@ -26,13 +60,33 @@ class JoernClient:
     - Mapping query results to Python objects
     """
 
-    def __init__(self, joern_path: str, host: str = "localhost", port: int = 8080):
+    def __init__(
+        self,
+        joern_path: str,
+        host: str = "localhost",
+        port: int = 8080,
+        *,
+        jvm_stack_size: str = "16m",
+        jvm_extra_opts: list[str] | None = None,
+        query_retries: int = 1,
+        query_retry_sleep_s: float = 0.5,
+    ):
         """Initialize Joern client.
 
         Args:
             joern_path: Path to Joern installation (e.g., /path/to/joern)
             host: Joern server host
             port: Joern server port
+            jvm_stack_size: Value for ``-Xss`` passed to the Joern JVM via
+                ``JAVA_OPTS``.  The Scala 3 extension-method resolver in the
+                Joern REPL trips "Recursion limit exceeded" on the default
+                1 MB stack for non-trivial CPGs — 16m is a well-known safe
+                mitigation.  Set to empty string to disable.
+            jvm_extra_opts: Additional JVM flags appended to ``JAVA_OPTS``.
+            query_retries: How many times to retry a query whose raw response
+                is a transient Scala compiler error (e.g. recursion-limit
+                compile failures).  ``0`` disables retries.
+            query_retry_sleep_s: Delay between query retries, in seconds.
         """
         self.joern_path = Path(joern_path)
 
@@ -42,6 +96,11 @@ class JoernClient:
             )
         self.host = host
         self.port = port
+
+        self.jvm_stack_size = jvm_stack_size or ""
+        self.jvm_extra_opts = list(jvm_extra_opts or [])
+        self.query_retries = max(0, int(query_retries))
+        self.query_retry_sleep_s = max(0.0, float(query_retry_sleep_s))
 
         # Determine Joern executable path
         self.joern_bin = self.joern_path / "joern-cli" / "joern"
@@ -239,6 +298,59 @@ class JoernClient:
             await self.query(f'open("{project_name}")')
             await self.query(f'workspace.setActiveProject("{project_name}")')
 
+        # Warm up the Scala compiler's extension-method cache.  Running a
+        # cheap reference to each ``Cpg`` extension we later rely on forces
+        # the implicit/extension search once, while the compiler is still
+        # cold and the stack is shallow.  Without this, the first real query
+        # against a large CPG often hits "Recursion limit exceeded" even with
+        # -Xss bumped.  Failures here are logged but non-fatal — the retry
+        # wrapper in ``query`` will still handle transient hits later.
+        await self._warm_up_extensions()
+
+    async def _warm_up_extensions(self) -> None:
+        """Touch the common ``Cpg`` extension entry points once.
+
+        The Joern REPL is a Scala 3 compile-then-run loop.  Each fresh
+        ``cpg.<member>`` reference forces an extension-method search whose
+        intermediate results get cached.  Touching the members we actually
+        use early (when the compiler's search depth is small) makes later
+        queries either succeed outright or at least be retry-eligible.
+        """
+        warm_ups = [
+            "cpg.method.size",       # used by get_code_units / callees
+            "cpg.call.size",         # taint-reachability entry point
+            "cpg.file.size",         # used by file-level lookups
+            "cpg.tag.size",          # used by get_unit_tags
+            "cpg.fieldAccess.size",  # used by source matching
+        ]
+        for q in warm_ups:
+            try:
+                await self.query(q)
+            except (BackendQueryError, BackendConnectionError) as exc:
+                logger.warning(
+                    "Joern warm-up query %r failed (continuing): %s", q, exc,
+                )
+
+    def _build_server_env(self) -> dict[str, str]:
+        """Build the subprocess env for the Joern REPL server.
+
+        Adds ``-Xss<size>`` (and any ``jvm_extra_opts``) to ``JAVA_OPTS`` so
+        the Scala 3 compiler has enough stack to resolve deep extension-method
+        search trees without tripping "Recursion limit exceeded".
+        """
+        env = os.environ.copy()
+        extra: list[str] = []
+        if self.jvm_stack_size:
+            extra.append(f"-Xss{self.jvm_stack_size}")
+        extra.extend(self.jvm_extra_opts)
+        if extra:
+            existing = env.get("JAVA_OPTS", "").strip()
+            env["JAVA_OPTS"] = (existing + " " + " ".join(extra)).strip()
+            logger.debug(
+                "Joern JVM JAVA_OPTS set to: %s", env["JAVA_OPTS"],
+            )
+        return env
+
     def _start_joern_server(self) -> None:
         """Start Joern server process."""
         if self._process is not None:
@@ -259,7 +371,7 @@ class JoernClient:
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                env=os.environ.copy(),
+                env=self._build_server_env(),
             )
         )
 
@@ -421,10 +533,14 @@ class JoernClient:
         self._workspace_dir = None
 
     async def query(self, query_str: str) -> str:
-        """Execute a CPG query using Joern CLI.
+        """Execute a CPG query using the Joern REPL server.
 
-        This executes queries by invoking joern with a script.
-        For production, consider using Joern's HTTP server mode instead.
+        A single transparent retry is performed when the REPL returns a
+        *transient* Scala compiler error (most commonly "Recursion limit
+        exceeded" while resolving ``Cpg`` extension methods).  Such errors
+        look like a successful RPC to ``cpgqls-client`` — the compiler just
+        writes its diagnostic to stdout in place of a real result — so they
+        are detected by scanning the decoded payload.
 
         Args:
             query_str: Joern query string (e.g., "cpg.method.name.l")
@@ -435,13 +551,37 @@ class JoernClient:
         if not self.core:
             raise BackendConnectionError("Not connected to Joern")
 
-        response = await self.core._send_query(query_str)
-        if not response["success"]:
-            raise BackendQueryError(
-                f"Joern query failed: {response.get('error', 'Unknown error')}"
-            )
+        last_raw: str = ""
+        attempts = self.query_retries + 1
+        for attempt in range(1, attempts + 1):
+            response = await self.core._send_query(query_str)
+            if not response["success"]:
+                raise BackendQueryError(
+                    f"Joern query failed: {response.get('error', 'Unknown error')}"
+                )
 
-        return Text.from_ansi(response["stdout"]).plain  # type: ignore
+            raw = Text.from_ansi(response["stdout"]).plain  # type: ignore
+            last_raw = raw
+
+            if not _looks_like_transient_compile_error(raw):
+                return raw
+
+            if attempt >= attempts:
+                break
+
+            logger.warning(
+                "Joern query hit transient Scala compile error "
+                "(attempt %d/%d); retrying in %.2fs. Query head: %s",
+                attempt, attempts, self.query_retry_sleep_s,
+                query_str[:120].replace("\n", " "),
+            )
+            if self.query_retry_sleep_s > 0:
+                await asyncio.sleep(self.query_retry_sleep_s)
+
+        # Exhausted retries — return the last payload so the caller's parser
+        # raises a BackendResponseError with the compiler text, matching
+        # previous behaviour.
+        return last_raw
 
     async def __aenter__(self):
         """Context manager entry.

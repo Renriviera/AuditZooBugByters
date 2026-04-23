@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
+import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from openai import AsyncOpenAI
@@ -20,6 +23,10 @@ class LLMConfig:
     api_key: str = "not-needed"
     max_tokens: int = 1024
     seed: int | None = 235711
+    # Optional path to an append-only JSONL trace of every chat request +
+    # response.  Used for the Phase-A3 deep dive on the UNCERTAIN-collapse
+    # root cause; ``None`` disables logging entirely.
+    log_io_path: str | None = None
 
 
 @dataclass
@@ -54,6 +61,9 @@ class LLMClient:
             api_key=self.config.api_key,
         )
         self.usage = LLMUsage()
+        # Serialise JSONL writes; chat() is async but completions can race
+        # across arms/agents sharing the client.
+        self._io_lock = threading.Lock()
 
     async def chat(
         self,
@@ -83,7 +93,44 @@ class LLMClient:
                 response.usage.completion_tokens,
             )
 
+        self._log_io(system_prompt, user_prompt, text, response)
         return text
+
+    def _log_io(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        response_text: str,
+        response: Any,
+    ) -> None:
+        """Append a single JSONL record for one chat round-trip.
+
+        No-op when ``config.log_io_path`` is unset.  We truncate prompts to
+        keep the trace from ballooning, but the full response is kept so
+        the UNCERTAIN-collapse diagnosis sees exactly what the LLM
+        returned.
+        """
+        path = self.config.log_io_path
+        if not path:
+            return
+        record = {
+            "ts": time.time(),
+            "model": self.config.model,
+            "system_prompt": system_prompt[:2000],
+            "user_prompt": user_prompt[:6000],
+            "response_text": response_text,
+            "usage": {
+                "prompt_tokens": getattr(response.usage, "prompt_tokens", None),
+                "completion_tokens": getattr(response.usage, "completion_tokens", None),
+            } if getattr(response, "usage", None) else None,
+            "finish_reason": getattr(response.choices[0], "finish_reason", None),
+        }
+        try:
+            with self._io_lock:
+                with Path(path).open("a", encoding="utf-8") as fh:
+                    fh.write(json.dumps(record, default=str) + "\n")
+        except OSError as exc:  # pragma: no cover - diagnostic path
+            logger.warning("Failed to log LLM I/O to %s: %s", path, exc)
 
     async def chat_json(
         self,

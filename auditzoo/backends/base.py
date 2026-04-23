@@ -17,6 +17,14 @@ class JoernConfig(BackendConfig):
     force_create_cpg: bool = False
     host: str = "localhost"
     port: int = 8080
+    # JVM tuning for the Joern REPL subprocess.  The Scala 3 compiler that
+    # powers the Joern REPL walks a deep extension-method search tree when
+    # resolving things like ``cpg.method`` / ``cpg.tag``; on the default 1 MB
+    # thread stack this intermittently trips "Recursion limit exceeded"
+    # (see https://github.com/scala/scala3/issues/ and Joern issue trackers).
+    # Bumping -Xss to 16m has been the recommended mitigation for years.
+    jvm_stack_size: str = "16m"
+    jvm_extra_opts: list[str] | None = None
 
     def __init__(
         self,
@@ -47,6 +55,16 @@ class JoernConfig(BackendConfig):
         self.host = kwargs.get("host", "localhost")
         self.port = kwargs.get("port", 8080)
         self.force_create_cpg = kwargs.get("force_create_cpg", False)
+        # Allow env-var override so ops can tune without code changes.
+        self.jvm_stack_size = kwargs.get(
+            "jvm_stack_size",
+            os.environ.get("AUDITZOO_JOERN_XSS", "16m"),
+        )
+        extras = kwargs.get("jvm_extra_opts")
+        if extras is None:
+            env_extras = os.environ.get("AUDITZOO_JOERN_JAVA_OPTS", "").strip()
+            extras = env_extras.split() if env_extras else []
+        self.jvm_extra_opts = list(extras)
 
 
 @dataclass

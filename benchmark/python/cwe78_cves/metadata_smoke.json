@@ -1,0 +1,68 @@
+[
+  {
+    "cve_id": "CVE-2020-15271",
+    "ghsa_id": "GHSA-c84h-w6cr-5v8q",
+    "package": "lookatme",
+    "repo_url": "https://github.com/d0c-s4vage/lookatme",
+    "vulnerable_commit": "f5d5f8b907ec37e54d49dcc69b35fc009e1760d3",
+    "patch_commit": "72fe36b784b234548d49dae60b840c37f0eb8d84",
+    "patch_diff_path": "diffs/CVE-2020-15271.diff",
+    "vulnerable_file": "examples/calendar_contrib/lookatme/contrib/calendar.py",
+    "vulnerable_lines": [
+      20
+    ],
+    "sink_api": "run",
+    "loc": 186,
+    "cvss_score": 9.3,
+    "cvss_severity": "critical",
+    "source_db": "ghsa",
+    "taint_hops": null,
+    "notes": "Markdown-supplied Shell Command Execution",
+    "manual_review_status": "pending"
+  },
+  {
+    "cve_id": "CVE-2021-38305",
+    "ghsa_id": "GHSA-435p-f82x-mxwm",
+    "package": "yamale",
+    "repo_url": "https://github.com/23andMe/Yamale",
+    "vulnerable_commit": "788664233700c45fc756a963613869cf0a0896f9",
+    "patch_commit": "60173004bc645ea1f27a7b871272a06695154516",
+    "patch_diff_path": "diffs/CVE-2021-38305.diff",
+    "vulnerable_file": "yamale/syntax/parser.py",
+    "vulnerable_lines": [
+      15
+    ],
+    "sink_api": "unknown",
+    "loc": 14,
+    "cvss_score": 7.8,
+    "cvss_severity": "high",
+    "source_db": "ghsa",
+    "taint_hops": null,
+    "notes": "Command injection in Yamale [NVD CWE mismatch: CWE-434]",
+    "manual_review_status": "pending"
+  },
+  {
+    "cve_id": "CVE-2021-39160",
+    "ghsa_id": "GHSA-mq5p-2mcr-m52j",
+    "package": "nbgitpuller",
+    "repo_url": "https://github.com/jupyterhub/nbgitpuller",
+    "vulnerable_commit": "2cad6147f1769a962f8d0733045967663add53cb",
+    "patch_commit": "07690644f29a566011dd0d7ba14cae3eb0490481",
+    "patch_diff_path": "diffs/CVE-2021-39160.diff",
+    "vulnerable_file": "nbgitpuller/pull.py",
+    "vulnerable_lines": [
+      91,
+      97,
+      121,
+      157
+    ],
+    "sink_api": "unknown",
+    "loc": 161,
+    "cvss_score": 9.6,
+    "cvss_severity": "critical",
+    "source_db": "ghsa",
+    "taint_hops": null,
+    "notes": "Code injection in nbgitpuller",
+    "manual_review_status": "pending"
+  }
+]

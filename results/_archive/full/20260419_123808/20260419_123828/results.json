@@ -1,0 +1,1714 @@
+[
+  {
+    "cve_id": "CVE-2020-11981",
+    "repo_url": "https://github.com/apache/airflow",
+    "loc": 260715,
+    "cvss_score": 9.8,
+    "arms": {
+      "semgrep_0": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "wall_clock_s": 16.918164115399122,
+          "cpg_build_s": 0.0,
+          "scan_s": 16.91808711644262,
+          "llm_triage_s": 7.329508662223816e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 6.96694478392601e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 106.17578125,
+          "cpu_user_s": 25.589010000000002,
+          "cpu_sys_s": 5.638337
+        }
+      },
+      "semgrep_1": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "wall_clock_s": 15.378387836739421,
+          "cpg_build_s": 0.0,
+          "scan_s": 15.378339637070894,
+          "llm_triage_s": 6.170012056827545e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 4.202965646982193e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 106.17578125,
+          "cpu_user_s": 25.589010000000002,
+          "cpu_sys_s": 5.638337
+        }
+      },
+      "semgrep_2": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "wall_clock_s": 16.048689571209252,
+          "cpg_build_s": 0.0,
+          "scan_s": 16.04863187018782,
+          "llm_triage_s": 6.750226020812988e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 5.09507954120636e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 106.17578125,
+          "cpu_user_s": 25.589010000000002,
+          "cpu_sys_s": 5.638337
+        }
+      },
+      "semgrep_3": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "wall_clock_s": 14.151092344895005,
+          "cpg_build_s": 0.0,
+          "scan_s": 14.151028195396066,
+          "llm_triage_s": 7.390044629573822e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 5.675945430994034e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 106.17578125,
+          "cpu_user_s": 25.589010000000002,
+          "cpu_sys_s": 5.638337
+        }
+      },
+      "joern_0": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "error": "Failed to parse Joern JSON response: -- [E008] Not Found Error: -----------------------------------------------------\n1 |cpg.method.id(107374185270L).call.map { call => Map(\"callees\" -> call.callee.l, \"callsite\" -> call) }.toJson\n  |^^^^^^^^^^\n  |value method is not a member of io.shiftleft.codepropertygraph.generated.Cpg.\n  |Extension methods were tried, but the search failed with:\n  |\n  |    Recursion limit exceeded.\n  |    Maybe there is an illegal cyclic reference?\n  |    If that's not the case, you could also try to increase the stacksize using the -Xss JVM option.\n  |    For the unprocessed stack trace, compile with -Xno-enrich-error-messages.\n  |    A recurring operation is (inner to outer):\n  |    \n  |      find-member JoernConsole#ItExtend\n  |      find-member Joern.ItExtend\n1 error found",
+          "cpg_build_s": 258.6663664476946
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 106.17578125,
+          "cpu_user_s": 25.589010000000002,
+          "cpu_sys_s": 5.638337
+        }
+      },
+      "semgrep_0_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "wall_clock_s": 14.290092755109072,
+          "cpg_build_s": 0.0,
+          "scan_s": 14.290037956088781,
+          "llm_triage_s": 7.140450179576874e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 4.765857011079788e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        }
+      },
+      "semgrep_1_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "wall_clock_s": 13.602114379405975,
+          "cpg_build_s": 0.0,
+          "scan_s": 13.602065229788423,
+          "llm_triage_s": 7.489696145057678e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 4.1659921407699585e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        }
+      },
+      "semgrep_2_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "wall_clock_s": 13.814115987159312,
+          "cpg_build_s": 0.0,
+          "scan_s": 13.814061207696795,
+          "llm_triage_s": 7.209368050098419e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 4.757009446620941e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        }
+      },
+      "semgrep_3_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "wall_clock_s": 14.23969517275691,
+          "cpg_build_s": 0.0,
+          "scan_s": 14.239646763540804,
+          "llm_triage_s": 7.3499977588653564e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 4.10592183470726e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        }
+      },
+      "joern_0_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "error": "Port localhost:12345 is already in use. Cannot connect to Joern.",
+          "cpg_build_s": 0.0005119936540722847
+        }
+      }
+    }
+  },
+  {
+    "cve_id": "CVE-2020-11978",
+    "repo_url": "https://github.com/apache/airflow",
+    "loc": 179661,
+    "cvss_score": 8.8,
+    "arms": {
+      "semgrep_0": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 2,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "wall_clock_s": 13.386333990842104,
+          "cpg_build_s": 0.0,
+          "scan_s": 13.386285441927612,
+          "llm_triage_s": 7.429160177707672e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 4.111975431442261e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 0.0174209999999988,
+          "cpu_sys_s": 0.003626999999999825
+        }
+      },
+      "semgrep_1": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 2,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "wall_clock_s": 17.146750980056822,
+          "cpg_build_s": 0.0,
+          "scan_s": 17.146699140779674,
+          "llm_triage_s": 7.040798664093018e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 4.479847848415375e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 0.0174209999999988,
+          "cpu_sys_s": 0.003626999999999825
+        }
+      },
+      "semgrep_2": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 2,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "wall_clock_s": 17.47973989136517,
+          "cpg_build_s": 0.0,
+          "scan_s": 17.479693572036922,
+          "llm_triage_s": 7.0193782448768616e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 3.929995000362396e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 0.0174209999999988,
+          "cpu_sys_s": 0.003626999999999825
+        }
+      },
+      "semgrep_3": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 2,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "wall_clock_s": 13.322476929984987,
+          "cpg_build_s": 0.0,
+          "scan_s": 13.3224309515208,
+          "llm_triage_s": 7.139518857002258e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 3.88389453291893e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 0.0174209999999988,
+          "cpu_sys_s": 0.003626999999999825
+        }
+      },
+      "joern_0": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 2,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "error": "Port localhost:12345 is already in use. Cannot connect to Joern.",
+          "cpg_build_s": 0.0004431242123246193
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 0.0174209999999988,
+          "cpu_sys_s": 0.003626999999999825
+        }
+      },
+      "semgrep_0_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "wall_clock_s": 13.322115356102586,
+          "cpg_build_s": 0.0,
+          "scan_s": 13.322064526379108,
+          "llm_triage_s": 8.00006091594696e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 4.2829662561416626e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        }
+      },
+      "semgrep_1_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "wall_clock_s": 13.419073391705751,
+          "cpg_build_s": 0.0,
+          "scan_s": 13.41902626119554,
+          "llm_triage_s": 7.24010169506073e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 3.9890408515930176e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        }
+      },
+      "semgrep_2_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "wall_clock_s": 13.504905257374048,
+          "cpg_build_s": 0.0,
+          "scan_s": 13.504865126684308,
+          "llm_triage_s": 5.43985515832901e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 3.469083458185196e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        }
+      },
+      "semgrep_3_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "wall_clock_s": 13.67360996734351,
+          "cpg_build_s": 0.0,
+          "scan_s": 13.673567436635494,
+          "llm_triage_s": 7.150694727897644e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 3.538001328706741e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        }
+      },
+      "joern_0_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "error": "Port localhost:12345 is already in use. Cannot connect to Joern.",
+          "cpg_build_s": 0.0004203151911497116
+        }
+      }
+    }
+  },
+  {
+    "cve_id": "CVE-2020-15271",
+    "repo_url": "https://github.com/d0c-s4vage/lookatme",
+    "loc": 3208,
+    "cvss_score": 9.3,
+    "arms": {
+      "semgrep_0": {
+        "tp": 0,
+        "fp": 1,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [
+          "fp_by_location"
+        ],
+        "fp_kloc": 0.31172069825436405,
+        "metrics": {
+          "wall_clock_s": 16.29884610697627,
+          "cpg_build_s": 0.0,
+          "scan_s": 12.33078067470342,
+          "llm_triage_s": 3.9680059049278498,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 5.952734500169754e-05,
+          "n_findings": 1,
+          "n_tp": 1,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 461,
+            "completion_tokens": 105,
+            "total_tokens": 566,
+            "call_count": 1
+          },
+          "llm_tokens_triage": 566,
+          "llm_tokens_refinement": 0
+        },
+        "n_candidates": 1,
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 0.35765200000000164,
+          "cpu_sys_s": 0.08757999999999999
+        }
+      },
+      "semgrep_1": {
+        "tp": 0,
+        "fp": 1,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [
+          "fp_by_location"
+        ],
+        "fp_kloc": 0.31172069825436405,
+        "metrics": {
+          "wall_clock_s": 15.008960681967437,
+          "cpg_build_s": 0.0,
+          "scan_s": 13.178559963591397,
+          "llm_triage_s": 1.83034772798419,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 5.2990391850471497e-05,
+          "n_findings": 1,
+          "n_tp": 1,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 461,
+            "completion_tokens": 105,
+            "total_tokens": 566,
+            "call_count": 1
+          },
+          "llm_tokens_triage": 566,
+          "llm_tokens_refinement": 0
+        },
+        "n_candidates": 1,
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 0.35765200000000164,
+          "cpu_sys_s": 0.08757999999999999
+        }
+      },
+      "semgrep_2": {
+        "tp": 0,
+        "fp": 1,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [
+          "fp_by_location"
+        ],
+        "fp_kloc": 0.31172069825436405,
+        "metrics": {
+          "wall_clock_s": 14.602742205373943,
+          "cpg_build_s": 0.0,
+          "scan_s": 12.77024235483259,
+          "llm_triage_s": 1.8324476899579167,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 5.2160583436489105e-05,
+          "n_findings": 1,
+          "n_tp": 1,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 461,
+            "completion_tokens": 105,
+            "total_tokens": 566,
+            "call_count": 1
+          },
+          "llm_tokens_triage": 566,
+          "llm_tokens_refinement": 0
+        },
+        "n_candidates": 1,
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 0.35765200000000164,
+          "cpu_sys_s": 0.08757999999999999
+        }
+      },
+      "semgrep_3": {
+        "tp": 0,
+        "fp": 1,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [
+          "fp_by_location"
+        ],
+        "fp_kloc": 0.31172069825436405,
+        "metrics": {
+          "wall_clock_s": 14.935884644277394,
+          "cpg_build_s": 0.0,
+          "scan_s": 13.11018115375191,
+          "llm_triage_s": 1.8256602501496673,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 4.324037581682205e-05,
+          "n_findings": 1,
+          "n_tp": 1,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 461,
+            "completion_tokens": 105,
+            "total_tokens": 566,
+            "call_count": 1
+          },
+          "llm_tokens_triage": 566,
+          "llm_tokens_refinement": 0
+        },
+        "n_candidates": 1,
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 0.35765200000000164,
+          "cpu_sys_s": 0.08757999999999999
+        }
+      },
+      "joern_0": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "error": "Port localhost:12345 is already in use. Cannot connect to Joern.",
+          "cpg_build_s": 0.0005099223926663399
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 0.35765200000000164,
+          "cpu_sys_s": 0.08757999999999999
+        }
+      },
+      "semgrep_0_patched": {
+        "n_findings_on_patched": 1,
+        "metrics": {
+          "wall_clock_s": 14.827935677021742,
+          "cpg_build_s": 0.0,
+          "scan_s": 12.952304286882281,
+          "llm_triage_s": 1.8755851099267602,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 4.6280212700366974e-05,
+          "n_findings": 1,
+          "n_tp": 1,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 461,
+            "completion_tokens": 108,
+            "total_tokens": 569,
+            "call_count": 1
+          },
+          "llm_tokens_triage": 569,
+          "llm_tokens_refinement": 0
+        }
+      },
+      "semgrep_1_patched": {
+        "n_findings_on_patched": 1,
+        "metrics": {
+          "wall_clock_s": 13.999142400920391,
+          "cpg_build_s": 0.0,
+          "scan_s": 12.121187083423138,
+          "llm_triage_s": 1.8779086098074913,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 4.670768976211548e-05,
+          "n_findings": 1,
+          "n_tp": 1,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 461,
+            "completion_tokens": 108,
+            "total_tokens": 569,
+            "call_count": 1
+          },
+          "llm_tokens_triage": 569,
+          "llm_tokens_refinement": 0
+        }
+      },
+      "semgrep_2_patched": {
+        "n_findings_on_patched": 1,
+        "metrics": {
+          "wall_clock_s": 18.048032767139375,
+          "cpg_build_s": 0.0,
+          "scan_s": 16.166461627930403,
+          "llm_triage_s": 1.8815190298482776,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 5.2109360694885254e-05,
+          "n_findings": 1,
+          "n_tp": 1,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 461,
+            "completion_tokens": 108,
+            "total_tokens": 569,
+            "call_count": 1
+          },
+          "llm_tokens_triage": 569,
+          "llm_tokens_refinement": 0
+        }
+      },
+      "semgrep_3_patched": {
+        "n_findings_on_patched": 1,
+        "metrics": {
+          "wall_clock_s": 15.558557622134686,
+          "cpg_build_s": 0.0,
+          "scan_s": 13.680313738062978,
+          "llm_triage_s": 1.878202235326171,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 4.16487455368042e-05,
+          "n_findings": 1,
+          "n_tp": 1,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 461,
+            "completion_tokens": 108,
+            "total_tokens": 569,
+            "call_count": 1
+          },
+          "llm_tokens_triage": 569,
+          "llm_tokens_refinement": 0
+        }
+      },
+      "joern_0_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "error": "Port localhost:12345 is already in use. Cannot connect to Joern.",
+          "cpg_build_s": 0.0004782341420650482
+        }
+      }
+    }
+  },
+  {
+    "cve_id": "CVE-2021-38305",
+    "repo_url": "https://github.com/23andMe/Yamale",
+    "loc": 1628,
+    "cvss_score": 7.8,
+    "arms": {
+      "semgrep_0": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "wall_clock_s": 12.86476440448314,
+          "cpg_build_s": 0.0,
+          "scan_s": 12.86471188440919,
+          "llm_triage_s": 6.57886266708374e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 4.594121128320694e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 0.017205999999998056,
+          "cpu_sys_s": 0.006318000000000268
+        }
+      },
+      "semgrep_1": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "wall_clock_s": 12.694636582396924,
+          "cpg_build_s": 0.0,
+          "scan_s": 12.694590381346643,
+          "llm_triage_s": 6.649643182754517e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 3.955140709877014e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 0.017205999999998056,
+          "cpu_sys_s": 0.006318000000000268
+        }
+      },
+      "semgrep_2": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "wall_clock_s": 13.270017865113914,
+          "cpg_build_s": 0.0,
+          "scan_s": 13.269971734844148,
+          "llm_triage_s": 6.9998204708099365e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 3.9130449295043945e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 0.017205999999998056,
+          "cpu_sys_s": 0.006318000000000268
+        }
+      },
+      "semgrep_3": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "wall_clock_s": 16.09614555258304,
+          "cpg_build_s": 0.0,
+          "scan_s": 16.096092883497477,
+          "llm_triage_s": 7.0892274379730225e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 4.5579858124256134e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 0.017205999999998056,
+          "cpu_sys_s": 0.006318000000000268
+        }
+      },
+      "joern_0": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "error": "Port localhost:12345 is already in use. Cannot connect to Joern.",
+          "cpg_build_s": 0.0004890142008662224
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 0.017205999999998056,
+          "cpu_sys_s": 0.006318000000000268
+        }
+      },
+      "semgrep_0_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "wall_clock_s": 15.710530846379697,
+          "cpg_build_s": 0.0,
+          "scan_s": 15.71046179626137,
+          "llm_triage_s": 9.120441973209381e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 5.992967635393143e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        }
+      },
+      "semgrep_1_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "wall_clock_s": 14.582287399098277,
+          "cpg_build_s": 0.0,
+          "scan_s": 14.582226701080799,
+          "llm_triage_s": 9.589828550815582e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 5.1108188927173615e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        }
+      },
+      "semgrep_2_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "wall_clock_s": 13.740306811407208,
+          "cpg_build_s": 0.0,
+          "scan_s": 13.740171393379569,
+          "llm_triage_s": 8.958391845226288e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 0.00012645963579416275,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        }
+      },
+      "semgrep_3_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "wall_clock_s": 13.066624470055103,
+          "cpg_build_s": 0.0,
+          "scan_s": 13.066562320105731,
+          "llm_triage_s": 8.069910109043121e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 5.4080039262771606e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        }
+      },
+      "joern_0_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "error": "Port localhost:12345 is already in use. Cannot connect to Joern.",
+          "cpg_build_s": 0.000504564493894577
+        }
+      }
+    }
+  },
+  {
+    "cve_id": "CVE-2021-39160",
+    "repo_url": "https://github.com/jupyterhub/nbgitpuller",
+    "loc": 1095,
+    "cvss_score": 9.6,
+    "arms": {
+      "semgrep_0": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 4,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "wall_clock_s": 13.41587374266237,
+          "cpg_build_s": 0.0,
+          "scan_s": 13.41582132410258,
+          "llm_triage_s": 6.860122084617615e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 4.555843770503998e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 0.017482000000001108,
+          "cpu_sys_s": 0.0062629999999996855
+        }
+      },
+      "semgrep_1": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 4,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "wall_clock_s": 13.431374595500529,
+          "cpg_build_s": 0.0,
+          "scan_s": 13.431327235884964,
+          "llm_triage_s": 6.87967985868454e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 4.0479935705661774e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 0.017482000000001108,
+          "cpu_sys_s": 0.0062629999999996855
+        }
+      },
+      "semgrep_2": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 4,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "wall_clock_s": 13.261771826073527,
+          "cpg_build_s": 0.0,
+          "scan_s": 13.261731586419046,
+          "llm_triage_s": 5.840323865413666e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 3.4399330615997314e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 0.017482000000001108,
+          "cpu_sys_s": 0.0062629999999996855
+        }
+      },
+      "semgrep_3": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 4,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "wall_clock_s": 12.838816152885556,
+          "cpg_build_s": 0.0,
+          "scan_s": 12.838772994466126,
+          "llm_triage_s": 7.2503462433815e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 3.590807318687439e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 0.017482000000001108,
+          "cpu_sys_s": 0.0062629999999996855
+        }
+      },
+      "joern_0": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 4,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "error": "Port localhost:12345 is already in use. Cannot connect to Joern.",
+          "cpg_build_s": 0.0005007237195968628
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 0.017482000000001108,
+          "cpu_sys_s": 0.0062629999999996855
+        }
+      },
+      "semgrep_0_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "wall_clock_s": 12.833635723218322,
+          "cpg_build_s": 0.0,
+          "scan_s": 12.833584402687848,
+          "llm_triage_s": 6.279908120632172e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 4.504062235355377e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        }
+      },
+      "semgrep_1_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "wall_clock_s": 14.056699867360294,
+          "cpg_build_s": 0.0,
+          "scan_s": 14.05666277743876,
+          "llm_triage_s": 5.0300732254981995e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 3.205984830856323e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        }
+      },
+      "semgrep_2_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "wall_clock_s": 13.77585266251117,
+          "cpg_build_s": 0.0,
+          "scan_s": 13.775805522687733,
+          "llm_triage_s": 7.810071110725403e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 3.932975232601166e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        }
+      },
+      "semgrep_3_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "wall_clock_s": 13.52861098665744,
+          "cpg_build_s": 0.0,
+          "scan_s": 13.528563207946718,
+          "llm_triage_s": 7.028691470623016e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 4.075001925230026e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        }
+      },
+      "joern_0_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "error": "Port localhost:12345 is already in use. Cannot connect to Joern.",
+          "cpg_build_s": 0.0006218720227479935
+        }
+      }
+    }
+  },
+  {
+    "cve_id": "CVE-2021-39159",
+    "repo_url": "https://github.com/jupyterhub/binderhub",
+    "loc": 8358,
+    "cvss_score": 9.6,
+    "arms": {
+      "semgrep_0": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "wall_clock_s": 12.88682623859495,
+          "cpg_build_s": 0.0,
+          "scan_s": 12.886772708036005,
+          "llm_triage_s": 6.609596312046051e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 4.692096263170242e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 0.01616199999999779,
+          "cpu_sys_s": 0.007077999999999918
+        }
+      },
+      "semgrep_1": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "wall_clock_s": 12.955408635549247,
+          "cpg_build_s": 0.0,
+          "scan_s": 12.95536199491471,
+          "llm_triage_s": 6.600283086299896e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 4.004035145044327e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 0.01616199999999779,
+          "cpu_sys_s": 0.007077999999999918
+        }
+      },
+      "semgrep_2": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "wall_clock_s": 13.101351913064718,
+          "cpg_build_s": 0.0,
+          "scan_s": 13.101305464282632,
+          "llm_triage_s": 7.3499977588653564e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 3.909878432750702e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 0.01616199999999779,
+          "cpu_sys_s": 0.007077999999999918
+        }
+      },
+      "semgrep_3": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "wall_clock_s": 12.683256384916604,
+          "cpg_build_s": 0.0,
+          "scan_s": 12.683208154514432,
+          "llm_triage_s": 7.099471986293793e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 4.113093018531799e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 0.01616199999999779,
+          "cpu_sys_s": 0.007077999999999918
+        }
+      },
+      "joern_0": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "error": "Port localhost:12345 is already in use. Cannot connect to Joern.",
+          "cpg_build_s": 0.00035291537642478943
+        },
+        "n_candidates": 0,
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 0.01616199999999779,
+          "cpu_sys_s": 0.007077999999999918
+        }
+      },
+      "semgrep_0_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "wall_clock_s": 13.865554817020893,
+          "cpg_build_s": 0.0,
+          "scan_s": 13.865500137209892,
+          "llm_triage_s": 7.2605907917022705e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 4.7419220209121704e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        }
+      },
+      "semgrep_1_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "wall_clock_s": 15.180800531059504,
+          "cpg_build_s": 0.0,
+          "scan_s": 15.180696432478726,
+          "llm_triage_s": 6.848946213722229e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 9.724963456392288e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        }
+      },
+      "semgrep_2_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "wall_clock_s": 14.010081162676215,
+          "cpg_build_s": 0.0,
+          "scan_s": 14.010031663812697,
+          "llm_triage_s": 7.400289177894592e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 4.2098574340343475e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        }
+      },
+      "semgrep_3_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "wall_clock_s": 13.832007828168571,
+          "cpg_build_s": 0.0,
+          "scan_s": 13.831959707662463,
+          "llm_triage_s": 7.60052353143692e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 4.051998257637024e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0
+        }
+      },
+      "joern_0_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "error": "Port localhost:12345 is already in use. Cannot connect to Joern.",
+          "cpg_build_s": 0.0006062621250748634
+        }
+      }
+    }
+  }
+]

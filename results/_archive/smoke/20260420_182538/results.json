@@ -1,0 +1,195 @@
+[
+  {
+    "cve_id": "CVE-2020-11981",
+    "repo_url": "https://github.com/apache/airflow",
+    "loc": 260716,
+    "cvss_score": 9.8,
+    "arms": {
+      "semgrep_0": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "fn_by_llm": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "wall_clock_s": 27.253899721428752,
+          "cpg_build_s": 0.0,
+          "scan_s": 27.253764264285564,
+          "llm_triage_s": 8.209608495235443e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 0.00012724753469228745,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0,
+          "rules_hash_pre": "548f37a35d7f8dd4",
+          "rules_hash_post": "548f37a35d7f8dd4",
+          "findings_hash": "e3b0c44298fc1c14"
+        },
+        "n_candidates": 0,
+        "triage_verdicts": [],
+        "refinement_actions": [],
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 0.04883700000000024,
+          "cpu_sys_s": 0.020855000000000068
+        }
+      },
+      "semgrep_1": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "fn_by_llm": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "wall_clock_s": 15.295323312282562,
+          "cpg_build_s": 0.0,
+          "scan_s": 15.295251884497702,
+          "llm_triage_s": 9.339302778244019e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 6.20884820818901e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0,
+          "rules_hash_pre": "548f37a35d7f8dd4",
+          "rules_hash_post": "548f37a35d7f8dd4",
+          "findings_hash": "e3b0c44298fc1c14"
+        },
+        "n_candidates": 0,
+        "triage_verdicts": [],
+        "refinement_actions": [],
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 0.04883700000000024,
+          "cpu_sys_s": 0.020855000000000068
+        }
+      },
+      "joern_0": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "fn_by_llm": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "detection_rate": 0.0,
+        "labels": [],
+        "fp_kloc": 0.0,
+        "metrics": {
+          "error": "Joern executable not found at /opt/opt/joern/joern-cli/joern",
+          "error_type": "BackendConnectionError",
+          "cpg_build_s": 5.0073953196406364,
+          "cpg_build_failed": true
+        },
+        "n_candidates": 0,
+        "triage_verdicts": [],
+        "refinement_actions": [],
+        "resource_delta": {
+          "peak_rss_mb": 0.0,
+          "cpu_user_s": 0.04883700000000024,
+          "cpu_sys_s": 0.020855000000000068
+        },
+        "arm_error": "Joern executable not found at /opt/opt/joern/joern-cli/joern",
+        "arm_error_type": "BackendConnectionError"
+      },
+      "semgrep_0_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "wall_clock_s": 15.094499801285565,
+          "cpg_build_s": 0.0,
+          "scan_s": 15.094407114200294,
+          "llm_triage_s": 7.020309567451477e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 8.566677570343018e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0,
+          "rules_hash_pre": "548f37a35d7f8dd4",
+          "rules_hash_post": "548f37a35d7f8dd4",
+          "findings_hash": "e3b0c44298fc1c14"
+        },
+        "triage_verdicts": [],
+        "refinement_actions": []
+      },
+      "semgrep_1_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "wall_clock_s": 14.701821652241051,
+          "cpg_build_s": 0.0,
+          "scan_s": 14.701759082265198,
+          "llm_triage_s": 7.760711014270782e-06,
+          "llm_refinement_s": 0.0,
+          "call_graph_s": 0.0,
+          "overhead_s": 5.4809264838695526e-05,
+          "n_findings": 0,
+          "n_tp": 0,
+          "n_fp": 0,
+          "n_uncertain": 0,
+          "llm_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0
+          },
+          "llm_tokens_triage": 0,
+          "llm_tokens_refinement": 0,
+          "rules_hash_pre": "548f37a35d7f8dd4",
+          "rules_hash_post": "548f37a35d7f8dd4",
+          "findings_hash": "e3b0c44298fc1c14"
+        },
+        "triage_verdicts": [],
+        "refinement_actions": []
+      },
+      "joern_0_patched": {
+        "n_findings_on_patched": 0,
+        "metrics": {
+          "error": "Joern executable not found at /opt/opt/joern/joern-cli/joern",
+          "error_type": "BackendConnectionError",
+          "cpg_build_s": 5.005893991328776,
+          "cpg_build_failed": true
+        },
+        "triage_verdicts": [],
+        "refinement_actions": []
+      }
+    }
+  }
+]

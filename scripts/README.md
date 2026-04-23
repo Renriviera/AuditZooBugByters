@@ -1,23 +1,35 @@
-# Scripts
+# scripts/
 
-This directory contains various utility scripts used in the project. Each script is in its own subdirectory with complete documentation and dependency information.
+Utility + library modules for the CWE-78 two-arm study.
 
-## Available Scripts
+## Live entry points
 
-### [resolve-ts-path-aliases](resolve-ts-path-aliases/)
+The canonical way to run the 105-CVE evaluation is the **split** sweep
+under [`splitEvaluations/`](../splitEvaluations/README.md):
 
-Convert TypeScript path aliases (like `@/`) to relative paths.
-
-**Requirements:**
-- Node.js >= 18.0.0 (LTS version recommended)
-- npm >= 9.0.0
-
-**Quick Start:**
 ```bash
-cd scripts/resolve-ts-path-aliases
-./run.sh /path/to/your/project
+# Joern-only sweep (1800 s per-CVE budget, no patched re-scan by default)
+python -m splitEvaluations.run_joern_sweep
+
+# Semgrep-only sweep (900 s per-CVE budget, rules-hash audit attached)
+python -m splitEvaluations.run_semgrep_sweep
 ```
 
-**Details:** See [resolve-ts-path-aliases/README.md](resolve-ts-path-aliases/README.md)
+The old combined CLI (`python scripts/run_evaluation.py ...`) has been
+retired. `run_evaluation.py` is now a **shared library**: its helpers
+(`run_main_comparison`, `clone_and_checkout`, `label_findings`,
+`serialize_triage_verdicts`, `_run_with_timeout`, etc.) are re-exported
+by [`splitEvaluations/common.py`](../splitEvaluations/common.py) and
+consumed by both split sweeps and the pytest suite. Do not invoke it as
+a script.
 
----
+## Files
+
+| Path                          | Role                                                                 |
+| ----------------------------- | -------------------------------------------------------------------- |
+| `run_evaluation.py`           | Shared library for the split sweeps (see above). Not a CLI.          |
+| `dataset_collection/`         | Archived dataset-mining scripts (frozen dataset).                    |
+
+See [`dataset_collection/README.md`](dataset_collection/README.md) for
+the archived mining pipeline that produced
+`benchmark/python/cwe78_cves/metadata.json`.

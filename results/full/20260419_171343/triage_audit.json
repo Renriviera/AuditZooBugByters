@@ -1,0 +1,86 @@
+{
+  "verdict_histogram": {
+    "semgrep": {
+      "0": {},
+      "1": {},
+      "2": {},
+      "3": {}
+    },
+    "joern": {
+      "0": {},
+      "1": {},
+      "2": {},
+      "3": {}
+    }
+  },
+  "verdict_vs_gt_contingency": {
+    "semgrep": {
+      "0": {
+        "true_positive": {},
+        "false_positive": {},
+        "uncertain": {}
+      },
+      "1": {
+        "true_positive": {},
+        "false_positive": {},
+        "uncertain": {}
+      },
+      "2": {
+        "true_positive": {},
+        "false_positive": {},
+        "uncertain": {}
+      },
+      "3": {
+        "true_positive": {},
+        "false_positive": {},
+        "uncertain": {}
+      }
+    },
+    "joern": {
+      "0": {
+        "true_positive": {},
+        "false_positive": {},
+        "uncertain": {}
+      },
+      "1": {
+        "true_positive": {},
+        "false_positive": {},
+        "uncertain": {}
+      },
+      "2": {
+        "true_positive": {},
+        "false_positive": {},
+        "uncertain": {}
+      },
+      "3": {
+        "true_positive": {},
+        "false_positive": {},
+        "uncertain": {}
+      }
+    }
+  },
+  "findings_invariance": {
+    "semgrep": {
+      "all_same": 0,
+      "any_change": 0,
+      "total": 0
+    },
+    "joern": {
+      "all_same": 0,
+      "any_change": 0,
+      "total": 0
+    }
+  },
+  "refinement_summary": {
+    "semgrep": {
+      "invocations": 0,
+      "actions": {}
+    },
+    "joern": {
+      "role_classifications": {},
+      "catalog_grew_iters": 0,
+      "catalog_total_iters": 0
+    }
+  },
+  "line_tolerance": 5
+}

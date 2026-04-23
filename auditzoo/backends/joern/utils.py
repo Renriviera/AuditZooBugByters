@@ -99,6 +99,10 @@ def parse_joern_response(raw: str, response_ty: str = "json", **kwargs) -> Any:
         elif s == "None":
             return None
 
+    # Empty Scala List (from queries that forget .toJson) → treat as empty JSON list.
+    if response_ty == "json" and (s == "List()" or re.fullmatch(r"List\[[^\]]+\]\(\)", s)):
+        return []
+
     match response_ty:
         case "json":
             return _parse_to_json(s)

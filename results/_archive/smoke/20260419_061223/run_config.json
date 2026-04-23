@@ -1,0 +1,25 @@
+{
+  "dataset": "benchmark/python/cwe78_cves/metadata_smoke.json",
+  "output": "results/smoke",
+  "clone_dir": "/tmp/auditzoo_eval",
+  "arms": [
+    "semgrep",
+    "joern"
+  ],
+  "max_k": 3,
+  "seed": 235711,
+  "llm_url": "http://localhost:8000/v1",
+  "llm_model": "Qwen/Qwen2.5-Coder-7B-Instruct",
+  "joern_port": 12345,
+  "variance": false,
+  "variance_n": 20,
+  "variance_seeds": [
+    235711,
+    123456,
+    654321,
+    111111,
+    999999
+  ],
+  "line_tolerance": 5,
+  "skip_empty_gt": true
+}

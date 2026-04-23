@@ -1,0 +1,133 @@
+{
+  "verdict_histogram": {
+    "semgrep": {
+      "0": {
+        "true_positive": 193
+      },
+      "1": {
+        "true_positive": 193
+      },
+      "2": {
+        "true_positive": 193
+      },
+      "3": {
+        "true_positive": 193
+      }
+    },
+    "joern": {
+      "0": {
+        "true_positive": 94,
+        "false_positive": 5
+      },
+      "1": {
+        "true_positive": 95,
+        "false_positive": 4
+      },
+      "2": {
+        "true_positive": 95,
+        "false_positive": 4
+      },
+      "3": {
+        "true_positive": 95,
+        "false_positive": 4
+      }
+    }
+  },
+  "verdict_vs_gt_contingency": {
+    "semgrep": {
+      "0": {
+        "true_positive": {
+          "no_match": 193
+        },
+        "false_positive": {},
+        "uncertain": {}
+      },
+      "1": {
+        "true_positive": {
+          "no_match": 193
+        },
+        "false_positive": {},
+        "uncertain": {}
+      },
+      "2": {
+        "true_positive": {
+          "no_match": 193
+        },
+        "false_positive": {},
+        "uncertain": {}
+      },
+      "3": {
+        "true_positive": {
+          "no_match": 193
+        },
+        "false_positive": {},
+        "uncertain": {}
+      }
+    },
+    "joern": {
+      "0": {
+        "true_positive": {
+          "no_match": 94
+        },
+        "false_positive": {
+          "no_match": 5
+        },
+        "uncertain": {}
+      },
+      "1": {
+        "true_positive": {
+          "no_match": 95
+        },
+        "false_positive": {
+          "no_match": 4
+        },
+        "uncertain": {}
+      },
+      "2": {
+        "true_positive": {
+          "no_match": 95
+        },
+        "false_positive": {
+          "no_match": 4
+        },
+        "uncertain": {}
+      },
+      "3": {
+        "true_positive": {
+          "no_match": 95
+        },
+        "false_positive": {
+          "no_match": 4
+        },
+        "uncertain": {}
+      }
+    }
+  },
+  "findings_invariance": {
+    "semgrep": {
+      "all_same": 18,
+      "any_change": 0,
+      "total": 18
+    },
+    "joern": {
+      "all_same": 18,
+      "any_change": 0,
+      "total": 18
+    }
+  },
+  "refinement_summary": {
+    "semgrep": {
+      "invocations": 39,
+      "actions": {
+        "refine": 29,
+        "keep": 10
+      }
+    },
+    "joern": {
+      "role_classifications": {},
+      "catalog_grew_iters": 18,
+      "catalog_total_iters": 72
+    }
+  },
+  "line_tolerance": 5
+}

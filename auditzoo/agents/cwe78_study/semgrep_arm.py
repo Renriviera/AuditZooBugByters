@@ -22,6 +22,41 @@ logger = logging.getLogger(__name__)
 _SEED_RULES_DIR = Path(__file__).parent / "seed_rules"
 
 
+def _parse_rule_patch(rule_yaml_patch: str) -> dict[str, Any] | None:
+    """Normalise an LLM-supplied rule YAML patch into a single rule dict.
+
+    Accepts any of the three shapes we see in the wild:
+
+    * ``{"rules": [<rule>, ...]}`` — full Semgrep rules document,
+    * ``[<rule>, ...]``            — bare list of rules,
+    * ``<rule>``                   — a single rule dict.
+
+    Returns the first rule dict encountered (with a non-empty ``id``) or
+    ``None`` if parsing fails or no rule was found.  A valid Semgrep rule
+    must be a mapping with an ``id`` key — empty strings, lists of
+    strings, or ``None`` are treated as no-op.
+    """
+    if not (rule_yaml_patch or "").strip():
+        return None
+    try:
+        patch = yaml.safe_load(rule_yaml_patch)
+    except yaml.YAMLError as exc:
+        logger.warning("Semgrep refinement patch failed to parse: %s", exc)
+        return None
+
+    if isinstance(patch, dict) and "rules" in patch:
+        rules = patch.get("rules") or []
+        patch = rules[0] if rules else None
+    elif isinstance(patch, list):
+        patch = patch[0] if patch else None
+
+    if not isinstance(patch, dict):
+        return None
+    if not patch.get("id"):
+        return None
+    return patch
+
+
 class SemgrepArm:
     """Wraps Semgrep CLI invocation and finding extraction."""
 
@@ -118,37 +153,77 @@ class SemgrepArm:
             )
         return enriched
 
-    def apply_refinement(self, action: str, rule_yaml_patch: str, target_rule_id: str = "") -> None:
+    def apply_refinement(
+        self, action: str, rule_yaml_patch: str, target_rule_id: str = ""
+    ) -> str:
         """Mutate the internal rule set based on LLM Call 1 output.
 
-        *action* is one of ``keep``, ``refine``, ``add_rule``.
+        *action* is one of ``keep``, ``refine``, ``add_rule``.  Returns a
+        short audit code describing what actually happened, so callers can
+        distinguish genuine mutations from silent no-ops:
+
+        * ``"keep"``                   — action was keep; rules unchanged.
+        * ``"refine_replaced"``        — rule with matching id found and
+                                         replaced.
+        * ``"refine_appended"``        — LLM emitted a refine patch but no
+                                         existing rule matched; the patch
+                                         was appended instead (treated as
+                                         add_rule).
+        * ``"add_rule_appended"``      — rule(s) from an add_rule patch
+                                         appended.
+        * ``"noop_empty_patch"``       — action was refine/add_rule but the
+                                         patch could not be parsed as a
+                                         rule.
+
+        The function always re-serialises the YAML, so ``rules_hash`` may
+        change for purely-cosmetic reasons even when the return code is
+        ``"keep"`` (callers should rely on this code, not on the hash, to
+        detect real mutations).
         """
         if action == "keep":
-            return
+            return "keep"
 
         current = yaml.safe_load(self._rules_yaml)
-        if current is None:
+        if current is None or not isinstance(current, dict):
             current = {"rules": []}
+        if "rules" not in current or not isinstance(current.get("rules"), list):
+            current["rules"] = []
 
-        if action == "refine" and target_rule_id:
-            patch = yaml.safe_load(rule_yaml_patch)
-            if isinstance(patch, dict) and "rules" in patch:
-                patch_rule = patch["rules"][0] if patch["rules"] else patch
-            else:
-                patch_rule = patch
+        patch_rule = _parse_rule_patch(rule_yaml_patch)
+        if patch_rule is None:
+            # Nothing actionable; skip re-serialisation so callers can
+            # see the rules_hash as unchanged.
+            return "noop_empty_patch"
 
-            for idx, rule in enumerate(current.get("rules", [])):
-                if rule.get("id") == target_rule_id:
-                    current["rules"][idx] = patch_rule
-                    break
+        status = ""
+        if action == "refine":
+            # Prefer an explicit target_rule_id from the LLM; otherwise
+            # fall back to the ``id`` field inside the patch itself.
+            tid = (target_rule_id or patch_rule.get("id", "")).strip()
+            replaced = False
+            if tid:
+                for idx, rule in enumerate(current["rules"]):
+                    if rule.get("id") == tid:
+                        current["rules"][idx] = patch_rule
+                        replaced = True
+                        status = "refine_replaced"
+                        break
+            if not replaced:
+                # Graceful degradation: LLM asked to refine a rule that
+                # isn't in the current set, or omitted the id entirely.
+                # Treat as add_rule so the k-loop still makes progress.
+                current["rules"].append(patch_rule)
+                status = "refine_appended"
         elif action == "add_rule":
-            patch = yaml.safe_load(rule_yaml_patch)
-            if isinstance(patch, dict) and "rules" in patch:
-                current["rules"].extend(patch["rules"])
-            elif isinstance(patch, dict):
-                current["rules"].append(patch)
+            current["rules"].append(patch_rule)
+            status = "add_rule_appended"
+        else:
+            return "noop_empty_patch"
 
-        self._rules_yaml = yaml.dump(current, default_flow_style=False, sort_keys=False)
+        self._rules_yaml = yaml.dump(
+            current, default_flow_style=False, sort_keys=False
+        )
+        return status
 
     # ------------------------------------------------------------------
 

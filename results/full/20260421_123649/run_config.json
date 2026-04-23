@@ -1,0 +1,53 @@
+{
+  "dataset": "/workspace/AuditZooBugByters/benchmark/python/cwe78_cves/metadata.json",
+  "output": "results/full",
+  "clone_dir": "/tmp/auditzoo_eval",
+  "arms": [
+    "semgrep",
+    "joern"
+  ],
+  "max_k": 3,
+  "seed": 235711,
+  "llm_url": "http://localhost:8000/v1",
+  "llm_model": "Qwen/Qwen2.5-Coder-7B-Instruct",
+  "joern_port": 12345,
+  "variance": false,
+  "variance_n": 20,
+  "variance_seeds": [
+    235711,
+    123456,
+    654321,
+    111111,
+    999999
+  ],
+  "line_tolerance": 5,
+  "skip_empty_gt": true,
+  "per_cve_timeout": 900.0,
+  "skip_cves": [
+    "CVE-2020-11981",
+    "CVE-2020-11978",
+    "CVE-2020-15271",
+    "CVE-2021-38305",
+    "CVE-2021-39160",
+    "CVE-2021-39159",
+    "CVE-2021-23422",
+    "CVE-2021-22557",
+    "CVE-2021-41228",
+    "CVE-2019-14904",
+    "CVE-2026-25130",
+    "CVE-2026-26331",
+    "CVE-2026-34955",
+    "CVE-2026-34935",
+    "CVE-2026-35043",
+    "CVE-2026-33641",
+    "CVE-2026-27602",
+    "CVE-2026-33046",
+    "CVE-2026-33310",
+    "CVE-2026-32608",
+    "CVE-2026-0596",
+    "CVE-2026-33718",
+    "CVE-2025-64340"
+  ],
+  "only_cves": [],
+  "log_llm_io": null
+}
