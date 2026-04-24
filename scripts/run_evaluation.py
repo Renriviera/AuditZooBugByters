@@ -25,8 +25,6 @@ import random
 import resource
 import shutil
 import subprocess
-import time
-from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -36,7 +34,6 @@ import psutil
 from auditzoo.agents.cwe78_study.pipeline import Pipeline, PipelineConfig
 from auditzoo.agents.cwe78_study.schemas import (
     Finding,
-    IterationResult,
     ToolArm,
     TriageResult,
     Verdict,
@@ -58,15 +55,19 @@ _REASONING_CAP = 200
 # Evidence serialisation
 # ======================================================================
 
+
 def _snippet_for(f: Finding) -> str:
     """Return the text that ``source_expr`` / ``sink_expr`` are validated against."""
-    return (getattr(f, "surrounding_context", "") or "") + "\n" + (
-        getattr(f, "code_snippet", "") or ""
+    return (
+        (getattr(f, "surrounding_context", "") or "")
+        + "\n"
+        + (getattr(f, "code_snippet", "") or "")
     )
 
 
 def serialize_triage_verdicts(
-    findings: list[Finding], triage_results: list[TriageResult],
+    findings: list[Finding],
+    triage_results: list[TriageResult],
 ) -> list[dict[str, Any]]:
     """Produce an audit-friendly, length-aligned list of triage decisions.
 
@@ -121,8 +122,12 @@ def serialize_triage_verdicts(
 # Ground-truth labelling
 # ======================================================================
 
+
 def _gt_line_match(
-    f: Finding, vuln_file: str, vuln_lines: set[int], line_tolerance: int,
+    f: Finding,
+    vuln_file: str,
+    vuln_lines: set[int],
+    line_tolerance: int,
 ) -> tuple[bool, int | None]:
     """Return ``(is_match, matched_gt_line)`` for a finding against GT."""
     if not vuln_lines:
@@ -190,16 +195,23 @@ def label_findings(
     fp_by_hallucinated_source = 0  # subset of fp: TPs with source_expr not in snippet
     labels: list[str] = []
 
-    matched_vuln_lines: set[int] = set()  # matched by a surviving (non-suppressed, non-hallucinated) finding
+    matched_vuln_lines: set[int] = (
+        set()
+    )  # matched by a surviving (non-suppressed, non-hallucinated) finding
 
     for f, t in zip(findings, triage_results):
         is_match, matched_line = _gt_line_match(
-            f, vuln_file, vuln_lines, line_tolerance,
+            f,
+            vuln_file,
+            vuln_lines,
+            line_tolerance,
         )
 
         source_expr = (getattr(t, "source_expr", "") or "").strip()
-        snippet = (getattr(f, "surrounding_context", "") or "") + "\n" + (
-            getattr(f, "code_snippet", "") or ""
+        snippet = (
+            (getattr(f, "surrounding_context", "") or "")
+            + "\n"
+            + (getattr(f, "code_snippet", "") or "")
         )
         # Parity: empty source_expr ⇒ treat as "present" so pre-evidence
         # runs aren't mass-flagged as hallucinations.
@@ -248,7 +260,11 @@ def label_findings(
 
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+    f1 = (
+        2 * precision * recall / (precision + recall)
+        if (precision + recall) > 0
+        else 0.0
+    )
 
     return {
         "tp": tp,
@@ -268,6 +284,7 @@ def label_findings(
 # Repo management
 # ======================================================================
 
+
 def clone_and_checkout(
     repo_url: str, commit: str, dest: Path, *, shallow: bool = True
 ) -> bool:
@@ -281,15 +298,24 @@ def clone_and_checkout(
         if shallow:
             clone_cmd += ["--depth", "1"]
         clone_cmd += [repo_url, str(dest)]
-        subprocess.run(clone_cmd, capture_output=True, text=True, timeout=120, check=True)
+        subprocess.run(
+            clone_cmd, capture_output=True, text=True, timeout=120, check=True
+        )
 
         subprocess.run(
             ["git", "fetch", "--depth=1", "origin", commit],
-            cwd=str(dest), capture_output=True, text=True, timeout=120,
+            cwd=str(dest),
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
         subprocess.run(
             ["git", "checkout", commit],
-            cwd=str(dest), capture_output=True, text=True, timeout=60, check=True,
+            cwd=str(dest),
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=True,
         )
         return True
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
@@ -297,12 +323,31 @@ def clone_and_checkout(
         return False
 
 
+def get_head_sha(dest: Path) -> str | None:
+    """Return the full SHA at HEAD for *dest*, or ``None`` on any failure."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(dest),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        )
+        sha = result.stdout.strip()
+        return sha or None
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+        return None
+
+
 def count_loc(repo_path: Path) -> int:
     """Count Python lines of code using tokei if available, else wc."""
     try:
         result = subprocess.run(
             ["tokei", "-t", "Python", "-o", "json", str(repo_path)],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         if result.returncode == 0:
             data = json.loads(result.stdout)
@@ -330,6 +375,7 @@ def count_loc(repo_path: Path) -> int:
 # Resource monitoring
 # ======================================================================
 
+
 def get_resource_snapshot() -> dict[str, Any]:
     proc = psutil.Process(os.getpid())
     mem = proc.memory_info()
@@ -345,6 +391,7 @@ def get_resource_snapshot() -> dict[str, Any]:
 # Main evaluation loop
 # ======================================================================
 
+
 def _cleanup_stray_joern() -> None:
     """Best-effort kill of any lingering Joern server subprocesses.
 
@@ -355,14 +402,20 @@ def _cleanup_stray_joern() -> None:
     try:
         subprocess.run(
             ["pkill", "-9", "-f", "joern-cli/joern|ReplBridge"],
-            check=False, timeout=10,
+            check=False,
+            timeout=10,
         )
     except Exception:
         logger.exception("_cleanup_stray_joern failed")
 
 
 async def _run_with_timeout(
-    pipeline: Pipeline, repo_path: str, cve_id: str, timeout_s: float,
+    pipeline: Pipeline,
+    repo_path: str,
+    cve_id: str,
+    timeout_s: float,
+    *,
+    git_sha: str | None = None,
 ) -> tuple[Any, bool]:
     """Run ``pipeline.run`` with a wall-clock budget.
 
@@ -372,18 +425,23 @@ async def _run_with_timeout(
     if timeout_s and timeout_s > 0:
         try:
             result = await asyncio.wait_for(
-                pipeline.run(repo_path, cve_id=cve_id), timeout=timeout_s,
+                pipeline.run(repo_path, cve_id=cve_id, git_sha=git_sha),
+                timeout=timeout_s,
             )
             return result, False
         except asyncio.TimeoutError:
             logger.warning(
                 "  %s: pipeline.run exceeded %.0fs budget, aborting this CVE",
-                cve_id, timeout_s,
+                cve_id,
+                timeout_s,
             )
             _cleanup_stray_joern()
             return None, True
     else:
-        return await pipeline.run(repo_path, cve_id=cve_id), False
+        return (
+            await pipeline.run(repo_path, cve_id=cve_id, git_sha=git_sha),
+            False,
+        )
 
 
 async def run_main_comparison(
@@ -428,20 +486,31 @@ async def run_main_comparison(
                 logger.warning("  Skipping %s — clone failed", cve_id)
                 continue
 
+            vuln_sha = get_head_sha(repo_dest) or vuln_commit
+
             loc = count_loc(repo_dest)
 
             res_before = get_resource_snapshot()
             pipeline = Pipeline(pipeline_cfg)
             vuln_run, timed_out = await _run_with_timeout(
-                pipeline, str(repo_dest), cve_id, per_cve_timeout,
+                pipeline,
+                str(repo_dest),
+                cve_id,
+                per_cve_timeout,
+                git_sha=vuln_sha,
             )
             res_after = get_resource_snapshot()
 
             if timed_out:
-                all_results.append({
-                    "cve_id": cve_id, "repo_url": repo_url, "loc": loc,
-                    "skipped": "timeout", "per_cve_timeout_s": per_cve_timeout,
-                })
+                all_results.append(
+                    {
+                        "cve_id": cve_id,
+                        "repo_url": repo_url,
+                        "loc": loc,
+                        "skipped": "timeout",
+                        "per_cve_timeout_s": per_cve_timeout,
+                    }
+                )
                 _save_json(all_results, output_dir / "results.json")
                 shutil.rmtree(repo_dest, ignore_errors=True)
                 continue
@@ -457,9 +526,14 @@ async def run_main_comparison(
             if run_patched:
                 ok_patch = clone_and_checkout(repo_url, patch_commit, repo_dest)
                 if ok_patch:
+                    patch_sha = get_head_sha(repo_dest) or patch_commit
                     pipeline_patch = Pipeline(pipeline_cfg)
                     patch_run, patch_timed_out = await _run_with_timeout(
-                        pipeline_patch, str(repo_dest), cve_id, per_cve_timeout,
+                        pipeline_patch,
+                        str(repo_dest),
+                        cve_id,
+                        per_cve_timeout,
+                        git_sha=patch_sha,
                     )
                     if patch_timed_out:
                         patch_run = None
@@ -476,7 +550,10 @@ async def run_main_comparison(
             for iteration in vuln_run.iterations:
                 arm_key = f"{iteration.arm}_{iteration.iteration}"
                 gt_labels = label_findings(
-                    iteration.findings, iteration.triage_results, cve, line_tolerance=line_tolerance
+                    iteration.findings,
+                    iteration.triage_results,
+                    cve,
+                    line_tolerance=line_tolerance,
                 )
                 fp_kloc = gt_labels["fp"] / (loc / 1000) if loc > 0 else 0.0
 
@@ -490,8 +567,7 @@ async def run_main_comparison(
                     ),
                     "refinement_actions": list(iteration.refinement_actions or []),
                     "resource_delta": {
-                        k: res_after[k] - res_before.get(k, 0)
-                        for k in res_after
+                        k: res_after[k] - res_before.get(k, 0) for k in res_after
                     },
                 }
                 if iteration.metrics.get("cpg_build_failed"):
@@ -528,12 +604,14 @@ async def run_main_comparison(
             raise
         except Exception as exc:  # noqa: BLE001 — isolate per-CVE failures
             logger.exception("  %s: unhandled error, skipping CVE: %s", cve_id, exc)
-            all_results.append({
-                "cve_id": cve_id,
-                "repo_url": cve.get("repo_url"),
-                "skipped": "error",
-                "error": f"{type(exc).__name__}: {exc}",
-            })
+            all_results.append(
+                {
+                    "cve_id": cve_id,
+                    "repo_url": cve.get("repo_url"),
+                    "skipped": "error",
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
             _save_json(all_results, output_dir / "results.json")
             _cleanup_stray_joern()
         finally:
@@ -584,7 +662,8 @@ async def run_variance_analysis(
             run_result = await pipeline.run(str(repo_dest), cve_id=cve_id)
 
             last_iter = [
-                it for it in run_result.iterations
+                it
+                for it in run_result.iterations
                 if it.arm == ToolArm.SEMGREP and it.iteration == 3
             ]
             if last_iter:
@@ -597,9 +676,7 @@ async def run_variance_analysis(
                     "finding_ids": [
                         f"{f.file_path}:{f.line_start}" for f in last_iter[0].findings
                     ],
-                    "verdicts": [
-                        t.verdict.value for t in last_iter[0].triage_results
-                    ],
+                    "verdicts": [t.verdict.value for t in last_iter[0].triage_results],
                 }
 
         all_results.append(seed_results)
@@ -618,6 +695,7 @@ def _save_json(data: Any, path: Path) -> None:
 # CLI entry point
 # ======================================================================
 
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="CWE-78 evaluation harness")
     p.add_argument("--dataset", type=Path, default=DEFAULT_DATASET)
@@ -629,9 +707,16 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--llm-url", default="http://localhost:8000/v1")
     p.add_argument("--llm-model", default="Qwen/Qwen2.5-Coder-7B-Instruct")
     p.add_argument("--joern-port", type=int, default=12345)
-    p.add_argument("--variance", action="store_true", help="Run variance analysis instead")
+    p.add_argument(
+        "--variance", action="store_true", help="Run variance analysis instead"
+    )
     p.add_argument("--variance-n", type=int, default=20)
-    p.add_argument("--variance-seeds", nargs="+", type=int, default=[235711, 123456, 654321, 111111, 999999])
+    p.add_argument(
+        "--variance-seeds",
+        nargs="+",
+        type=int,
+        default=[235711, 123456, 654321, 111111, 999999],
+    )
     p.add_argument("--line-tolerance", type=int, default=LINE_TOLERANCE)
     p.add_argument("--skip-empty-gt", action="store_true", default=True)
     p.add_argument(
@@ -639,7 +724,10 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=900.0,
         help="Wall-clock seconds budget per pipeline.run(); 0 disables.  "
-        "On timeout the CVE is recorded as 'timed_out' and we move on.",
+        "On timeout the CVE is recorded as 'timed_out' and we move on.  "
+        "The 900 s default is sized for the Joern arm with IRView "
+        "preload disabled (default): ~21 s avg cpg_build + triage on "
+        "this dataset, ~90 s on the 25 kLoC outlier.",
     )
     p.add_argument(
         "--skip-cves",
@@ -662,18 +750,85 @@ def parse_args() -> argparse.Namespace:
         "to this path.  Useful for debugging the UNCERTAIN-collapse root "
         "cause; leave unset for production runs (writes are unbatched).",
     )
+    p.add_argument(
+        "--cpg-cache-dir",
+        type=str,
+        default=None,
+        help="Directory for the shared Joern CPG cache (default: "
+        "$AUDITZOO_CPG_CACHE_DIR or ~/.cache/auditzoo/joern_cpgs).  "
+        "Cache is keyed on <cve_id>_<git_sha[:12]> so re-runs skip "
+        "importCode + overlays.",
+    )
+    p.add_argument(
+        "--no-cpg-cache",
+        action="store_true",
+        default=False,
+        help="Disable the CPG cache entirely (clean baseline / ablation).",
+    )
+    p.add_argument(
+        "--cpg-cache-max-gb",
+        type=float,
+        default=50.0,
+        help="Best-effort prune: if the cache dir exceeds this size at "
+        "startup, oldest-by-mtime project entries are evicted until "
+        "the total fits.  Set to 0 to disable pruning.",
+    )
+    p.add_argument(
+        "--ir-preload",
+        action="store_true",
+        default=False,
+        help="Re-enable IRView.preload_from_backend (O(n_methods) Calls "
+        "preload + per-unit facts preload) for the Joern arm. The "
+        "CWE-78 pipeline queries the backend directly and does not "
+        "consume either structure, so this is disabled by default.  "
+        "Setting AUDITZOO_SKIP_PRELOAD_CALLS / AUDITZOO_SKIP_PRELOAD_FACTS "
+        "explicitly in the environment always wins.",
+    )
     return p.parse_args()
 
 
 async def main() -> None:
     args = parse_args()
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
     # Silence the very chatty autogen-core message envelope logs so the eval
     # log stays readable (each agent round-trip otherwise produces ~10 KB of
     # INFO-level JSON).  The analysis-relevant info we care about is emitted
     # by the pipeline itself and by __main__ below.
     for noisy in ("autogen_core", "autogen_core.events", "httpx", "httpcore"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
+
+    # ------------------------------------------------------------------
+    # IRView preload defaults for the Joern arm.
+    #
+    # The two 10-CVE smokes on the ``joernTimeoutDebug`` branch showed
+    # that ``IRView.preload_from_backend`` (invoked from
+    # ``AnalysisRuntime.initialize`` via ``IRView.create``) is the real
+    # ~85% bottleneck on ``cpg_build_s``: ~120 s average hidden phase
+    # dropping to ~1 s once the preload is skipped.  The CWE-78 Joern
+    # arm queries the backend directly — it never reads
+    # ``IRView.get_all_relations_by_kind(Calls)`` or per-unit facts —
+    # so skipping the preload is functionally safe (documented on
+    # :meth:`IRView.preload_from_backend`).
+    #
+    # ``os.environ.setdefault`` keeps an operator's explicit override
+    # from being clobbered.
+    if "joern" in args.arms and not args.ir_preload:
+        for key in ("AUDITZOO_SKIP_PRELOAD_CALLS", "AUDITZOO_SKIP_PRELOAD_FACTS"):
+            os.environ.setdefault(key, "1")
+        logger.info(
+            "Joern arm: disabling IRView preload by default "
+            "(AUDITZOO_SKIP_PRELOAD_CALLS=%s, AUDITZOO_SKIP_PRELOAD_FACTS=%s); "
+            "pass --ir-preload to re-enable.",
+            os.environ.get("AUDITZOO_SKIP_PRELOAD_CALLS", ""),
+            os.environ.get("AUDITZOO_SKIP_PRELOAD_FACTS", ""),
+        )
+    elif "joern" in args.arms and args.ir_preload:
+        logger.info(
+            "Joern arm: --ir-preload set, IRView preload kept enabled "
+            "(expect ~100 s hidden phase on medium-sized repos)."
+        )
 
     dataset = json.loads(args.dataset.read_text())
     logger.info("Loaded %d CVEs from %s", len(dataset), args.dataset)
@@ -690,7 +845,26 @@ async def main() -> None:
         llm_model=args.llm_model,
         joern_port=args.joern_port,
         llm_log_io_path=str(args.log_llm_io) if args.log_llm_io else None,
+        cpg_cache_enabled=not args.no_cpg_cache,
+        cpg_cache_dir=args.cpg_cache_dir,
     )
+
+    if not args.no_cpg_cache and args.cpg_cache_max_gb > 0:
+        from auditzoo.backends.base import DEFAULT_CPG_CACHE_DIR
+        from auditzoo.backends.joern.client import prune_cpg_cache
+
+        cache_dir = args.cpg_cache_dir or os.environ.get(
+            "AUDITZOO_CPG_CACHE_DIR", DEFAULT_CPG_CACHE_DIR
+        )
+        budget_bytes = int(args.cpg_cache_max_gb * (1024**3))
+        removed = prune_cpg_cache(cache_dir, budget_bytes)
+        if removed:
+            logger.info(
+                "CPG cache at %s pruned: evicted %d project(s): %s",
+                cache_dir,
+                len(removed),
+                removed[:5] + (["..."] if len(removed) > 5 else []),
+            )
 
     if args.only_cves:
         keep = set(args.only_cves)
@@ -698,25 +872,42 @@ async def main() -> None:
         dataset = [c for c in dataset if c.get("cve_id") in keep]
         logger.info(
             "Restricted dataset to %d/%d CVEs via --only-cves: %s",
-            len(dataset), before, sorted(keep),
+            len(dataset),
+            before,
+            sorted(keep),
         )
 
     # Save run config
     _save_json(vars(args), output_dir / "run_config.json")
 
     if args.variance:
-        logger.info("Running variance analysis (%d repos, %d seeds)", args.variance_n, len(args.variance_seeds))
+        logger.info(
+            "Running variance analysis (%d repos, %d seeds)",
+            args.variance_n,
+            len(args.variance_seeds),
+        )
         await run_variance_analysis(
-            dataset, pipeline_cfg, args.clone_dir, output_dir,
-            n_repos=args.variance_n, seeds=args.variance_seeds,
+            dataset,
+            pipeline_cfg,
+            args.clone_dir,
+            output_dir,
+            n_repos=args.variance_n,
+            seeds=args.variance_seeds,
         )
     else:
         logger.info(
             "Running main comparison (%d CVEs, arms=%s, k=0..%d, per_cve_timeout=%.0fs, skip=%d)",
-            len(dataset), args.arms, args.max_k, args.per_cve_timeout, len(args.skip_cves),
+            len(dataset),
+            args.arms,
+            args.max_k,
+            args.per_cve_timeout,
+            len(args.skip_cves),
         )
         await run_main_comparison(
-            dataset, pipeline_cfg, args.clone_dir, output_dir,
+            dataset,
+            pipeline_cfg,
+            args.clone_dir,
+            output_dir,
             line_tolerance=args.line_tolerance,
             skip_empty_gt=args.skip_empty_gt,
             per_cve_timeout=args.per_cve_timeout,

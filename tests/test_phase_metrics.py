@@ -13,7 +13,6 @@ from auditzoo.agents.cwe78_study.pipeline import (
     build_phase_metrics,
 )
 
-
 EMPTY_USAGE: dict[str, int] = {
     "prompt_tokens": 0,
     "completion_tokens": 0,
@@ -82,14 +81,22 @@ class TestBuildPhaseMetrics:
         wall = sum(phases.values()) + 0.4  # 0.4 overhead
         m = _make_metrics(wall_clock_s=wall, **phases)
         reconstructed = (
-            m["cpg_build_s"] + m["scan_s"] + m["llm_triage_s"]
-            + m["llm_refinement_s"] + m["call_graph_s"] + m["overhead_s"]
+            m["cpg_build_s"]
+            + m["scan_s"]
+            + m["llm_triage_s"]
+            + m["llm_refinement_s"]
+            + m["call_graph_s"]
+            + m["overhead_s"]
         )
         assert reconstructed == pytest.approx(m["wall_clock_s"])
 
     def test_counts_and_usage_passed_through(self) -> None:
-        usage = {"prompt_tokens": 100, "completion_tokens": 50,
-                 "total_tokens": 150, "call_count": 3}
+        usage = {
+            "prompt_tokens": 100,
+            "completion_tokens": 50,
+            "total_tokens": 150,
+            "call_count": 3,
+        }
         m = build_phase_metrics(
             wall_clock_s=1.0,
             n_findings=7,
@@ -107,6 +114,56 @@ class TestBuildPhaseMetrics:
         assert m["llm_usage"] is usage
         assert m["llm_tokens_triage"] == 80
         assert m["llm_tokens_refinement"] == 70
+
+    def test_cpg_phase_fields_absent_by_default(self) -> None:
+        m = _make_metrics(wall_clock_s=1.0)
+        assert "cpg_phase_s" not in m
+        assert "cpg_rss_bytes" not in m
+
+    def test_cpg_phase_fields_passed_through_when_provided(self) -> None:
+        phase = {
+            "import_code_s": 12.3,
+            "overlay_controlflow_s": 4.0,
+            "overlay_callgraph_s": 2.5,
+            "warmup_s": 0.9,
+            "total_connect_s": 20.0,
+            "cache_hit": False,
+        }
+        rss = {
+            "start_bytes": 100 * 1024 * 1024,
+            "after_import_bytes": 800 * 1024 * 1024,
+            "peak_bytes": 900 * 1024 * 1024,
+        }
+        m = build_phase_metrics(
+            wall_clock_s=1.0,
+            n_findings=0,
+            n_tp=0,
+            n_fp=0,
+            n_uncertain=0,
+            llm_usage=EMPTY_USAGE,
+            cpg_phase_s=phase,
+            cpg_rss_bytes=rss,
+        )
+        assert m["cpg_phase_s"] == phase
+        assert m["cpg_rss_bytes"] == rss
+        # Must be copies, not aliases, so downstream mutation does not leak.
+        assert m["cpg_phase_s"] is not phase
+        assert m["cpg_rss_bytes"] is not rss
+
+    def test_empty_cpg_phase_dicts_omitted(self) -> None:
+        """Falsy dicts are treated as absence so Semgrep-only iterations stay clean."""
+        m = build_phase_metrics(
+            wall_clock_s=1.0,
+            n_findings=0,
+            n_tp=0,
+            n_fp=0,
+            n_uncertain=0,
+            llm_usage=EMPTY_USAGE,
+            cpg_phase_s={},
+            cpg_rss_bytes={},
+        )
+        assert "cpg_phase_s" not in m
+        assert "cpg_rss_bytes" not in m
 
 
 class TestLLMTokensDelta:

@@ -3,6 +3,7 @@
 This module implements the IRBackend interface using Joern CPG queries.
 """
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -44,6 +45,15 @@ class JoernBackend(CPGBackend):
             jvm_extra_opts=config.jvm_extra_opts or [],
         )
         self._connected = False
+        # ``pre_define.sc`` is loaded lazily the first time a caller reaches
+        # for a helper that actually needs it (``get_code_unit_by_location``
+        # today).  Loading it from ``connect`` makes ``cpg_build_s`` dominated
+        # by Scala-compile-against-the-fresh-CPG cost (~85% of build time on
+        # the CWE-78 sweep, up to ~450s for bikeshed-sized CPGs) even for
+        # pipelines that never invoke the helper at all.  Guarded by a lock
+        # so concurrent first-time callers only trigger the load once.
+        self._pre_define_loaded: bool = False
+        self._pre_define_lock: asyncio.Lock = asyncio.Lock()
 
     @property
     def backend_type(self) -> str:
@@ -60,17 +70,39 @@ class JoernBackend(CPGBackend):
     # ===== Connection Management =====
 
     async def connect(self) -> None:
-        """Connect to Joern and load the CPG."""
+        """Connect to Joern and load the CPG.
+
+        ``pre_define.sc`` is *not* loaded here; it is deferred until the
+        first caller actually needs one of its helpers.  See
+        ``_ensure_pre_defined_loaded`` for the rationale.
+        """
         await self.client.connect(
             language=self.config.language,
             source_path=self.config.source_path,
             analysis_path=self.config.analysis_path,
             project_name=self.config.project_name,
             force_create_cpg=self.config.force_create_cpg,
+            run_overlays=self.config.run_overlays,
+            cache_enabled=bool(self.config.cpg_cache_key),
         )
         self._connected = True
+        # Fresh JVM session: every previously-defined helper is gone.
+        self._pre_define_loaded = False
 
-        await self._load_pre_defined_scripts()
+    @property
+    def last_connect_timings(self) -> dict[str, float | bool]:
+        """Per-phase CPG build timings from the most recent ``connect``."""
+        return dict(self.client.last_connect_timings)
+
+    @property
+    def last_connect_rss(self) -> dict[str, int]:
+        """Per-phase JVM RSS samples from the most recent ``connect``."""
+        return dict(self.client.last_connect_rss)
+
+    @property
+    def gc_log_path(self) -> str | None:
+        """Directory where the Joern JVM is writing GC logs, or ``None``."""
+        return self.client.gc_log_path
 
     async def disconnect(self) -> None:
         """Disconnect from Joern."""
@@ -87,6 +119,7 @@ class JoernBackend(CPGBackend):
 
         await self.client.disconnect()
         self._connected = False
+        self._pre_define_loaded = False
 
     def is_connected(self) -> bool:
         """Check if backend is connected."""
@@ -111,13 +144,46 @@ class JoernBackend(CPGBackend):
             project_name=self.config.project_name,
             language=self.config.language,
             force_create_cpg=True,
+            run_overlays=self.config.run_overlays,
         )
 
-        # Reload pre-defined scripts after reloading CPG
-        await self._load_pre_defined_scripts()
+        # A fresh CPG means the REPL's previously-compiled helpers were
+        # tied to the old session and are no longer valid; the next caller
+        # that needs them will trigger a re-load lazily.
+        self._pre_define_loaded = False
+
+    async def _ensure_pre_defined_loaded(self) -> None:
+        """Idempotently load ``pre_define.sc`` on first demand.
+
+        Shipping the helper through ``query_raw`` forces Scala to
+        type-check + compile it against the freshly-imported CPG's
+        classpath, which is by far the dominant cost in ``connect`` on
+        medium-to-large repos (see ``FORK_FIXES.md``).  The cwe78_study
+        arms never hit the helper, so for that workload paying this cost
+        inside ``connect`` is pure overhead.  Load it lazily and cache
+        the result; a ``disconnect`` / ``reload`` / new ``connect``
+        invalidates the cache because the JVM session's defined symbols
+        are gone.
+
+        The lock makes concurrent first-time callers serialise through a
+        single load rather than firing N duplicate compilations.
+        """
+        if self._pre_define_loaded:
+            return
+        async with self._pre_define_lock:
+            if self._pre_define_loaded:
+                return
+            await self._load_pre_defined_scripts()
+            self._pre_define_loaded = True
 
     async def _load_pre_defined_scripts(self) -> None:
-        """Load pre-defined Scala scripts into Joern."""
+        """Unconditionally ship ``pre_define.sc`` to the Joern REPL.
+
+        Callers should almost always go through
+        ``_ensure_pre_defined_loaded`` instead; this method exists as a
+        direct hook for tests and for any caller that explicitly wants
+        to force a re-load.
+        """
         scripts_dir = Path(__file__).parent / "scripts"
         pre_define_script = scripts_dir / "pre_define.sc"
 
@@ -265,6 +331,10 @@ class JoernBackend(CPGBackend):
             raise BackendUnimplementedError(
                 "get_code_unit_by_location with column_start is not implemented for Joern backend."
             )
+
+        # ``minimalCoveringNodeInfo`` is defined in ``pre_define.sc``; make
+        # sure it is available in the REPL before we reference it.
+        await self._ensure_pre_defined_loaded()
 
         unit_id = await self.query(
             f'minimalCoveringNodeInfo("{location.file_path}", {location.line_start}, {location.line_end})',

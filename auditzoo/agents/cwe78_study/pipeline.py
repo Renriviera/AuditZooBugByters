@@ -11,13 +11,15 @@ import asyncio
 import hashlib
 import logging
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
-from autogen_core import AgentId, MessageContext
+from autogen_core import AgentId
 
+from auditzoo.backends.base import make_cpg_cache_key
 from auditzoo.backends.ingestion import auto_detect_backend
 from auditzoo.core.protocol.requests import Request
 from auditzoo.core.runtime import AnalysisRuntime
@@ -29,7 +31,6 @@ from .schemas import (
     Finding,
     HelperRole,
     IterationResult,
-    RefinementAction,
     RunResult,
     ToolArm,
     Verdict,
@@ -124,7 +125,9 @@ async def _connect_joern_with_retry(
             last_exc = exc
             logger.warning(
                 "Joern CPG connect attempt %d/%d failed: %s",
-                attempt + 1, max_retries + 1, exc,
+                attempt + 1,
+                max_retries + 1,
+                exc,
             )
             try:
                 await runtime_cm.stop()
@@ -133,6 +136,36 @@ async def _connect_joern_with_retry(
             if attempt < max_retries:
                 await asyncio.sleep(retry_delay_s)
     return runtime_cm, None, last_exc
+
+
+def _extract_joern_phase_instrumentation(
+    runtime_cm: Any,
+) -> tuple[dict[str, Any], dict[str, int]]:
+    """Best-effort extraction of per-phase timings + RSS from a failed connect.
+
+    The :class:`AnalysisRuntime` exposes ``backend`` only after a successful
+    ``__aenter__``.  When the build fails partway the runtime context may
+    not yet have a bound backend, but the backend instance is still
+    reachable via its private ``_backend`` attribute — we pull the
+    instrumentation from there so callers can see which phase was in
+    flight when the connect crashed or timed out.
+    """
+    phase: dict[str, Any] = {}
+    rss: dict[str, int] = {}
+    if runtime_cm is None:
+        return phase, rss
+    backend = getattr(runtime_cm, "_backend", None)
+    if backend is None:
+        return phase, rss
+    try:
+        phase = dict(getattr(backend, "last_connect_timings", {}) or {})
+    except Exception:  # pragma: no cover - defensive
+        phase = {}
+    try:
+        rss = dict(getattr(backend, "last_connect_rss", {}) or {})
+    except Exception:  # pragma: no cover - defensive
+        rss = {}
+    return phase, rss
 
 
 def _joern_catalog_snapshot(joern: Any) -> dict[str, list[str]]:
@@ -159,6 +192,8 @@ def build_phase_metrics(
     call_graph_s: float = 0.0,
     llm_tokens_triage: int = 0,
     llm_tokens_refinement: int = 0,
+    cpg_phase_s: dict[str, Any] | None = None,
+    cpg_rss_bytes: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """Build the per-iteration metrics dict with phase-level attribution.
 
@@ -170,10 +205,18 @@ def build_phase_metrics(
     for the iteration; ``llm_tokens_triage`` and ``llm_tokens_refinement``
     are the subtotals used by the triage and refinement LLM calls
     respectively.
+
+    ``cpg_phase_s`` (dict) carries the Joern CPG build sub-phases
+    (``import_code_s``, ``overlay_<name>_s``, ``warmup_s``,
+    ``total_connect_s``, ``cache_hit``) pulled off the backend after the
+    CPG is built.  ``cpg_rss_bytes`` carries JVM RSS snapshots taken at
+    the same phase boundaries plus ``peak_bytes``.  Both are attached
+    as-is for downstream analysis and are only populated for the Joern
+    arm's k=0 iteration (amortisation rule).
     """
     attributed = cpg_build_s + scan_s + llm_triage_s + llm_refinement_s + call_graph_s
     overhead_s = max(0.0, wall_clock_s - attributed)
-    return {
+    metrics = {
         "wall_clock_s": wall_clock_s,
         "cpg_build_s": cpg_build_s,
         "scan_s": scan_s,
@@ -189,6 +232,11 @@ def build_phase_metrics(
         "llm_tokens_triage": llm_tokens_triage,
         "llm_tokens_refinement": llm_tokens_refinement,
     }
+    if cpg_phase_s:
+        metrics["cpg_phase_s"] = dict(cpg_phase_s)
+    if cpg_rss_bytes:
+        metrics["cpg_rss_bytes"] = dict(cpg_rss_bytes)
+    return metrics
 
 
 def _log_phase_breakdown(
@@ -213,6 +261,30 @@ def _log_phase_breakdown(
         metrics["llm_tokens_triage"],
         metrics["llm_tokens_refinement"],
     )
+    phase = metrics.get("cpg_phase_s")
+    rss = metrics.get("cpg_rss_bytes")
+    if phase or rss:
+        overlays = {
+            key[len("overlay_") : -len("_s")]: round(float(val), 2)
+            for key, val in (phase or {}).items()
+            if isinstance(key, str)
+            and key.startswith("overlay_")
+            and key.endswith("_s")
+        }
+        peak_mib = (rss or {}).get("peak_bytes", 0) / (1024 * 1024)
+        logger.info(
+            "[%s | %s k=%d] cpg_phases import=%.2fs overlays=%s warmup=%.2fs "
+            "total=%.2fs cache_hit=%s rss_peak=%.1fMiB",
+            cve_id or "-",
+            arm,
+            k,
+            float((phase or {}).get("import_code_s", 0.0)),
+            overlays,
+            float((phase or {}).get("warmup_s", 0.0)),
+            float((phase or {}).get("total_connect_s", 0.0)),
+            (phase or {}).get("cache_hit"),
+            peak_mib,
+        )
 
 
 class PipelineConfig:
@@ -233,6 +305,8 @@ class PipelineConfig:
         joern_port: int = 12345,
         call_graph_depth: int = 3,
         llm_log_io_path: str | None = None,
+        cpg_cache_enabled: bool = True,
+        cpg_cache_dir: str | None = None,
     ) -> None:
         self.max_iterations = max_iterations
         self.seed = seed
@@ -246,6 +320,8 @@ class PipelineConfig:
         self.joern_port = joern_port
         self.call_graph_depth = call_graph_depth
         self.llm_log_io_path = llm_log_io_path
+        self.cpg_cache_enabled = cpg_cache_enabled
+        self.cpg_cache_dir = cpg_cache_dir
 
 
 class Pipeline:
@@ -266,8 +342,18 @@ class Pipeline:
         self._triage = TriageAgent(self._llm)
         self._refinement = RefinementAgent(self._llm)
 
-    async def run(self, repo_path: str | Path, cve_id: str = "") -> RunResult:
-        """Run both arms across k=0..max_iterations on *repo_path*."""
+    async def run(
+        self,
+        repo_path: str | Path,
+        cve_id: str = "",
+        git_sha: str | None = None,
+    ) -> RunResult:
+        """Run both arms across k=0..max_iterations on *repo_path*.
+
+        ``git_sha`` is forwarded to the Joern arm and (when combined with
+        ``cve_id``) becomes the CPG cache key so re-runs against the same
+        checkout skip ``importCode`` + overlay passes.
+        """
         repo_path = str(Path(repo_path).resolve())
         result = RunResult(repo_path=repo_path, cve_id=cve_id)
 
@@ -276,7 +362,11 @@ class Pipeline:
             result.iterations.extend(semgrep_iters)
 
         if "joern" in self._cfg.arms:
-            joern_iters = await self._run_joern_arm(repo_path, cve_id=cve_id)
+            joern_iters = await self._run_joern_arm(
+                repo_path,
+                cve_id=cve_id,
+                git_sha=git_sha,
+            )
             result.iterations.extend(joern_iters)
 
         result.metadata["llm_usage"] = self._llm.usage.to_dict()
@@ -355,9 +445,15 @@ class Pipeline:
                 llm_triage_s=triage_t[0],
                 llm_refinement_s=refinement_s,
                 n_findings=len(findings),
-                n_tp=sum(1 for t in triage_results if t.verdict == Verdict.TRUE_POSITIVE),
-                n_fp=sum(1 for t in triage_results if t.verdict == Verdict.FALSE_POSITIVE),
-                n_uncertain=sum(1 for t in triage_results if t.verdict == Verdict.UNCERTAIN),
+                n_tp=sum(
+                    1 for t in triage_results if t.verdict == Verdict.TRUE_POSITIVE
+                ),
+                n_fp=sum(
+                    1 for t in triage_results if t.verdict == Verdict.FALSE_POSITIVE
+                ),
+                n_uncertain=sum(
+                    1 for t in triage_results if t.verdict == Verdict.UNCERTAIN
+                ),
                 llm_usage=self._llm.usage.to_dict(),
                 llm_tokens_triage=llm_tokens_triage,
                 llm_tokens_refinement=llm_tokens_refinement,
@@ -389,11 +485,21 @@ class Pipeline:
     # ------------------------------------------------------------------
 
     async def _run_joern_arm(
-        self, repo_path: str, *, cve_id: str = ""
+        self,
+        repo_path: str,
+        *,
+        cve_id: str = "",
+        git_sha: str | None = None,
     ) -> list[IterationResult]:
-        backend_cfg = auto_detect_backend(
-            repo_path, port=self._cfg.joern_port
-        )
+        # Build backend cfg with (optional) CPG cache enabled.  Cache key is
+        # <cve>_<sha[:12]> so re-runs against the same checkout reuse the
+        # persisted CPG (importCode + overlays are skipped).
+        backend_kwargs: dict[str, Any] = {"port": self._cfg.joern_port}
+        if self._cfg.cpg_cache_enabled and (cve_id or git_sha):
+            backend_kwargs["cpg_cache_key"] = make_cpg_cache_key(cve_id, git_sha)
+            if self._cfg.cpg_cache_dir:
+                backend_kwargs["cpg_cache_dir"] = self._cfg.cpg_cache_dir
+        backend_cfg = auto_detect_backend(repo_path, **backend_kwargs)
         results: list[IterationResult] = []
 
         # CPG construction happens inside AnalysisRuntime.__aenter__
@@ -403,35 +509,53 @@ class Pipeline:
         # "port already in use" when the previous CVE's JVM was still
         # releasing the port) we retry once after a short pause.
         cpg_start = time.perf_counter()
-        runtime_cm, runtime, cpg_error = await _connect_joern_with_retry(
-            backend_cfg
-        )
+        runtime_cm, runtime, cpg_error = await _connect_joern_with_retry(backend_cfg)
         if runtime is None:
             cpg_build_s_total = time.perf_counter() - cpg_start
             logger.error(
                 "Joern arm failed during CPG build after %.2fs (with retry): %s",
-                cpg_build_s_total, cpg_error, exc_info=cpg_error is not None,
+                cpg_build_s_total,
+                cpg_error,
+                exc_info=cpg_error is not None,
+            )
+            # Try to pull out whatever partial phase data the client recorded
+            # before it crashed; this is what you want when the build timed
+            # out and you need to know which phase was in flight.
+            partial_phase, partial_rss = _extract_joern_phase_instrumentation(
+                runtime_cm
             )
             if runtime_cm is not None:
                 try:
                     await runtime_cm.stop()
                 except Exception:
-                    logger.exception("AnalysisRuntime cleanup after __aenter__ failure failed")
+                    logger.exception(
+                        "AnalysisRuntime cleanup after __aenter__ failure failed"
+                    )
+            failure_metrics: dict[str, Any] = {
+                "error": str(cpg_error) if cpg_error else "unknown CPG error",
+                "error_type": (type(cpg_error).__name__ if cpg_error else "unknown"),
+                "cpg_build_s": cpg_build_s_total,
+                "cpg_build_failed": True,
+            }
+            if partial_phase:
+                failure_metrics["cpg_phase_s"] = partial_phase
+            if partial_rss:
+                failure_metrics["cpg_rss_bytes"] = partial_rss
             return [
                 IterationResult(
                     arm=ToolArm.JOERN,
                     iteration=0,
-                    metrics={
-                        "error": str(cpg_error) if cpg_error else "unknown CPG error",
-                        "error_type": (
-                            type(cpg_error).__name__ if cpg_error else "unknown"
-                        ),
-                        "cpg_build_s": cpg_build_s_total,
-                        "cpg_build_failed": True,
-                    },
+                    metrics=failure_metrics,
                 )
             ]
         cpg_build_s_total = time.perf_counter() - cpg_start
+        backend = getattr(runtime, "backend", None)
+        cpg_phase_s_total: dict[str, Any] = dict(
+            getattr(backend, "last_connect_timings", {}) or {}
+        )
+        cpg_rss_bytes_total: dict[str, int] = dict(
+            getattr(backend, "last_connect_rss", {}) or {}
+        )
 
         try:
             joern_holder: list[JoernArm] = []
@@ -456,6 +580,8 @@ class Pipeline:
                 self._llm.reset_usage()
                 # CPG build cost is a one-shot, amortise onto k=0 only.
                 cpg_build_s = cpg_build_s_total if k == 0 else 0.0
+                cpg_phase_s = cpg_phase_s_total if k == 0 else None
+                cpg_rss_bytes = cpg_rss_bytes_total if k == 0 else None
 
                 joern = joern_holder[0] if joern_holder else None
                 catalog_pre = _joern_catalog_snapshot(joern) if joern else {}
@@ -467,8 +593,7 @@ class Pipeline:
                     )
                     raw_findings = scan_resp.data if scan_resp.success else []
                     findings = [
-                        Finding(**f) if isinstance(f, dict) else f
-                        for f in raw_findings
+                        Finding(**f) if isinstance(f, dict) else f for f in raw_findings
                     ]
                     joern = joern_holder[0]
                     findings = joern.get_findings_with_context(findings, repo_path)
@@ -503,23 +628,28 @@ class Pipeline:
                             continue
                         tokens_before_ref = self._llm.usage.to_dict()
                         with _stopwatch() as refine_t:
-                            classification = await self._refinement.classify_helpers_joern(
-                                call_graph_neighborhood=neighbors,
-                                current_sources=joern.sources,
-                                current_sinks=joern.sinks,
-                                current_sanitizers=joern.sanitizers,
+                            classification = (
+                                await self._refinement.classify_helpers_joern(
+                                    call_graph_neighborhood=neighbors,
+                                    current_sources=joern.sources,
+                                    current_sinks=joern.sinks,
+                                    current_sanitizers=joern.sanitizers,
+                                )
                             )
                             refinement_actions.append(asdict(classification))
                             new_sources = [
-                                n for n, r in classification.classifications.items()
+                                n
+                                for n, r in classification.classifications.items()
                                 if r == HelperRole.SOURCE_WRAPPER
                             ]
                             new_sinks = [
-                                n for n, r in classification.classifications.items()
+                                n
+                                for n, r in classification.classifications.items()
                                 if r == HelperRole.SINK_WRAPPER
                             ]
                             new_sanitizers = [
-                                n for n, r in classification.classifications.items()
+                                n
+                                for n, r in classification.classifications.items()
                                 if r == HelperRole.SANITIZER
                             ]
                             joern.expand_sources(new_sources)
@@ -541,20 +671,31 @@ class Pipeline:
                     llm_refinement_s=refinement_s,
                     call_graph_s=call_graph_s,
                     n_findings=len(findings),
-                    n_tp=sum(1 for t in triage_results if t.verdict == Verdict.TRUE_POSITIVE),
-                    n_fp=sum(1 for t in triage_results if t.verdict == Verdict.FALSE_POSITIVE),
-                    n_uncertain=sum(1 for t in triage_results if t.verdict == Verdict.UNCERTAIN),
+                    n_tp=sum(
+                        1 for t in triage_results if t.verdict == Verdict.TRUE_POSITIVE
+                    ),
+                    n_fp=sum(
+                        1 for t in triage_results if t.verdict == Verdict.FALSE_POSITIVE
+                    ),
+                    n_uncertain=sum(
+                        1 for t in triage_results if t.verdict == Verdict.UNCERTAIN
+                    ),
                     llm_usage=self._llm.usage.to_dict(),
                     llm_tokens_triage=llm_tokens_triage,
                     llm_tokens_refinement=llm_tokens_refinement,
+                    cpg_phase_s=cpg_phase_s,
+                    cpg_rss_bytes=cpg_rss_bytes,
                 )
                 catalog_post = _joern_catalog_snapshot(joern)
                 metrics["joern_catalog_pre"] = catalog_pre
                 metrics["joern_catalog_post"] = catalog_post
                 metrics["joern_catalog_grew"] = (
-                    len(catalog_post.get("sources", [])) > len(catalog_pre.get("sources", []))
-                    or len(catalog_post.get("sinks", [])) > len(catalog_pre.get("sinks", []))
-                    or len(catalog_post.get("sanitizers", [])) > len(catalog_pre.get("sanitizers", []))
+                    len(catalog_post.get("sources", []))
+                    > len(catalog_pre.get("sources", []))
+                    or len(catalog_post.get("sinks", []))
+                    > len(catalog_pre.get("sinks", []))
+                    or len(catalog_post.get("sanitizers", []))
+                    > len(catalog_pre.get("sanitizers", []))
                 )
                 metrics["findings_hash"] = _findings_hash(findings)
                 _log_phase_breakdown(cve_id=cve_id, arm="joern", k=k, metrics=metrics)
@@ -602,7 +743,8 @@ def _triage_summary(triage_results: list[Any]) -> dict[str, int]:
 
 
 def _pick_refinement_target(
-    findings: list[Finding], triage_results: list[Any],
+    findings: list[Finding],
+    triage_results: list[Any],
 ) -> Finding:
     """Choose the most informative finding to anchor LLM refinement.
 
