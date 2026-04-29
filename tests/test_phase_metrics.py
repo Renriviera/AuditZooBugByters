@@ -8,10 +8,14 @@ import pytest
 
 from auditzoo.agents.cwe78_study.pipeline import (
     _PHASE_KEYS,
+    _joern_structural_evidence,
+    _joern_structural_evidence_map,
     _llm_tokens_delta,
+    _reduce_joern_findings,
     _stopwatch,
     build_phase_metrics,
 )
+from auditzoo.agents.cwe78_study.schemas import Finding
 
 EMPTY_USAGE: dict[str, int] = {
     "prompt_tokens": 0,
@@ -71,13 +75,13 @@ class TestBuildPhaseMetrics:
         assert m["overhead_s"] == 0.0
 
     def test_phase_sum_plus_overhead_equals_wall_clock_when_no_skew(self) -> None:
-        phases = dict(
-            cpg_build_s=0.1,
-            scan_s=0.2,
-            llm_triage_s=0.3,
-            llm_refinement_s=0.15,
-            call_graph_s=0.05,
-        )
+        phases = {
+            "cpg_build_s": 0.1,
+            "scan_s": 0.2,
+            "llm_triage_s": 0.3,
+            "llm_refinement_s": 0.15,
+            "call_graph_s": 0.05,
+        }
         wall = sum(phases.values()) + 0.4  # 0.4 overhead
         m = _make_metrics(wall_clock_s=wall, **phases)
         reconstructed = (
@@ -115,56 +119,6 @@ class TestBuildPhaseMetrics:
         assert m["llm_tokens_triage"] == 80
         assert m["llm_tokens_refinement"] == 70
 
-    def test_cpg_phase_fields_absent_by_default(self) -> None:
-        m = _make_metrics(wall_clock_s=1.0)
-        assert "cpg_phase_s" not in m
-        assert "cpg_rss_bytes" not in m
-
-    def test_cpg_phase_fields_passed_through_when_provided(self) -> None:
-        phase = {
-            "import_code_s": 12.3,
-            "overlay_controlflow_s": 4.0,
-            "overlay_callgraph_s": 2.5,
-            "warmup_s": 0.9,
-            "total_connect_s": 20.0,
-            "cache_hit": False,
-        }
-        rss = {
-            "start_bytes": 100 * 1024 * 1024,
-            "after_import_bytes": 800 * 1024 * 1024,
-            "peak_bytes": 900 * 1024 * 1024,
-        }
-        m = build_phase_metrics(
-            wall_clock_s=1.0,
-            n_findings=0,
-            n_tp=0,
-            n_fp=0,
-            n_uncertain=0,
-            llm_usage=EMPTY_USAGE,
-            cpg_phase_s=phase,
-            cpg_rss_bytes=rss,
-        )
-        assert m["cpg_phase_s"] == phase
-        assert m["cpg_rss_bytes"] == rss
-        # Must be copies, not aliases, so downstream mutation does not leak.
-        assert m["cpg_phase_s"] is not phase
-        assert m["cpg_rss_bytes"] is not rss
-
-    def test_empty_cpg_phase_dicts_omitted(self) -> None:
-        """Falsy dicts are treated as absence so Semgrep-only iterations stay clean."""
-        m = build_phase_metrics(
-            wall_clock_s=1.0,
-            n_findings=0,
-            n_tp=0,
-            n_fp=0,
-            n_uncertain=0,
-            llm_usage=EMPTY_USAGE,
-            cpg_phase_s={},
-            cpg_rss_bytes={},
-        )
-        assert "cpg_phase_s" not in m
-        assert "cpg_rss_bytes" not in m
-
 
 class TestLLMTokensDelta:
     def test_delta_computes_total_tokens_difference(self) -> None:
@@ -196,3 +150,446 @@ class TestStopwatch:
         except RuntimeError:
             pass
         assert t_holder[0] >= 0.01
+
+
+class TestJoernStructuralEvidence:
+    def test_renders_source_sink_and_flow_from_metadata(self) -> None:
+        finding = Finding(
+            file_path="pkg/sink.py",
+            line_start=20,
+            line_end=20,
+            rule_id="joern-taint-reachability",
+            message="demo",
+            sink_api="run",
+            metadata={
+                "sourceFile": "pkg/source.py",
+                "sourceLine": "10",
+                "sourceCode": "request.args['cmd']",
+                "sinkFile": "pkg/sink.py",
+                "sinkLine": "20",
+                "sinkCode": "subprocess.run(cmd, shell=True)",
+                "sinkName": "run",
+                "flowPath": [
+                    {
+                        "file": "pkg/source.py",
+                        "line": "10",
+                        "code": "request.args['cmd']",
+                        "nodeType": "Call",
+                    }
+                ],
+            },
+        )
+
+        evidence = _joern_structural_evidence(finding)
+
+        assert "Joern source: pkg/source.py:10 `request.args['cmd']`" in evidence
+        assert (
+            "Joern sink: pkg/sink.py:20 run `subprocess.run(cmd, shell=True)`"
+            in evidence
+        )
+        assert (
+            "Joern taint flow: `request.args['cmd']` -> "
+            "`subprocess.run(cmd, shell=True)`"
+        ) in evidence
+        assert "Joern flow path:" not in evidence
+
+        full_evidence = _joern_structural_evidence(finding, include_flow_path=True)
+
+        assert "Joern flow path:" in full_evidence
+        assert "pkg/source.py:10 Call `request.args['cmd']`" in full_evidence
+
+    def test_evidence_map_only_includes_findings_with_metadata(self) -> None:
+        with_metadata = Finding(
+            file_path="pkg/sink.py",
+            line_start=20,
+            line_end=20,
+            rule_id="joern-taint-reachability",
+            message="demo",
+            metadata={"sourceCode": "sys.argv[1]", "sinkCode": "os.system(cmd)"},
+        )
+        without_metadata = Finding(
+            file_path="pkg/other.py",
+            line_start=5,
+            line_end=5,
+            rule_id="joern-taint-reachability",
+            message="demo",
+        )
+
+        evidence_map = _joern_structural_evidence_map([with_metadata, without_metadata])
+
+        assert list(evidence_map) == [0]
+        assert "sys.argv[1]" in evidence_map[0]
+
+    def test_structural_evidence_renders_origin_and_caller_chain(self) -> None:
+        finding = Finding(
+            file_path="pkg/sink.py",
+            line_start=20,
+            line_end=20,
+            rule_id="joern-taint-reachability",
+            message="demo",
+            metadata={
+                "sourceCode": "cmd",
+                "sinkCode": "subprocess.run(cmd, shell=True)",
+                "originExternalSource": True,
+                "originEvidence": [
+                    {
+                        "file": "pkg/view.py",
+                        "line": "9",
+                        "code": "cmd = os.getenv('CMD')",
+                        "matchesExternal": True,
+                    }
+                ],
+                "callerChain": [
+                    {
+                        "file": "pkg/view.py",
+                        "line": "12",
+                        "code": "run(request.args['cmd'])",
+                        "argumentCode": "request.args['cmd']",
+                        "matchesExternal": True,
+                    }
+                ],
+            },
+        )
+
+        evidence = _joern_structural_evidence(finding)
+
+        assert "Joern origin: external_source_confirmed" in evidence
+        assert "Joern origin evidence:" in evidence
+        assert "cmd = os.getenv('CMD')" in evidence
+        assert "Joern caller evidence:" in evidence
+        assert "arg=`request.args['cmd']` [external]" in evidence
+
+
+class TestJoernCandidateReducer:
+    def test_reducer_keeps_high_risk_findings_before_low_signal_ones(self) -> None:
+        risky = Finding(
+            file_path="app/views.py",
+            line_start=12,
+            line_end=12,
+            rule_id="joern-taint-reachability",
+            message="risk",
+            metadata={
+                "sinkKind": "direct",
+                "sourceKind": "parameter",
+                "sinkCode": "subprocess.run(cmd, shell=True)",
+                "shell_true": True,
+                "string_command_like": True,
+                "reportReason": "flow_command_construction",
+            },
+        )
+        low_signal = Finding(
+            file_path="tests/test_runner.py",
+            line_start=20,
+            line_end=20,
+            rule_id="joern-taint-reachability",
+            message="noise",
+            metadata={
+                "sinkKind": "wrapper",
+                "wrapperName": "run",
+                "sourceKind": "attribute",
+                "sinkCode": "subprocess.run(command.split(' '))",
+                "argv_list_like": True,
+                "test_file": True,
+            },
+        )
+
+        kept, metrics = _reduce_joern_findings([low_signal, risky], 1)
+
+        assert kept == [risky]
+        assert metrics["joern_raw_findings"] == 2
+        assert metrics["joern_triaged_findings"] == 1
+        assert metrics["joern_candidates_dropped_before_triage"] == 1
+        assert metrics["joern_dropped_reason_counts"] == {"low_signal_path": 1}
+
+    def test_reducer_keeps_external_origin_before_generic_parameter(self) -> None:
+        external = Finding(
+            file_path="app/views.py",
+            line_start=12,
+            line_end=12,
+            rule_id="joern-taint-reachability",
+            message="external",
+            metadata={
+                "sinkKind": "direct",
+                "sourceKind": "attribute",
+                "originExternalSource": True,
+                "sinkCode": "subprocess.run(cmd, shell=True)",
+                "shell_true": True,
+            },
+        )
+        generic = Finding(
+            file_path="app/helpers.py",
+            line_start=30,
+            line_end=30,
+            rule_id="joern-taint-reachability",
+            message="generic",
+            metadata={
+                "sinkKind": "direct",
+                "sourceKind": "parameter",
+                "sinkCode": "subprocess.run(cmd, shell=True)",
+                "shell_true": True,
+            },
+        )
+
+        kept, _ = _reduce_joern_findings([generic, external], 1)
+
+        assert kept == [external]
+
+    def test_reducer_keeps_external_caller_before_generic_parameter(self) -> None:
+        caller_external = Finding(
+            file_path="app/helpers.py",
+            line_start=20,
+            line_end=20,
+            rule_id="joern-taint-reachability",
+            message="caller",
+            metadata={
+                "sinkKind": "direct",
+                "sourceKind": "parameter",
+                "sinkCode": "subprocess.run(cmd, shell=True)",
+                "shell_true": True,
+                "callerChain": [
+                    {
+                        "file": "app/views.py",
+                        "line": "10",
+                        "code": "run(request.args['cmd'])",
+                        "argumentCode": "request.args['cmd']",
+                        "matchesExternal": True,
+                    }
+                ],
+            },
+        )
+        generic = Finding(
+            file_path="app/helpers.py",
+            line_start=30,
+            line_end=30,
+            rule_id="joern-taint-reachability",
+            message="generic",
+            metadata={
+                "sinkKind": "direct",
+                "sourceKind": "parameter",
+                "sinkCode": "subprocess.run(cmd, shell=True)",
+                "shell_true": True,
+            },
+        )
+
+        kept, _ = _reduce_joern_findings([generic, caller_external], 1)
+
+        assert kept == [caller_external]
+
+    def test_reducer_keeps_shell_true_external_before_literal_noise(self) -> None:
+        external = Finding(
+            file_path="app/views.py",
+            line_start=12,
+            line_end=12,
+            rule_id="joern-taint-reachability",
+            message="external",
+            metadata={
+                "sinkKind": "direct",
+                "sourceKind": "external",
+                "sinkCode": "subprocess.run(cmd, shell=True)",
+                "shell_true": True,
+                "originExternalSource": True,
+            },
+        )
+        literal_noise = Finding(
+            file_path="app/maintenance.py",
+            line_start=8,
+            line_end=8,
+            rule_id="joern-taint-reachability",
+            message="literal",
+            metadata={
+                "sinkKind": "direct",
+                "sourceKind": "catalog",
+                "sinkCode": "os.system('echo ok')",
+                "literal_command_like": True,
+            },
+        )
+
+        kept, _ = _reduce_joern_findings([literal_noise, external], 1)
+
+        assert kept == [external]
+
+    def test_high_risk_findings_kept_when_cap_exceeded(self) -> None:
+        high_risk = [
+            Finding(
+                file_path=f"app/risky_{idx}.py",
+                line_start=idx,
+                line_end=idx,
+                rule_id="joern-taint-reachability",
+                message="risk",
+                metadata={
+                    "sourceKind": "parameter",
+                    "sinkKind": "direct",
+                    "sinkCode": "subprocess.run(cmd, shell=True)",
+                    "shell_true": True,
+                },
+            )
+            for idx in range(10)
+        ]
+        low_risk = [
+            Finding(
+                file_path=f"app/noise_{idx}.py",
+                line_start=idx,
+                line_end=idx,
+                rule_id="joern-taint-reachability",
+                message="noise",
+                metadata={
+                    "sourceKind": "attribute",
+                    "sinkKind": "direct",
+                    "sinkCode": "subprocess.run(cmd)",
+                    "argv_list_like": True,
+                },
+            )
+            for idx in range(30)
+        ]
+
+        kept, metrics = _reduce_joern_findings(low_risk + high_risk, 20)
+
+        assert len(kept) == 20
+        assert all(f in kept for f in high_risk)
+        assert metrics["joern_high_risk_count"] == 10
+        assert metrics["joern_high_risk_kept"] == 10
+        assert metrics["joern_high_risk_dropped_when_overflow"] == 0
+
+    def test_high_risk_overflow_drops_lower_ranked_high_risk_only(self) -> None:
+        high_risk = [
+            Finding(
+                file_path=f"app/risky_{idx}.py",
+                line_start=idx,
+                line_end=idx,
+                rule_id="joern-taint-reachability",
+                message="risk",
+                metadata={
+                    "sourceKind": "parameter",
+                    "sinkKind": "direct",
+                    "sinkCode": "subprocess.run(cmd, shell=True)",
+                    "shell_true": True,
+                },
+            )
+            for idx in range(25)
+        ]
+        low_risk = [
+            Finding(
+                file_path="app/noise.py",
+                line_start=100,
+                line_end=100,
+                rule_id="joern-taint-reachability",
+                message="noise",
+                metadata={"sinkCode": "subprocess.run(cmd)"},
+            )
+        ]
+
+        kept, metrics = _reduce_joern_findings(low_risk + high_risk, 20)
+
+        assert len(kept) == 20
+        assert all(f in high_risk for f in kept)
+        assert metrics["joern_high_risk_count"] == 25
+        assert metrics["joern_high_risk_kept"] == 20
+        assert metrics["joern_high_risk_dropped_when_overflow"] == 5
+
+
+def _high_risk_finding(idx: int) -> Finding:
+    return Finding(
+        file_path=f"app/risky_{idx}.py",
+        line_start=idx,
+        line_end=idx,
+        rule_id="joern-taint-reachability",
+        message="risk",
+        metadata={
+            "sourceKind": "parameter",
+            "sinkKind": "direct",
+            "sinkCode": "subprocess.run(cmd, shell=True)",
+            "shell_true": True,
+        },
+    )
+
+
+def _low_risk_finding(idx: int) -> Finding:
+    return Finding(
+        file_path=f"app/noise_{idx}.py",
+        line_start=idx,
+        line_end=idx,
+        rule_id="joern-taint-reachability",
+        message="noise",
+        metadata={
+            "sourceKind": "attribute",
+            "sinkKind": "direct",
+            "sinkCode": "subprocess.run(cmd)",
+            "argv_list_like": True,
+        },
+    )
+
+
+class TestTwoBudgetReducer:
+    """Two-budget cap (high-risk + low-risk independently capped)."""
+
+    def test_keeps_high_risk_within_cap(self) -> None:
+        high_risk = [_high_risk_finding(i) for i in range(30)]
+        low_risk = [_low_risk_finding(i) for i in range(30)]
+
+        kept, metrics = _reduce_joern_findings(
+            low_risk + high_risk, None, high_risk_cap=20, low_risk_cap=10
+        )
+
+        assert len(kept) == 30
+        assert sum(1 for f in kept if f in high_risk) == 20
+        assert sum(1 for f in kept if f in low_risk) == 10
+        assert metrics["joern_high_risk_count"] == 30
+        assert metrics["joern_high_risk_kept"] == 20
+        assert metrics["joern_high_risk_dropped_when_overflow"] == 10
+        assert metrics["joern_low_risk_count"] == 30
+        assert metrics["joern_low_risk_kept"] == 10
+        assert metrics["joern_low_risk_dropped_when_overflow"] == 20
+
+    def test_falls_back_to_single_cap_when_unset(self) -> None:
+        high_risk = [_high_risk_finding(i) for i in range(10)]
+        low_risk = [_low_risk_finding(i) for i in range(30)]
+
+        kept, metrics = _reduce_joern_findings(low_risk + high_risk, 20)
+
+        assert len(kept) == 20
+        assert sum(1 for f in kept if f in high_risk) == 10
+        assert metrics["joern_high_risk_kept"] == 10
+        assert metrics["joern_high_risk_dropped_when_overflow"] == 0
+        assert metrics["joern_high_risk_cap"] is None
+        assert metrics["joern_low_risk_cap"] is None
+
+    def test_low_risk_only_when_no_high_risk(self) -> None:
+        low_risk = [_low_risk_finding(i) for i in range(50)]
+
+        kept, metrics = _reduce_joern_findings(
+            low_risk, None, high_risk_cap=20, low_risk_cap=10
+        )
+
+        assert len(kept) == 10
+        assert metrics["joern_high_risk_count"] == 0
+        assert metrics["joern_high_risk_kept"] == 0
+        assert metrics["joern_low_risk_count"] == 50
+        assert metrics["joern_low_risk_kept"] == 10
+        assert metrics["joern_low_risk_dropped_when_overflow"] == 40
+
+    def test_records_caps_in_metrics(self) -> None:
+        high_risk = [_high_risk_finding(i) for i in range(5)]
+
+        _, metrics = _reduce_joern_findings(
+            high_risk, None, high_risk_cap=20, low_risk_cap=10
+        )
+
+        assert metrics["joern_high_risk_cap"] == 20
+        assert metrics["joern_low_risk_cap"] == 10
+        assert metrics["joern_candidate_reducer_cap"] == 30
+
+    def test_reducer_disabled_returns_all(self) -> None:
+        high_risk = [_high_risk_finding(i) for i in range(5)]
+        low_risk = [_low_risk_finding(i) for i in range(5)]
+
+        kept, metrics = _reduce_joern_findings(
+            high_risk + low_risk,
+            None,
+            enabled=False,
+            high_risk_cap=20,
+            low_risk_cap=10,
+        )
+
+        assert len(kept) == 10
+        assert metrics["joern_high_risk_dropped_when_overflow"] == 0
+        assert metrics["joern_low_risk_dropped_when_overflow"] == 0

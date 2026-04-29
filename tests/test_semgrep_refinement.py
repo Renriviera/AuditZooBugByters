@@ -89,21 +89,21 @@ class TestApplyRefinement:
         rule = rules[0]
         assert rule["id"] == "cwe78-os-system"
         patterns = rule["patterns"]
-        assert any("pattern-not" in p for p in patterns), (
-            "patched rule must include the new pattern-not"
-        )
+        assert any(
+            "pattern-not" in p for p in patterns
+        ), "patched rule must include the new pattern-not"
 
     def test_refine_without_target_recovers_id_from_patch(self) -> None:
         """The 20260422 regression: LLM emits refine+valid_yaml+empty target."""
         arm = SemgrepArm(rules_yaml=_SEED_YAML)
         before = arm.rules_yaml
         status = arm.apply_refinement("refine", _PATCH_REFINE, target_rule_id="")
-        assert status == "refine_replaced", (
-            "empty target_rule_id must be recovered from the patch's id:"
-        )
-        assert arm.rules_yaml != before, (
-            "rules_yaml must actually change when the patch modifies the rule"
-        )
+        assert (
+            status == "refine_replaced"
+        ), "empty target_rule_id must be recovered from the patch's id:"
+        assert (
+            arm.rules_yaml != before
+        ), "rules_yaml must actually change when the patch modifies the rule"
         loaded = yaml.safe_load(arm.rules_yaml)
         assert len(loaded["rules"]) == 1
         assert any("pattern-not" in p for p in loaded["rules"][0]["patterns"])
@@ -168,9 +168,7 @@ class _ScriptedLLM:
 
     usage = _Usage()
 
-    async def chat_json(
-        self, system_prompt: str, user_prompt: str
-    ) -> dict[str, Any]:
+    async def chat_json(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
         return self.response
 
 
@@ -194,9 +192,9 @@ async def test_refine_semgrep_backfills_target_rule_id() -> None:
         triage_summary={"tp": 1, "fp": 0, "uncertain": 0},
     )
     assert ref.action == RefinementAction.REFINE
-    assert ref.target_rule_id == "cwe78-os-system", (
-        "target_rule_id must be recovered from the patch's id: field"
-    )
+    assert (
+        ref.target_rule_id == "cwe78-os-system"
+    ), "target_rule_id must be recovered from the patch's id: field"
 
 
 @pytest.mark.asyncio
@@ -218,6 +216,89 @@ async def test_refine_semgrep_preserves_explicit_target_rule_id() -> None:
     )
     assert ref.target_rule_id == "cwe78-os-system"
     assert ref.action == RefinementAction.REFINE
+
+
+@pytest.mark.asyncio
+async def test_refine_semgrep_parses_structured_taint_edits() -> None:
+    llm = _ScriptedLLM(
+        response={
+            "action": "refine",
+            "target_rule_id": "cwe78-os-system",
+            "add_source_patterns": [
+                "request.query_params.get(...)",
+                "request.query_params.get(...)",
+            ],
+            "add_sanitizer_patterns": "allowlisted_command(...)",
+            "rationale": "Add FastAPI and allowlist handling.",
+        }
+    )
+    agent = RefinementAgent(llm=llm)
+    ref = await agent.refine_semgrep(
+        rule_yaml=_SEED_YAML,
+        file_path="x.py",
+        line_number=1,
+        code_snippet="os.system(x)",
+        triage_summary={"tp": 0, "fp": 1, "uncertain": 0},
+    )
+    assert ref.action == RefinementAction.REFINE
+    assert ref.target_rule_id == "cwe78-os-system"
+    assert ref.add_source_patterns == ["request.query_params.get(...)"]
+    assert ref.add_sanitizer_patterns == ["allowlisted_command(...)"]
+    assert ref.rationale == "Add FastAPI and allowlist handling."
+
+
+def test_apply_structured_source_and_sanitizer_edits() -> None:
+    seed = """\
+rules:
+  - id: cwe78-os-system
+    mode: taint
+    pattern-sources:
+      - pattern: sys.argv
+    pattern-sinks:
+      - pattern: os.system($CMD)
+    pattern-sanitizers:
+      - pattern: shlex.quote(...)
+    message: os.system taint
+    languages: [python]
+    severity: ERROR
+"""
+    arm = SemgrepArm(rules_yaml=seed)
+    status = arm.apply_refinement(
+        "refine",
+        "",
+        "cwe78-os-system",
+        add_source_patterns=["request.query_params.get(...)"],
+        add_sanitizer_patterns=["allowlisted_command(...)"],
+    )
+    assert status == "structured_sources_added_sanitizers_added"
+    loaded = yaml.safe_load(arm.rules_yaml)
+    rule = loaded["rules"][0]
+    sources = [item["pattern"] for item in rule["pattern-sources"]]
+    sanitizers = [item["pattern"] for item in rule["pattern-sanitizers"]]
+    assert "request.query_params.get(...)" in sources
+    assert "allowlisted_command(...)" in sanitizers
+
+
+def test_apply_structured_duplicate_is_explicit_noop() -> None:
+    seed = """\
+rules:
+  - id: cwe78-os-system
+    mode: taint
+    pattern-sources:
+      - pattern: sys.argv
+    pattern-sinks:
+      - pattern: os.system($CMD)
+    message: os.system taint
+    languages: [python]
+    severity: ERROR
+"""
+    arm = SemgrepArm(rules_yaml=seed)
+    before = arm.rules_yaml
+    status = arm.apply_refinement(
+        "refine", "", "cwe78-os-system", add_source_patterns=["sys.argv"]
+    )
+    assert status == "noop_duplicate"
+    assert arm.rules_yaml == before
 
 
 def test_extract_rule_id_shapes() -> None:

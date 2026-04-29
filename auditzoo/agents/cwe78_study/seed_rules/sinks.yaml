@@ -1,4 +1,4 @@
-# Command-execution sink APIs for CWE-78 detection (15 APIs).
+# Command-execution sink APIs for CWE-78 detection (43 APIs).
 
 sinks:
   - api: "os.system"
@@ -7,10 +7,70 @@ sinks:
   - api: "os.popen"
     severity: critical
     shell_param: false
+  - api: "os.popen2"
+    severity: high
+    shell_param: false
+    legacy: true
+  - api: "os.popen3"
+    severity: high
+    shell_param: false
+    legacy: true
+  - api: "os.popen4"
+    severity: high
+    shell_param: false
+    legacy: true
+  - api: "os.execv"
+    severity: high
+    shell_param: false
+  - api: "os.execve"
+    severity: high
+    shell_param: false
   - api: "os.execvp"
     severity: high
     shell_param: false
   - api: "os.execvpe"
+    severity: high
+    shell_param: false
+  - api: "os.execl"
+    severity: high
+    shell_param: false
+  - api: "os.execle"
+    severity: high
+    shell_param: false
+  - api: "os.execlp"
+    severity: high
+    shell_param: false
+  - api: "os.execlpe"
+    severity: high
+    shell_param: false
+  - api: "os.spawnv"
+    severity: high
+    shell_param: false
+  - api: "os.spawnve"
+    severity: high
+    shell_param: false
+  - api: "os.spawnvp"
+    severity: high
+    shell_param: false
+  - api: "os.spawnvpe"
+    severity: high
+    shell_param: false
+  - api: "os.spawnl"
+    severity: high
+    shell_param: false
+  - api: "os.spawnle"
+    severity: high
+    shell_param: false
+  - api: "os.spawnlp"
+    severity: high
+    shell_param: false
+  - api: "os.spawnlpe"
+    severity: high
+    shell_param: false
+  - api: "asyncio.create_subprocess_shell"
+    severity: critical
+    shell_param: false
+  - api: "asyncio.create_subprocess_exec"
     severity: high
     shell_param: false
   - api: "subprocess.run"
@@ -20,6 +80,9 @@ sinks:
     severity: critical
     shell_param: true
   - api: "subprocess.Popen"
+    severity: critical
+    shell_param: true
+  - api: "Popen"
     severity: critical
     shell_param: true
   - api: "subprocess.check_output"
@@ -45,7 +108,43 @@ sinks:
   - api: "pty.spawn"
     severity: high
     shell_param: false
+  - api: "pexpect.spawn"
+    severity: high
+    shell_param: false
+    framework: pexpect
+  - api: "pexpect.run"
+    severity: high
+    shell_param: false
+    framework: pexpect
+  - api: "pexpect.runu"
+    severity: high
+    shell_param: false
+    framework: pexpect
+  - api: "paramiko.SSHClient.exec_command"
+    severity: high
+    shell_param: false
+    framework: paramiko
   - api: "fabric.run"
     severity: medium
     shell_param: false
     framework: fabric
+  - api: "fabric.Connection.run"
+    severity: medium
+    shell_param: false
+    framework: fabric
+  - api: "fabric.Connection.sudo"
+    severity: medium
+    shell_param: false
+    framework: fabric
+  - api: "fabric.Connection.local"
+    severity: medium
+    shell_param: false
+    framework: fabric
+  - api: "invoke.run"
+    severity: medium
+    shell_param: false
+    framework: invoke
+  - api: "invoke.sudo"
+    severity: medium
+    shell_param: false
+    framework: invoke

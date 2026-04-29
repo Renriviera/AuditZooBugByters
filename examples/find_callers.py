@@ -94,7 +94,7 @@ class CallerFinderAgent(BaseAnalysisAgent):
         # Register FunctionSummaryAgent as a sub-agent
         print("Registering SubAgent FunctionSummaryAgent...")
         model_client = OpenAIChatCompletionClient(
-            model="gpt-4o-mini",
+            model="gpt-5.4-mini",
         )
 
         await FunctionSummaryAgent.register_all(

@@ -22,6 +22,7 @@ class RefinementAction(str, Enum):
     KEEP = "keep"
     REFINE = "refine"
     ADD_RULE = "add_rule"
+    DISABLE_RULE = "disable_rule"
 
 
 class HelperRole(str, Enum):
@@ -97,13 +98,33 @@ class SemgrepRefinement:
     action: RefinementAction
     rule_yaml: str = ""
     target_rule_id: str = ""
+    add_source_patterns: list[str] = field(default_factory=list)
+    add_sanitizer_patterns: list[str] = field(default_factory=list)
+    add_pattern_not: list[str] = field(default_factory=list)
+    disable_rule: bool = False
+    rationale: str = ""
 
 
 @dataclass
 class JoernHelperClassification:
-    """LLM Call 1 output for the Joern arm."""
+    """LLM Call 1 output for the Joern arm.
+
+    ``classifications`` maps candidate function name to the LLM-assigned
+    ``HelperRole``.  ``evidence`` and ``confidence`` are optional and only
+    populated when the LLM fills out the v2 schema; downstream code must
+    treat them as best-effort metadata rather than required fields, since
+    older / smaller models may continue to emit only ``classifications``.
+
+    ``evidence[name]`` is expected to be a small dict of the shape::
+
+        {"quote": "<verbatim line>", "file": "<path>", "line": <int>}
+
+    ``confidence[name]`` is a float in ``[0.0, 1.0]``.
+    """
 
     classifications: dict[str, HelperRole] = field(default_factory=dict)
+    evidence: dict[str, dict[str, Any]] = field(default_factory=dict)
+    confidence: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass

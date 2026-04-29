@@ -75,3 +75,9 @@ data/advisory-database/
 
 # Shallow repo clones used during dataset collection
 benchmark/python/cwe78_cves/repos/
+
+# Autogrep repo cache (cloned OSS sources used by autogrep sweeps)
+results/**/autogrep_repo_cache/
+
+# Local agent scratch files
+.run_g_dir

@@ -1,0 +1,291 @@
+Semgrep Sweep and Patch-Derived Rule Generation Summary - 2026-04-26
+
+Scope
+=====
+
+This note summarizes the Semgrep-related experiments performed in this branch:
+the original Semgrep sweep, the patched-findings rule audit, the GPT 5.4 mini
+Semgrep diagnostic loop, and the attempted patch-derived rule generation loop.
+The goal was to determine whether the Semgrep pipeline could be improved enough
+to justify larger frontier-model spending.
+
+Important: the GPT 5.4 mini API key was present in the local working copy of
+splitEvaluations/run_patch_derived_semgrep_loop.py when the latest run was
+started. Archived copies are redacted and should not contain the key.
+
+What Was Tried
+==============
+
+1. Baseline Semgrep sweep and rule refinement
+
+The Semgrep arm was run on CWE-78 benchmark CVEs using the seed rule pack in
+auditzoo/agents/cwe78_study/seed_rules/cwe78_semgrep.yaml. The pipeline used
+Semgrep findings as candidates, then tried LLM-assisted refinement across k
+iterations.
+
+The main result was that the pipeline was operational but analytically weak.
+Candidate generation was sparse for some CVEs, noisy for others, and refinement
+did not materially alter the findings. The findings hashes were often invariant
+across k, showing that refinement did not change detection behavior even when
+rules appeared to mutate.
+
+2. Patched-findings audit
+
+A diagnostic audit was added to compare vulnerable and patched findings without
+using heldout patched information for reported heldout accuracy. This was meant
+to answer whether rules were learning vulnerability semantics or merely matching
+generic dangerous sinks.
+
+The audit showed the latter. On the dev diagnostic side, many findings persisted
+after the patch:
+
+- Dev diagnostics covered 41 CVEs.
+- Vulnerable candidates: 481.
+- Patched candidates: 476.
+- TP: 5.
+- FP: 476.
+- FN: 269.
+
+The top problematic rules were broad sink matchers:
+
+- cwe78-os-system: 295 vulnerable candidates, 293 patched candidates, 3 TP,
+  292 FP, patched persistence rate about 0.993.
+- cwe78-sub-popen: 57 vulnerable candidates, 56 patched candidates, 1 TP,
+  56 FP, patched persistence rate about 0.982.
+- cwe78-sub-run: 33 vulnerable candidates, 33 patched candidates, 0 TP,
+  33 FP, patched persistence rate 1.0.
+- cwe78-concat: 29 vulnerable candidates, 29 patched candidates, 0 TP,
+  29 FP, patched persistence rate 1.0.
+
+Interpretation: many rules fire on APIs that remain in the patched program
+because the patch adds validation, quoting, allowlists, argument separators, or
+safer construction around the same sink. A sink-only rule therefore continues to
+fire even after the vulnerability has been fixed.
+
+3. GPT 5.4 mini Semgrep diagnostic
+
+A 10-CVE GPT 5.4 mini diagnostic script was created:
+
+- splitEvaluations/run_gpt54mini_semgrep_diagnostic.py
+- tests/test_gpt54mini_diagnostic_script.py
+
+It used GPT 5.4 mini for the LLM side and logged rule/refinement diagnostics.
+The latest completed diagnostic was:
+
+- results/gpt54mini_semgrep/20260426_025756/diagnostic_summary.json
+
+Key results:
+
+- 10 CVEs evaluated.
+- k=0: TP 5, FP 13, FN 59, candidates 19.
+- k=1: TP 5, FP 12, FN 59, candidates 19.
+- k=2: TP 5, FP 13, FN 59, candidates 19.
+- k=3: TP 5, FP 12, FN 59, candidates 19.
+- Zero-candidate CVEs: CVE-2021-21386 and CVE-2022-24065.
+- Candidate-but-no-TP CVEs: CVE-2017-16667, CVE-2025-47782,
+  CVE-2026-33718, CVE-2026-34935, CVE-2026-34955.
+- Findings invariance: 10/10 CVEs had invariant findings across k.
+- LLM usage: 270,960 total tokens across 100 calls.
+- Ready for full frontier sweep: false.
+
+Although GPT 5.4 mini produced better structured output than earlier local
+model attempts, the rule changes still did not move the actual candidate set.
+The bottleneck was not only model strength. It was the candidate/rule design:
+Semgrep rules were still too broad, too sink-centric, or too hard to generalize
+from the weak feedback available to the refinement loop.
+
+4. Patch-derived rule generation loop
+
+A new script was implemented:
+
+- splitEvaluations/run_patch_derived_semgrep_loop.py
+- tests/test_patch_derived_semgrep_loop.py
+
+The intended workflow:
+
+- Use 5 dev CVEs only for rule generation and validation.
+- Generate structured Semgrep taint rule specs from vulnerable/patched diffs
+  using GPT 5.4 mini.
+- Convert structured specs into YAML.
+- Validate YAML with semgrep --validate.
+- Run each generated rule on the dev vulnerable and patched commits.
+- Accept only rules that match near the dev vulnerable ground-truth line.
+- Freeze accepted rules.
+- Evaluate the frozen rule pack only on a separate 20-CVE eval set.
+
+The plan's leakage guardrails were implemented:
+
+- PATCH_RULE_DEV_CVES has 5 CVEs.
+- PATCH_RULE_EVAL_CVES has 20 CVEs.
+- The script checks uniqueness and dev/eval disjointness.
+- run_config.json stores dev_cves, eval_cves, leakage_check_passed, and
+  dev_eval_overlap.
+- The dev CVEs are never counted as evaluation performance.
+
+Focused tests passed:
+
+- ruff check splitEvaluations/run_patch_derived_semgrep_loop.py
+  tests/test_patch_derived_semgrep_loop.py splitEvaluations/readiness_config.py
+- python -m pytest tests/test_patch_derived_semgrep_loop.py -q
+- Result: 7 passed.
+
+Latest patch-derived run:
+
+- results/patch_derived_semgrep/20260426_161242/
+
+This run was stopped because it reached evaluation with an empty accepted rule
+pack. Continuing would only produce Semgrep errors against an empty rules list.
+
+Observed patch-derived run behavior:
+
+- CVE-2021-43857 clone timed out while cloning Gerapy/Gerapy, so it produced no
+  generated rules.
+- GPT calls succeeded for the remaining dev CVEs.
+- GPT generated 7 candidate rules:
+  - cwe78-derived-python-os-system-fstring-taint
+  - cwe78-derived-python-popen-shell-true-tainted-string
+  - cwe78-derived-python-popen-fstring-shell-true
+  - cwe78-derived-python-command-builder-to-shell
+  - cwe78-derived-python-os-system-concat
+  - cwe78-derived-python-shell-command-string
+  - cwe78-derived-python-subprocess-check-output-untrusted-arg
+- All 7 were rejected before acceptance.
+- accepted_rules/patch_derived_rules.yaml contained an empty rule pack.
+- No valid eval_summary.json was produced because the run was killed once it
+  was clear evaluation was operating on an empty accepted pack.
+
+Problems Found
+==============
+
+1. Validation command for generated YAML was wrong
+
+The script attempted to validate YAML with:
+
+  semgrep --validate --config -
+
+The installed Semgrep invocation did not treat '-' as stdin here. The validation
+error included:
+
+  WARNING: unable to find a config; path `-` does not exist
+
+This caused every generated rule to be marked invalid_yaml, even when some
+rules may have been structurally close enough to inspect further.
+
+Fix: write generated YAML to a temporary file and run:
+
+  semgrep --validate --config <tempfile>
+
+2. Overfit rejection incorrectly rejected all generated rules with source_cve
+metadata
+
+The YAML conversion placed the dev CVE in metadata:
+
+  metadata:
+    source_cve: CVE-...
+
+The overfit rejection then scanned the full YAML payload for CVE IDs and marked
+every generated rule as contains_cve_id. This conflicts with the audit need to
+trace rule provenance.
+
+Fix: either allow source_cve in metadata while banning CVE IDs in patterns,
+messages, and rule ids, or move provenance out of the YAML into dev_validation
+and accepted-rule manifest files.
+
+3. Empty accepted rule pack was still evaluated
+
+After all generated rules were rejected, the script wrote:
+
+  rules: []
+
+and proceeded to evaluation. Semgrep then emitted repeated code 7 warnings.
+
+Fix: if accepted_rule_count == 0, write dev_validation.json,
+rejected_rules.json, accepted_rules/patch_derived_rules.yaml, and a terminal
+summary, then abort before eval with a clear "no accepted rules" status. Do not
+scan the 20-CVE eval set with an empty rule pack.
+
+4. One dev CVE clone timed out
+
+CVE-2021-43857 timed out during clone of Gerapy/Gerapy using the shared
+120-second clone limit. This reduced the effective dev generation set from 5 to
+4 CVEs for that run.
+
+Fix options:
+
+- Replace CVE-2021-43857 in PATCH_RULE_DEV_CVES with a smaller CVE.
+- Add clone retry and longer clone timeout for the patch-derived dev loop.
+- Prewarm/cache dev repositories before generation.
+
+5. GPT output still needs schema normalization
+
+The generated rules included concepts like "function parameter" as a source.
+That is not a valid or useful Semgrep pattern as emitted. The YAML converter
+currently trusts GPT patterns too much.
+
+Fix: add a normalization layer before YAML validation:
+
+- Drop vague phrases like "function parameter".
+- Convert known source families to valid Python Semgrep patterns.
+- Keep only patterns that pass a small Semgrep syntax smoke check.
+- Use a curated base source/sink vocabulary and let GPT select from it rather
+  than invent arbitrary Semgrep syntax.
+
+Results and Interpretation
+==========================
+
+The Semgrep pipeline is functional as an execution pipeline, but the current
+rule learning strategy is not yet effective:
+
+- The baseline rules mostly match dangerous APIs, not vulnerability conditions.
+- Patched findings persist at very high rates.
+- GPT 5.4 mini refinement did not change findings across CVEs.
+- Patch-derived generation produced plausible rule ideas, but the first
+  implementation rejected all candidates due to validation/provenance bugs and
+  weak schema normalization.
+
+This means the latest Semgrep work has not produced a reliable bug-finding
+pipeline yet. It has produced useful diagnostics and a reasonable experimental
+framework, but the rule-generation loop needs another engineering pass before
+spending more frontier-model credits on broad evaluation.
+
+Recommended Next Steps
+======================
+
+1. Fix patch-derived loop mechanics before another paid run:
+
+- Validate Semgrep YAML through a temporary file, not stdin "-".
+- Do not reject source_cve metadata as overfit.
+- Abort before eval if zero rules are accepted.
+- Add tests for those three behaviors.
+
+2. Make GPT produce constrained rule specs:
+
+- Give GPT allowed source and sink families.
+- Ask GPT to choose source_family/sink_family plus optional custom patterns,
+  rather than emitting raw Semgrep patterns only.
+- Normalize source families to vetted Semgrep patterns.
+
+3. Replace or pre-cache the dev CVE that timed out:
+
+- CVE-2021-43857 should be replaced in the 5-CVE dev set unless clone behavior
+  is being tested.
+
+4. Rerun only the 5-CVE generation and dev validation:
+
+- Do not run the 20-CVE eval set until at least one rule validates and catches
+  its dev vulnerable commit.
+
+5. Treat the 20-CVE eval result as the first meaningful number:
+
+- Once accepted rules are frozen, run the 20-CVE eval exactly once.
+- Do not inspect or tune using eval patched findings before reporting the
+  result.
+
+Bottom Line
+===========
+
+The Semgrep direction should not be abandoned, but it is not ready for a large
+frontier-model sweep. The best next investment is a small patch-derived loop
+fix: make validation correct, preserve provenance without triggering overfit
+rejection, constrain GPT outputs to known-good Semgrep pattern families, and
+only then spend credits on generation plus the heldout 20-CVE evaluation.

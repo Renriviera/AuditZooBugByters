@@ -1,0 +1,289 @@
+Semgrep Rule Refinement Issues - 2026-04-26
+===========================================
+
+Summary
+-------
+
+The evaluation pipeline is now operational: Semgrep scans run, LLM calls
+complete, patched scans run, rules-hash audits are produced, and diagnostic
+artifacts are written. The main blocker is not execution plumbing. The blocker
+is that Semgrep rule refinement is not meaningfully improving candidate
+generation or final TP/FP/FN outcomes.
+
+Both the local Qwen run and the GPT 5.4 mini diagnostic run show the same core
+pattern:
+
+- The candidate set is nearly or completely invariant across k iterations.
+- Rule refinement often produces no rule change.
+- Even when structured changes are accepted, they do not materially change
+  findings.
+- Many false negatives are never surfaced as Semgrep candidates, so LLM triage
+  cannot recover them.
+
+
+Recent Qwen Semgrep Readiness Results
+-------------------------------------
+
+Latest Qwen Semgrep readiness sweep:
+
+- Results path: results/semgrep/20260425_180645/results.json
+- Model: Qwen/Qwen2.5-Coder-7B-Instruct
+- CVEs completed: 13
+- Iterations: k=0..3
+- Patched scans: enabled
+
+Per-iteration aggregate metrics were unchanged:
+
+- k=0: 5 TP / 14 FP / 91 FN, 19 candidates
+- k=1: 5 TP / 14 FP / 91 FN, 19 candidates
+- k=2: 5 TP / 14 FP / 91 FN, 19 candidates
+- k=3: 5 TP / 14 FP / 91 FN, 19 candidates
+
+Rules-hash audit:
+
+- Semgrep iteration rows: 52
+- Refine actions total: 24
+- Refine actions that were no-ops: 24
+- Refine no-op rate: 100%
+- CVEs with k-invariant findings: 13/13
+- Findings invariance: 100%
+
+Interpretation: Qwen was able to emit refinement actions, but those actions did
+not produce effective Semgrep rule mutations. The k-loop was mostly cosmetic.
+
+
+Recent GPT 5.4 Mini Diagnostic Results
+--------------------------------------
+
+Latest GPT 5.4 mini Semgrep diagnostic run:
+
+- Results path: results/gpt54mini_semgrep/20260426_025756/results.json
+- Diagnostic summary: results/gpt54mini_semgrep/20260426_025756/diagnostic_summary.json
+- Model: gpt-5.4-mini
+- CVEs completed: 10
+- Iterations: k=0..3
+- Patched scans: enabled
+
+Per-iteration aggregate metrics:
+
+- k=0: 5 TP / 13 FP / 59 FN, 19 candidates
+- k=1: 5 TP / 12 FP / 59 FN, 19 candidates
+- k=2: 5 TP / 13 FP / 59 FN, 19 candidates
+- k=3: 5 TP / 12 FP / 59 FN, 19 candidates
+
+Rules-hash audit:
+
+- Semgrep iteration rows: 40
+- Refine actions total: 11
+- Refine actions that were no-ops: 9
+- Refine no-op rate: 81.82%
+- CVEs with k-invariant findings: 10/10
+- Findings invariance: 100%
+
+Diagnostic summary:
+
+- Zero-candidate CVEs:
+  - CVE-2021-21386
+  - CVE-2022-24065
+
+- Candidate-but-no-TP CVEs:
+  - CVE-2017-16667
+  - CVE-2025-47782
+  - CVE-2026-33718
+  - CVE-2026-34935
+  - CVE-2026-34955
+
+- Refinement apply statuses:
+  - keep: 13
+  - noop_duplicate: 5
+  - noop_empty_patch: 4
+  - structured_sanitizers_added: 1
+  - structured_sources_added: 1
+
+Readiness gates failed:
+
+- refine_no_op_rate_lt_0_5
+- findings_changed_for_some_cve
+
+Interpretation: GPT 5.4 mini improved neither recall nor candidate diversity.
+It did produce two structured edits, but the findings remained invariant across
+all CVEs. This suggests the issue is not simply "use a stronger model"; the
+current refinement loop is not giving the model the right task or validation
+feedback.
+
+
+Main Rule Refinement Failure Modes
+----------------------------------
+
+1. Pattern-not suggestions are unusable for taint rules
+
+The LLM frequently proposes file-specific or line-specific pattern-not edits,
+for example excluding one path or one line. The current Semgrep rules are mostly
+taint-mode rules, and the rule applier intentionally ignores pattern-not edits
+for taint rules:
+
+  "Ignoring add_pattern_not for taint rule ...; prefer sanitizer/source edits"
+
+This is correct behavior for generalization, but it means many LLM refinement
+actions are non-actionable.
+
+
+2. The model often proposes overly specific exclusions
+
+Many suggestions target a specific file, line, or local expression. These may
+reduce one observed false positive, but they do not generalize across projects
+or improve benchmark-level detection. They also risk overfitting the dev set.
+
+
+3. Candidate generation recall is too low
+
+Several CVEs produce zero candidates. If Semgrep emits no finding, LLM triage
+and refinement cannot classify or rescue the missed bug. This is a source/sink
+coverage problem, not a model-verdict problem.
+
+
+4. Accepted structured edits do not change findings
+
+GPT 5.4 mini produced a small number of accepted structured edits, including
+source and sanitizer additions. However, findings remained 100% invariant. This
+means the accepted edits either did not match the relevant code, were not in the
+right rule, or were not enough to connect source-to-sink flows.
+
+
+5. The k-loop is not currently learning
+
+The intended loop is:
+
+  scan -> triage -> refine rules -> rescan -> changed findings
+
+Observed behavior is closer to:
+
+  scan -> triage -> no-op or ineffective refinement -> same findings
+
+As long as findings hashes remain invariant, additional k iterations mostly
+spend tokens without improving detection.
+
+
+6. Semgrep may be too shallow as the only static engine
+
+Semgrep is useful as a fast syntactic and lightweight taint scanner, but many
+CWE-78 CVEs require deeper reasoning:
+
+- cross-file dataflow
+- framework-specific source modeling
+- command construction through helper functions
+- sanitizer and allowlist semantics
+- repository-level context
+- indirect wrappers around subprocess/os APIs
+
+These cases are difficult for Semgrep-only rules to capture with high recall
+and acceptable precision.
+
+
+Comparison: Qwen vs GPT 5.4 Mini
+--------------------------------
+
+Qwen:
+
+- Lower-cost/local model.
+- Produced refinement actions.
+- 100% refinement no-op rate.
+- 100% findings invariance.
+- Did not improve across k.
+
+GPT 5.4 mini:
+
+- API/model path works after fixing max_completion_tokens compatibility.
+- Better at returning valid structured outputs in some cases.
+- Produced two accepted structured edits.
+- Still had 81.82% refinement no-op rate.
+- Still had 100% findings invariance.
+- Did not improve TP or FN across k.
+
+Conclusion: GPT 5.4 mini is better at following the structured interface, but
+the pipeline does not yet convert that capability into better Semgrep findings.
+The bottleneck is rule-generation/refinement design and Semgrep candidate
+coverage, not simply model strength.
+
+
+Implications for Frontier Model Spending
+----------------------------------------
+
+The current evidence does not justify a broad frontier-model sweep. A stronger
+model will still be limited by:
+
+- candidates that Semgrep never emits
+- a refinement interface that accepts few useful edits
+- lack of precise symbolic feedback about why a rule failed
+- Semgrep's limited ability to express deeper repository-wide dataflow
+
+Frontier credits are better spent on targeted diagnostics:
+
+- generating candidate source/sink/sanitizer specifications from patches
+- explaining false negatives from vulnerable diffs
+- proposing new rules from vulnerable/fixed examples
+- validating generated rules against vulnerable and patched commits
+
+They should not yet be spent on a large evaluation sweep that repeatedly
+triages unchanged candidate sets.
+
+
+Recommended Next Steps
+----------------------
+
+1. Fix the diagnostic summary bug
+
+diagnostic_summary.json reported refine_actions_total as 0 while
+rules_hash_audit.json correctly reported 11. The audit value should be treated
+as the source of truth, but the summary aggregation should be fixed.
+
+
+2. Build a false-negative audit
+
+For each CVE with FN or zero candidates, inspect the vulnerable diff and record:
+
+- Was there a known sink?
+- Was there a source pattern missing?
+- Was the source/sink connected through a helper?
+- Was the command built indirectly?
+- Was the vulnerable line outside Semgrep's current match model?
+
+
+3. Replace reactive refinement with patch-derived rule generation
+
+The current loop refines after seeing scanner findings. This cannot fix
+zero-candidate CVEs. A better loop is:
+
+  vulnerable diff + patched diff -> generate Semgrep rule -> validate on
+  vulnerable commit -> validate on patched commit -> keep only rules that pass
+
+This is closer to Autogrep-style Semgrep rule generation and is more likely to
+improve candidate generation.
+
+
+4. Add a symbolic validation loop
+
+Rule changes should be accepted only if they produce useful behavior:
+
+- detect a vulnerable commit finding near ground truth
+- avoid firing on the patched commit
+- avoid file/line-specific overfitting unless explicitly marked dev-only
+- change findings in an explainable way
+
+
+5. Keep Semgrep as a fast candidate generator, not the only long-term engine
+
+Semgrep is valuable for cheap first-pass scanning, but the results suggest it
+should be paired with Joern, CodeQL-style dataflow, or another richer symbolic
+analysis layer if the goal is stronger CWE-78 recall.
+
+
+Bottom Line
+-----------
+
+The pipeline is functional, but Semgrep rule refinement is not yet useful.
+Qwen and GPT 5.4 mini both failed to improve findings across k. GPT 5.4 mini
+showed somewhat better structured-output behavior, but not better detection.
+
+The next research/engineering step should be validated rule generation from
+patches and false-negative audits, not a broad frontier-model sweep.

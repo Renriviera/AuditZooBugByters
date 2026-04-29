@@ -47,6 +47,36 @@ def _extract_rule_id(rule_yaml: str) -> str:
         return str(loaded.get("id", "") or "")
     return ""
 
+
+def _string_list(value: Any) -> list[str]:
+    """Normalize an LLM JSON field into a de-duplicated list of strings."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        raw_items = [value]
+    elif isinstance(value, list):
+        raw_items = value
+    else:
+        return []
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in raw_items:
+        text = str(item or "").strip()
+        if text and text not in seen:
+            out.append(text)
+            seen.add(text)
+    return out
+
+
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "disable"}
+    return bool(value)
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -86,9 +116,7 @@ class RefinementAgent:
             common_fp_pattern=common_fp_pattern,
         )
         try:
-            data = await self._llm.chat_json(
-                SYSTEM_PROMPT_A_SEMGREP, user_prompt
-            )
+            data = await self._llm.chat_json(SYSTEM_PROMPT_A_SEMGREP, user_prompt)
         except (ValueError, Exception) as exc:
             logger.warning("Semgrep refinement LLM call failed: %s", exc)
             return SemgrepRefinement(action=RefinementAction.KEEP)
@@ -101,6 +129,11 @@ class RefinementAgent:
 
         rule_yaml = str(data.get("rule_yaml", "") or "")
         target_rule_id = str(data.get("target_rule_id", "") or "").strip()
+        add_source_patterns = _string_list(data.get("add_source_patterns"))
+        add_sanitizer_patterns = _string_list(data.get("add_sanitizer_patterns"))
+        add_pattern_not = _string_list(data.get("add_pattern_not"))
+        disable_rule = _as_bool(data.get("disable_rule", False))
+        rationale = str(data.get("rationale", "") or "").strip()
 
         # Back-fill ``target_rule_id`` from the YAML patch when the LLM
         # emits action=refine with a valid rule body but forgets the id.
@@ -120,6 +153,11 @@ class RefinementAgent:
             action=action,
             rule_yaml=rule_yaml,
             target_rule_id=target_rule_id,
+            add_source_patterns=add_source_patterns,
+            add_sanitizer_patterns=add_sanitizer_patterns,
+            add_pattern_not=add_pattern_not,
+            disable_rule=disable_rule,
+            rationale=rationale,
         )
 
     # ------------------------------------------------------------------
@@ -134,7 +172,14 @@ class RefinementAgent:
         current_sinks: list[str],
         current_sanitizers: list[str],
     ) -> JoernHelperClassification:
-        """Classify call-graph neighbors for taint-spec expansion."""
+        """Classify call-graph neighbors for taint-spec expansion.
+
+        v2 schema: the LLM is asked to return ``classifications``,
+        ``evidence``, and ``confidence``.  Older models (or transient
+        truncated responses) may emit only ``classifications`` — we treat
+        ``evidence``/``confidence`` as optional and ignore parse errors on
+        those fields rather than dropping the whole call.
+        """
         user_prompt = build_user_prompt_call1_joern(
             call_graph_neighborhood=call_graph_neighborhood,
             current_sources=current_sources,
@@ -142,19 +187,52 @@ class RefinementAgent:
             current_sanitizers=current_sanitizers,
         )
         try:
-            data = await self._llm.chat_json(
-                SYSTEM_PROMPT_A_JOERN, user_prompt
-            )
+            data = await self._llm.chat_json(SYSTEM_PROMPT_A_JOERN, user_prompt)
         except (ValueError, Exception) as exc:
             logger.warning("Joern helper-ID LLM call failed: %s", exc)
             return JoernHelperClassification()
 
-        raw_classes = data.get("classifications", {})
+        raw_classes = data.get("classifications", {}) if isinstance(data, dict) else {}
+        if not isinstance(raw_classes, dict):
+            raw_classes = {}
         classifications: dict[str, HelperRole] = {}
         for func_name, role_str in raw_classes.items():
             try:
-                classifications[func_name] = HelperRole(role_str)
+                classifications[str(func_name)] = HelperRole(str(role_str))
             except ValueError:
-                classifications[func_name] = HelperRole.UNRELATED
+                classifications[str(func_name)] = HelperRole.UNRELATED
 
-        return JoernHelperClassification(classifications=classifications)
+        raw_evidence = data.get("evidence", {}) if isinstance(data, dict) else {}
+        evidence: dict[str, dict[str, Any]] = {}
+        if isinstance(raw_evidence, dict):
+            for func_name, payload in raw_evidence.items():
+                if not isinstance(payload, dict):
+                    continue
+                quote = str(payload.get("quote", "") or "")
+                file_ = str(payload.get("file", "") or "")
+                line_raw = payload.get("line", 0) or 0
+                try:
+                    line = int(line_raw)
+                except (TypeError, ValueError):
+                    line = 0
+                evidence[str(func_name)] = {
+                    "quote": quote[:500],
+                    "file": file_,
+                    "line": line,
+                }
+
+        raw_confidence = data.get("confidence", {}) if isinstance(data, dict) else {}
+        confidence: dict[str, float] = {}
+        if isinstance(raw_confidence, dict):
+            for func_name, value in raw_confidence.items():
+                try:
+                    conf = float(value)
+                except (TypeError, ValueError):
+                    continue
+                confidence[str(func_name)] = max(0.0, min(1.0, conf))
+
+        return JoernHelperClassification(
+            classifications=classifications,
+            evidence=evidence,
+            confidence=confidence,
+        )

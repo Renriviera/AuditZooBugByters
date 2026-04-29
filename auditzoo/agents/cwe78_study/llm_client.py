@@ -6,7 +6,7 @@ import json
 import logging
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +51,12 @@ class LLMUsage:
         }
 
 
+def _uses_max_completion_tokens(model: str) -> bool:
+    """Return True for Chat Completions models that reject ``max_tokens``."""
+    normalized = model.lower().replace("_", "-")
+    return normalized.startswith(("gpt-5", "o1", "o3", "o4"))
+
+
 class LLMClient:
     """Async client for Qwen via vLLM (OpenAI-compatible endpoint)."""
 
@@ -74,16 +80,13 @@ class LLMClient:
         max_tokens: int | None = None,
     ) -> str:
         """Send a chat completion request and return the assistant's reply."""
-        response = await self._client.chat.completions.create(
-            model=self.config.model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=temperature or self.config.temperature,
-            max_tokens=max_tokens or self.config.max_tokens,
-            seed=self.config.seed,
+        request = self._chat_request(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
         )
+        response = await self._client.chat.completions.create(**request)
         choice = response.choices[0]
         text = choice.message.content or ""
 
@@ -95,6 +98,32 @@ class LLMClient:
 
         self._log_io(system_prompt, user_prompt, text, response)
         return text
+
+    def _chat_request(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> dict[str, Any]:
+        """Build model-aware Chat Completions parameters."""
+        token_budget = max_tokens or self.config.max_tokens
+        request: dict[str, Any] = {
+            "model": self.config.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        }
+        if _uses_max_completion_tokens(self.config.model):
+            request["max_completion_tokens"] = token_budget
+            return request
+
+        request["temperature"] = temperature or self.config.temperature
+        request["max_tokens"] = token_budget
+        request["seed"] = self.config.seed
+        return request
 
     def _log_io(
         self,

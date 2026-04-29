@@ -162,6 +162,35 @@ class TestTriageAgentVerdictPropagation:
         assert result.source_expr == "sys.argv[1]"  # preserved for audit
 
     @pytest.mark.asyncio
+    async def test_structural_evidence_can_satisfy_source_expr_check(self) -> None:
+        llm = _ScriptedLLM([
+            {"verdict": "true_positive", "confidence": 0.9,
+             "reasoning": "Joern flow shows source -> sink",
+             "source_expr": "sys.argv[1]",
+             "sink_expr": "os.system(cmd)"},
+        ])
+        agent = TriageAgent(llm)  # type: ignore[arg-type]
+        finding = Finding(
+            file_path="x.py",
+            line_start=1,
+            line_end=1,
+            rule_id="joern-taint-reachability",
+            message="demo",
+            code_snippet="os.system(cmd)",
+            surrounding_context="os.system(cmd)",
+        )
+
+        [result] = await agent.triage_batch(
+            [finding],
+            structural_evidence_map={
+                0: "Joern taint flow: `sys.argv[1]` -> `os.system(cmd)`"
+            },
+        )
+
+        assert result.verdict == Verdict.TRUE_POSITIVE
+        assert result.downgrade_reason == ""
+
+    @pytest.mark.asyncio
     async def test_fp_with_missing_sink_expr_is_preserved_but_tagged(self) -> None:
         """Parallel brake: FP with blank sink_expr stays FP but is flagged."""
         llm = _ScriptedLLM([

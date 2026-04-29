@@ -20,7 +20,6 @@ Also applies two hallucination brakes before returning a verdict:
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from .llm_client import LLMClient
 from .prompts import SYSTEM_PROMPT_B_TRIAGE, build_user_prompt_call2
@@ -60,10 +59,13 @@ def _substring_ok(needle: str, haystack: str) -> bool:
 class TriageAgent:
     """LLM Call 2: classify findings for both Semgrep and Joern arms."""
 
-    def __init__(self, llm: LLMClient) -> None:
+    def __init__(self, llm: LLMClient, *, system_prompt: str | None = None) -> None:
         self._llm = llm
+        self._system_prompt = system_prompt or SYSTEM_PROMPT_B_TRIAGE
 
-    async def triage(self, finding: Finding, structural_evidence: str = "") -> TriageResult:
+    async def triage(
+        self, finding: Finding, structural_evidence: str = ""
+    ) -> TriageResult:
         """Classify a single finding via LLM."""
         user_prompt = build_user_prompt_call2(
             file_path=finding.file_path,
@@ -73,9 +75,14 @@ class TriageAgent:
             structural_evidence=structural_evidence,
         )
         try:
-            data = await self._llm.chat_json(SYSTEM_PROMPT_B_TRIAGE, user_prompt)
+            data = await self._llm.chat_json(self._system_prompt, user_prompt)
         except (ValueError, Exception) as exc:
-            logger.warning("Triage LLM call failed for %s:%d — %s", finding.file_path, finding.line_start, exc)
+            logger.warning(
+                "Triage LLM call failed for %s:%d — %s",
+                finding.file_path,
+                finding.line_start,
+                exc,
+            )
             return TriageResult(
                 verdict=Verdict.UNCERTAIN, confidence=0.0, reasoning=str(exc)
             )
@@ -106,7 +113,9 @@ class TriageAgent:
         # negation evidence so ``label_findings`` / audit tooling can
         # separate "LLM suppressed with real evidence" from "LLM
         # suppressed blind".
-        elif verdict == Verdict.FALSE_POSITIVE and not _substring_ok(sink_expr, snippet):
+        elif verdict == Verdict.FALSE_POSITIVE and not _substring_ok(
+            sink_expr, snippet
+        ):
             downgrade_reason = "sink_expr_not_in_snippet"
 
         try:

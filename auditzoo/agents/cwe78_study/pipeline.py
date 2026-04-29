@@ -19,13 +19,13 @@ from typing import Any
 
 from autogen_core import AgentId
 
-from auditzoo.backends.base import make_cpg_cache_key
 from auditzoo.backends.ingestion import auto_detect_backend
 from auditzoo.core.protocol.requests import Request
 from auditzoo.core.runtime import AnalysisRuntime
 
 from .joern_arm import JoernArm
 from .llm_client import LLMClient, LLMConfig
+from .prompts import triage_system_prompt
 from .refinement_agent import RefinementAgent
 from .schemas import (
     Finding,
@@ -33,6 +33,7 @@ from .schemas import (
     IterationResult,
     RunResult,
     ToolArm,
+    TriageResult,
     Verdict,
 )
 from .semgrep_arm import SemgrepArm
@@ -51,6 +52,38 @@ _PHASE_KEYS: tuple[str, ...] = (
     "llm_triage_s",
     "llm_refinement_s",
     "call_graph_s",
+)
+
+_JOERN_LOW_SIGNAL_PATH_MARKERS = (
+    "/.github/",
+    "/devscripts/",
+    "/docs/",
+    "/examples/",
+    "/test/",
+    "/tests/",
+    "/third_party/",
+    "/vendor/",
+    "_test.py",
+    "test_",
+)
+_JOERN_GENERIC_WRAPPERS = {
+    "run",
+    "call",
+    "system",
+    "popen",
+    "popen2",
+    "popen3",
+    "popen4",
+}
+_JOERN_COMMAND_HINTS = (
+    "cmd",
+    "command",
+    "shell",
+    "exec",
+    "checkout",
+    "clone",
+    "subprocess",
+    "os.system",
 )
 
 
@@ -138,42 +171,382 @@ async def _connect_joern_with_retry(
     return runtime_cm, None, last_exc
 
 
-def _extract_joern_phase_instrumentation(
-    runtime_cm: Any,
-) -> tuple[dict[str, Any], dict[str, int]]:
-    """Best-effort extraction of per-phase timings + RSS from a failed connect.
-
-    The :class:`AnalysisRuntime` exposes ``backend`` only after a successful
-    ``__aenter__``.  When the build fails partway the runtime context may
-    not yet have a bound backend, but the backend instance is still
-    reachable via its private ``_backend`` attribute — we pull the
-    instrumentation from there so callers can see which phase was in
-    flight when the connect crashed or timed out.
-    """
-    phase: dict[str, Any] = {}
-    rss: dict[str, int] = {}
-    if runtime_cm is None:
-        return phase, rss
-    backend = getattr(runtime_cm, "_backend", None)
-    if backend is None:
-        return phase, rss
-    try:
-        phase = dict(getattr(backend, "last_connect_timings", {}) or {})
-    except Exception:  # pragma: no cover - defensive
-        phase = {}
-    try:
-        rss = dict(getattr(backend, "last_connect_rss", {}) or {})
-    except Exception:  # pragma: no cover - defensive
-        rss = {}
-    return phase, rss
-
-
 def _joern_catalog_snapshot(joern: Any) -> dict[str, list[str]]:
     """Snapshot a :class:`JoernArm`'s source/sink/sanitizer catalogs for audit."""
     return {
         "sources": list(getattr(joern, "sources", []) or []),
         "sinks": list(getattr(joern, "sinks", []) or []),
         "sanitizers": list(getattr(joern, "sanitizers", []) or []),
+    }
+
+
+def _joern_structural_evidence(
+    finding: Finding,
+    *,
+    include_flow_path: bool = False,
+) -> str:
+    """Render Joern taint metadata into compact triage evidence.
+
+    Joern findings carry source/sink coordinates from the CPG query in
+    ``Finding.metadata``.  Passing this to triage lets the LLM verify a
+    source-to-sink relationship even when the ±context snippet only shows the
+    sink helper body.
+    """
+    meta = finding.metadata or {}
+    source_file = str(meta.get("sourceFile", "") or "")
+    source_line = str(meta.get("sourceLine", "") or "")
+    source_code = str(meta.get("sourceCode", "") or "")
+    sink_file = str(meta.get("sinkFile", "") or "")
+    sink_line = str(meta.get("sinkLine", "") or "")
+    sink_code = str(meta.get("sinkCode", "") or "")
+    sink_name = str(meta.get("sinkName", "") or finding.sink_api or "")
+    report_file = str(meta.get("reportFile", "") or "")
+    report_line = str(meta.get("reportLine", "") or "")
+    report_reason = str(meta.get("reportReason", "") or "")
+
+    rows: list[str] = []
+    if report_file or report_line or report_reason:
+        rows.append(
+            "Joern report location: "
+            f"{report_file}:{report_line} "
+            f"{report_reason}".strip()
+        )
+    if source_code or source_file or source_line:
+        rows.append(
+            "Joern source: " f"{source_file}:{source_line} " f"`{source_code}`".strip()
+        )
+    if meta.get("originExternalSource"):
+        rows.append("Joern origin: external_source_confirmed")
+    origin_evidence = meta.get("originEvidence") or []
+    if isinstance(origin_evidence, list) and origin_evidence:
+        rows.append("Joern origin evidence:")
+        for record in origin_evidence[:3]:
+            if not isinstance(record, dict):
+                continue
+            tag = " [external]" if record.get("matchesExternal") else ""
+            code = str(record.get("code", "") or "")
+            file_path = str(record.get("file", "") or "")
+            line = str(record.get("line", "") or "")
+            rows.append(f"  {file_path}:{line} `{code}`{tag}")
+    caller_chain = meta.get("callerChain") or []
+    if isinstance(caller_chain, list) and caller_chain:
+        rows.append("Joern caller evidence:")
+        for record in caller_chain[:3]:
+            if not isinstance(record, dict):
+                continue
+            tag = " [external]" if record.get("matchesExternal") else ""
+            code = str(record.get("code", "") or "")
+            arg_code = str(record.get("argumentCode", "") or "")
+            file_path = str(record.get("file", "") or "")
+            line = str(record.get("line", "") or "")
+            if arg_code:
+                rows.append(f"  {file_path}:{line} `{code}` arg=`{arg_code}`{tag}")
+            else:
+                rows.append(f"  {file_path}:{line} `{code}`{tag}")
+    if sink_code or sink_file or sink_line or sink_name:
+        rows.append(
+            "Joern sink: "
+            f"{sink_file}:{sink_line} "
+            f"{sink_name} "
+            f"`{sink_code}`".strip()
+        )
+    flow_path = meta.get("flowPath") or []
+    if include_flow_path and isinstance(flow_path, list) and flow_path:
+        rows.append("Joern flow path:")
+        for idx, node in enumerate(flow_path[:12], start=1):
+            if not isinstance(node, dict):
+                continue
+            node_file = str(node.get("file", "") or "")
+            node_line = str(node.get("line", "") or "")
+            node_type = str(node.get("nodeType", "") or "")
+            node_code = str(node.get("code", "") or "")
+            rows.append(f"  {idx}. {node_file}:{node_line} {node_type} `{node_code}`")
+    if source_code and sink_code:
+        rows.append(f"Joern taint flow: `{source_code}` -> `{sink_code}`")
+    return "\n".join(rows)
+
+
+def _joern_structural_evidence_map(
+    findings: list[Finding],
+    *,
+    include_flow_path: bool = False,
+) -> dict[int, str]:
+    """Build the ``TriageAgent.triage_batch`` evidence map for Joern findings."""
+    evidence: dict[int, str] = {}
+    for idx, finding in enumerate(findings):
+        rendered = _joern_structural_evidence(
+            finding,
+            include_flow_path=include_flow_path,
+        )
+        if rendered:
+            evidence[idx] = rendered
+    return evidence
+
+
+def _joern_path_is_low_signal(path: str) -> bool:
+    lowered = f"/{path.lower().lstrip('/')}"
+    return any(marker in lowered for marker in _JOERN_LOW_SIGNAL_PATH_MARKERS)
+
+
+def _joern_flow_has_command_hint(finding: Finding) -> bool:
+    meta = finding.metadata or {}
+    flow_path = meta.get("flowPath") or []
+    snippets = [
+        str(meta.get("sourceCode", "") or ""),
+        str(meta.get("sinkCode", "") or ""),
+        str(meta.get("reportReason", "") or ""),
+        finding.code_snippet or "",
+    ]
+    if isinstance(flow_path, list):
+        snippets.extend(
+            str(node.get("code", "") or "")
+            for node in flow_path
+            if isinstance(node, dict)
+        )
+    text = " ".join(snippets).lower()
+    return any(hint in text for hint in _JOERN_COMMAND_HINTS)
+
+
+def _joern_has_external_caller(finding: Finding) -> bool:
+    meta = finding.metadata or {}
+    return any(
+        isinstance(record, dict) and bool(record.get("matchesExternal"))
+        for record in (meta.get("callerChain") or [])
+    )
+
+
+def _is_high_risk_joern(finding: Finding) -> bool:
+    meta = finding.metadata or {}
+    sink_code = str(meta.get("sinkCode", "") or finding.code_snippet or "").lower()
+    return bool(
+        meta.get("originExternalSource")
+        or _joern_has_external_caller(finding)
+        or meta.get("shell_true")
+        or meta.get("string_command_like")
+        or "shell=true" in sink_code
+        or "os.system" in sink_code
+        or "os.popen" in sink_code
+    )
+
+
+def _rank_joern_finding(
+    finding: Finding,
+) -> tuple[int, int, int, int, int, int, str, int]:
+    """Return a sortable risk key; lower values are triaged first."""
+    meta = finding.metadata or {}
+    sink_kind = str(meta.get("sinkKind", "") or "")
+    wrapper_name = str(meta.get("wrapperName", "") or finding.sink_api or "").lower()
+    source_kind = str(meta.get("sourceKind", "") or "")
+    report_reason = str(meta.get("reportReason", "") or "")
+    sink_code = str(meta.get("sinkCode", "") or finding.code_snippet or "").lower()
+    high_risk_sink = bool(
+        meta.get("shell_true")
+        or meta.get("string_command_like")
+        or "shell=true" in sink_code
+        or "os.system" in sink_code
+    )
+    low_risk_semantics = bool(
+        (meta.get("argv_list_like") or meta.get("shlex_split_input"))
+        and not meta.get("shell_true")
+    )
+    low_signal_path = bool(
+        meta.get("test_file")
+        or _joern_path_is_low_signal(finding.file_path)
+        or _joern_path_is_low_signal(str(meta.get("sinkFile", "") or ""))
+    )
+    generic_wrapper = sink_kind == "wrapper" and wrapper_name in _JOERN_GENERIC_WRAPPERS
+    command_hint = _joern_flow_has_command_hint(finding)
+    caller_external = _joern_has_external_caller(finding)
+
+    risk = 0 if high_risk_sink else 1
+    directness = 0 if sink_kind != "wrapper" else 1
+    source_rank = (
+        -2
+        if meta.get("originExternalSource")
+        else (
+            -1
+            if caller_external
+            else {"external": 0, "parameter": 1, "catalog": 2, "attribute": 3}.get(
+                source_kind, 4
+            )
+        )
+    )
+    report_rank = (
+        0
+        if report_reason
+        in {"flow_command_construction", "flow_non_wrapper_callsite", "flow_callsite"}
+        else 1
+    )
+    semantic_penalty = (
+        int(low_risk_semantics)
+        + int(low_signal_path)
+        + int(generic_wrapper and not high_risk_sink)
+    )
+    command_rank = 0 if command_hint else 1
+    return (
+        risk,
+        directness,
+        semantic_penalty,
+        source_rank,
+        report_rank,
+        command_rank,
+        finding.file_path,
+        finding.line_start,
+    )
+
+
+def _reduce_joern_findings(
+    findings: list[Finding],
+    max_candidates: int | None,
+    *,
+    enabled: bool = True,
+    high_risk_cap: int | None = None,
+    low_risk_cap: int | None = None,
+) -> tuple[list[Finding], dict[str, Any]]:
+    """Rank and cap Joern findings before LLM triage.
+
+    Two-budget mode: if either ``high_risk_cap`` or ``low_risk_cap`` is
+    supplied, findings are partitioned into high-risk and lower-risk
+    groups (see :func:`_is_high_risk_joern`) and each group is independently
+    capped.  Unfilled high-risk budget does NOT spill over to lower-risk
+    by design — keeping high-risk strictly bounded matches the diagnostic
+    intent of "20 high-risk + 10 low-risk".
+
+    Single-cap fallback (both new caps ``None``): preserves the legacy
+    behaviour where ``max_candidates`` is the shared budget and lower-risk
+    fills any leftover after high-risk.
+    """
+    raw_count = len(findings)
+    two_budget_mode = high_risk_cap is not None or low_risk_cap is not None
+
+    if not enabled:
+        return findings, {
+            "joern_raw_findings": raw_count,
+            "joern_triaged_findings": raw_count,
+            "joern_candidates_dropped_before_triage": 0,
+            "joern_candidate_reducer_enabled": False,
+            "joern_candidate_reducer_cap": max_candidates,
+            "joern_dropped_reason_counts": {},
+            "joern_high_risk_count": sum(1 for f in findings if _is_high_risk_joern(f)),
+            "joern_high_risk_kept": sum(1 for f in findings if _is_high_risk_joern(f)),
+            "joern_high_risk_dropped_when_overflow": 0,
+            "joern_low_risk_count": sum(
+                1 for f in findings if not _is_high_risk_joern(f)
+            ),
+            "joern_low_risk_kept": sum(
+                1 for f in findings if not _is_high_risk_joern(f)
+            ),
+            "joern_low_risk_dropped_when_overflow": 0,
+            "joern_high_risk_cap": high_risk_cap,
+            "joern_low_risk_cap": low_risk_cap,
+        }
+
+    if two_budget_mode:
+        hr_cap = int(high_risk_cap) if high_risk_cap is not None else 0
+        lr_cap = int(low_risk_cap) if low_risk_cap is not None else 0
+        effective_total_cap = hr_cap + lr_cap
+    else:
+        if max_candidates is None or max_candidates <= 0:
+            return findings, {
+                "joern_raw_findings": raw_count,
+                "joern_triaged_findings": raw_count,
+                "joern_candidates_dropped_before_triage": 0,
+                "joern_candidate_reducer_enabled": True,
+                "joern_candidate_reducer_cap": max_candidates,
+                "joern_dropped_reason_counts": {},
+                "joern_high_risk_count": sum(
+                    1 for f in findings if _is_high_risk_joern(f)
+                ),
+                "joern_high_risk_kept": sum(
+                    1 for f in findings if _is_high_risk_joern(f)
+                ),
+                "joern_high_risk_dropped_when_overflow": 0,
+                "joern_low_risk_count": sum(
+                    1 for f in findings if not _is_high_risk_joern(f)
+                ),
+                "joern_low_risk_kept": sum(
+                    1 for f in findings if not _is_high_risk_joern(f)
+                ),
+                "joern_low_risk_dropped_when_overflow": 0,
+                "joern_high_risk_cap": None,
+                "joern_low_risk_cap": None,
+            }
+        hr_cap = lr_cap = int(max_candidates)
+        effective_total_cap = int(max_candidates)
+
+    high_risk = sorted(
+        [finding for finding in findings if _is_high_risk_joern(finding)],
+        key=_rank_joern_finding,
+    )
+    lower_risk = sorted(
+        [finding for finding in findings if not _is_high_risk_joern(finding)],
+        key=_rank_joern_finding,
+    )
+
+    if two_budget_mode:
+        kept_high_risk = high_risk[:hr_cap]
+        kept_low_risk = lower_risk[:lr_cap]
+    else:
+        kept_high_risk = high_risk[:hr_cap]
+        kept_low_risk = lower_risk[: max(0, hr_cap - len(kept_high_risk))]
+
+    kept = kept_high_risk + kept_low_risk
+
+    if not two_budget_mode and raw_count <= effective_total_cap:
+        # Single-cap legacy fast path: no drops.
+        return findings, {
+            "joern_raw_findings": raw_count,
+            "joern_triaged_findings": raw_count,
+            "joern_candidates_dropped_before_triage": 0,
+            "joern_candidate_reducer_enabled": True,
+            "joern_candidate_reducer_cap": max_candidates,
+            "joern_dropped_reason_counts": {},
+            "joern_high_risk_count": len(high_risk),
+            "joern_high_risk_kept": len(high_risk),
+            "joern_high_risk_dropped_when_overflow": 0,
+            "joern_low_risk_count": len(lower_risk),
+            "joern_low_risk_kept": len(lower_risk),
+            "joern_low_risk_dropped_when_overflow": 0,
+            "joern_high_risk_cap": None,
+            "joern_low_risk_cap": None,
+        }
+
+    kept_ids = {id(finding) for finding in kept}
+    dropped = [
+        finding for finding in high_risk + lower_risk if id(finding) not in kept_ids
+    ]
+    high_risk_dropped = len(high_risk) - len(kept_high_risk)
+    low_risk_dropped = len(lower_risk) - len(kept_low_risk)
+    reason_counts: dict[str, int] = {}
+    for finding in dropped:
+        meta = finding.metadata or {}
+        reason = "lower_ranked"
+        if meta.get("test_file") or _joern_path_is_low_signal(finding.file_path):
+            reason = "low_signal_path"
+        elif str(meta.get("sinkKind", "")) == "wrapper":
+            reason = "wrapper"
+        elif (
+            meta.get("argv_list_like") or meta.get("shlex_split_input")
+        ) and not meta.get("shell_true"):
+            reason = "argv_or_split_without_shell"
+        elif meta.get("literal_command_like"):
+            reason = "literal_command_like"
+        reason_counts[reason] = reason_counts.get(reason, 0) + 1
+    return kept, {
+        "joern_raw_findings": raw_count,
+        "joern_triaged_findings": len(kept),
+        "joern_candidates_dropped_before_triage": len(dropped),
+        "joern_candidate_reducer_enabled": True,
+        "joern_candidate_reducer_cap": effective_total_cap,
+        "joern_dropped_reason_counts": dict(sorted(reason_counts.items())),
+        "joern_high_risk_count": len(high_risk),
+        "joern_high_risk_kept": len(kept_high_risk),
+        "joern_high_risk_dropped_when_overflow": high_risk_dropped,
+        "joern_low_risk_count": len(lower_risk),
+        "joern_low_risk_kept": len(kept_low_risk),
+        "joern_low_risk_dropped_when_overflow": low_risk_dropped,
+        "joern_high_risk_cap": hr_cap if two_budget_mode else None,
+        "joern_low_risk_cap": lr_cap if two_budget_mode else None,
     }
 
 
@@ -192,8 +565,12 @@ def build_phase_metrics(
     call_graph_s: float = 0.0,
     llm_tokens_triage: int = 0,
     llm_tokens_refinement: int = 0,
-    cpg_phase_s: dict[str, Any] | None = None,
-    cpg_rss_bytes: dict[str, int] | None = None,
+    refinement_candidates_seen: int = 0,
+    refinement_candidates_applied: int = 0,
+    refinement_candidates_rejected_by_verification: int = 0,
+    refinement_added_sources: int = 0,
+    refinement_added_sinks: int = 0,
+    refinement_added_sanitizers: int = 0,
 ) -> dict[str, Any]:
     """Build the per-iteration metrics dict with phase-level attribution.
 
@@ -206,17 +583,20 @@ def build_phase_metrics(
     are the subtotals used by the triage and refinement LLM calls
     respectively.
 
-    ``cpg_phase_s`` (dict) carries the Joern CPG build sub-phases
-    (``import_code_s``, ``overlay_<name>_s``, ``warmup_s``,
-    ``total_connect_s``, ``cache_hit``) pulled off the backend after the
-    CPG is built.  ``cpg_rss_bytes`` carries JVM RSS snapshots taken at
-    the same phase boundaries plus ``peak_bytes``.  Both are attached
-    as-is for downstream analysis and are only populated for the Joern
-    arm's k=0 iteration (amortisation rule).
+    The ``refinement_*`` counters are populated by the v2 refinement loop:
+
+    - ``refinement_candidates_seen``: total wrapper candidates the LLM was
+      asked to classify (post-ranking, post-cap).
+    - ``refinement_candidates_applied``: classifications that survived
+      symbolic verification and were appended to the Joern catalogs.
+    - ``refinement_candidates_rejected_by_verification``: classifications
+      the LLM produced but Joern could not confirm (dropped silently;
+      logged in ``refinement_actions``).
+    - ``refinement_added_{sources,sinks,sanitizers}``: per-role tally.
     """
     attributed = cpg_build_s + scan_s + llm_triage_s + llm_refinement_s + call_graph_s
     overhead_s = max(0.0, wall_clock_s - attributed)
-    metrics = {
+    return {
         "wall_clock_s": wall_clock_s,
         "cpg_build_s": cpg_build_s,
         "scan_s": scan_s,
@@ -231,12 +611,15 @@ def build_phase_metrics(
         "llm_usage": llm_usage,
         "llm_tokens_triage": llm_tokens_triage,
         "llm_tokens_refinement": llm_tokens_refinement,
+        "refinement_candidates_seen": refinement_candidates_seen,
+        "refinement_candidates_applied": refinement_candidates_applied,
+        "refinement_candidates_rejected_by_verification": (
+            refinement_candidates_rejected_by_verification
+        ),
+        "refinement_added_sources": refinement_added_sources,
+        "refinement_added_sinks": refinement_added_sinks,
+        "refinement_added_sanitizers": refinement_added_sanitizers,
     }
-    if cpg_phase_s:
-        metrics["cpg_phase_s"] = dict(cpg_phase_s)
-    if cpg_rss_bytes:
-        metrics["cpg_rss_bytes"] = dict(cpg_rss_bytes)
-    return metrics
 
 
 def _log_phase_breakdown(
@@ -261,30 +644,6 @@ def _log_phase_breakdown(
         metrics["llm_tokens_triage"],
         metrics["llm_tokens_refinement"],
     )
-    phase = metrics.get("cpg_phase_s")
-    rss = metrics.get("cpg_rss_bytes")
-    if phase or rss:
-        overlays = {
-            key[len("overlay_") : -len("_s")]: round(float(val), 2)
-            for key, val in (phase or {}).items()
-            if isinstance(key, str)
-            and key.startswith("overlay_")
-            and key.endswith("_s")
-        }
-        peak_mib = (rss or {}).get("peak_bytes", 0) / (1024 * 1024)
-        logger.info(
-            "[%s | %s k=%d] cpg_phases import=%.2fs overlays=%s warmup=%.2fs "
-            "total=%.2fs cache_hit=%s rss_peak=%.1fMiB",
-            cve_id or "-",
-            arm,
-            k,
-            float((phase or {}).get("import_code_s", 0.0)),
-            overlays,
-            float((phase or {}).get("warmup_s", 0.0)),
-            float((phase or {}).get("total_connect_s", 0.0)),
-            (phase or {}).get("cache_hit"),
-            peak_mib,
-        )
 
 
 class PipelineConfig:
@@ -305,8 +664,21 @@ class PipelineConfig:
         joern_port: int = 12345,
         call_graph_depth: int = 3,
         llm_log_io_path: str | None = None,
-        cpg_cache_enabled: bool = True,
-        cpg_cache_dir: str | None = None,
+        joern_prompt_flow_path: bool = False,
+        joern_max_triage_candidates: int | None = 50,
+        joern_candidate_reducer_enabled: bool = True,
+        joern_high_risk_candidate_cap: int | None = None,
+        joern_low_risk_candidate_cap: int | None = None,
+        joern_retry_uncertain_with_flow_path: bool = False,
+        joern_flow_path_retry_limit: int = 10,
+        joern_triage_argv_exception: bool = True,
+        joern_skip_triage: bool = False,
+        joern_modeling_mode: str = "full_wrapper",
+        joern_emit_coverage_probe: bool = False,
+        joern_coverage_probe_targets: dict[str, dict[str, Any]] | None = None,
+        joern_refinement_candidate_cap: int = 12,
+        joern_refinement_apply_multiple: bool = True,
+        joern_refinement_verify: bool = True,
     ) -> None:
         self.max_iterations = max_iterations
         self.seed = seed
@@ -320,8 +692,21 @@ class PipelineConfig:
         self.joern_port = joern_port
         self.call_graph_depth = call_graph_depth
         self.llm_log_io_path = llm_log_io_path
-        self.cpg_cache_enabled = cpg_cache_enabled
-        self.cpg_cache_dir = cpg_cache_dir
+        self.joern_prompt_flow_path = joern_prompt_flow_path
+        self.joern_max_triage_candidates = joern_max_triage_candidates
+        self.joern_candidate_reducer_enabled = joern_candidate_reducer_enabled
+        self.joern_high_risk_candidate_cap = joern_high_risk_candidate_cap
+        self.joern_low_risk_candidate_cap = joern_low_risk_candidate_cap
+        self.joern_retry_uncertain_with_flow_path = joern_retry_uncertain_with_flow_path
+        self.joern_flow_path_retry_limit = joern_flow_path_retry_limit
+        self.joern_triage_argv_exception = joern_triage_argv_exception
+        self.joern_skip_triage = joern_skip_triage
+        self.joern_modeling_mode = joern_modeling_mode
+        self.joern_emit_coverage_probe = joern_emit_coverage_probe
+        self.joern_coverage_probe_targets = joern_coverage_probe_targets or {}
+        self.joern_refinement_candidate_cap = joern_refinement_candidate_cap
+        self.joern_refinement_apply_multiple = joern_refinement_apply_multiple
+        self.joern_refinement_verify = joern_refinement_verify
 
 
 class Pipeline:
@@ -339,21 +724,16 @@ class Pipeline:
                 log_io_path=config.llm_log_io_path,
             )
         )
-        self._triage = TriageAgent(self._llm)
+        self._triage = TriageAgent(
+            self._llm,
+            system_prompt=triage_system_prompt(
+                include_argv_exception=config.joern_triage_argv_exception
+            ),
+        )
         self._refinement = RefinementAgent(self._llm)
 
-    async def run(
-        self,
-        repo_path: str | Path,
-        cve_id: str = "",
-        git_sha: str | None = None,
-    ) -> RunResult:
-        """Run both arms across k=0..max_iterations on *repo_path*.
-
-        ``git_sha`` is forwarded to the Joern arm and (when combined with
-        ``cve_id``) becomes the CPG cache key so re-runs against the same
-        checkout skip ``importCode`` + overlay passes.
-        """
+    async def run(self, repo_path: str | Path, cve_id: str = "") -> RunResult:
+        """Run both arms across k=0..max_iterations on *repo_path*."""
         repo_path = str(Path(repo_path).resolve())
         result = RunResult(repo_path=repo_path, cve_id=cve_id)
 
@@ -362,11 +742,7 @@ class Pipeline:
             result.iterations.extend(semgrep_iters)
 
         if "joern" in self._cfg.arms:
-            joern_iters = await self._run_joern_arm(
-                repo_path,
-                cve_id=cve_id,
-                git_sha=git_sha,
-            )
+            joern_iters = await self._run_joern_arm(repo_path, cve_id=cve_id)
             result.iterations.extend(joern_iters)
 
         result.metadata["llm_usage"] = self._llm.usage.to_dict()
@@ -427,7 +803,13 @@ class Pipeline:
                         triage_summary=triage_summary,
                     )
                     apply_status = arm.apply_refinement(
-                        ref.action.value, ref.rule_yaml, ref.target_rule_id
+                        ref.action.value,
+                        ref.rule_yaml,
+                        ref.target_rule_id,
+                        add_source_patterns=ref.add_source_patterns,
+                        add_sanitizer_patterns=ref.add_sanitizer_patterns,
+                        add_pattern_not=ref.add_pattern_not,
+                        disable_rule=ref.disable_rule,
                     )
                     action_dict = asdict(ref)
                     action_dict["apply_status"] = apply_status
@@ -485,21 +867,9 @@ class Pipeline:
     # ------------------------------------------------------------------
 
     async def _run_joern_arm(
-        self,
-        repo_path: str,
-        *,
-        cve_id: str = "",
-        git_sha: str | None = None,
+        self, repo_path: str, *, cve_id: str = ""
     ) -> list[IterationResult]:
-        # Build backend cfg with (optional) CPG cache enabled.  Cache key is
-        # <cve>_<sha[:12]> so re-runs against the same checkout reuse the
-        # persisted CPG (importCode + overlays are skipped).
-        backend_kwargs: dict[str, Any] = {"port": self._cfg.joern_port}
-        if self._cfg.cpg_cache_enabled and (cve_id or git_sha):
-            backend_kwargs["cpg_cache_key"] = make_cpg_cache_key(cve_id, git_sha)
-            if self._cfg.cpg_cache_dir:
-                backend_kwargs["cpg_cache_dir"] = self._cfg.cpg_cache_dir
-        backend_cfg = auto_detect_backend(repo_path, **backend_kwargs)
+        backend_cfg = auto_detect_backend(repo_path, port=self._cfg.joern_port)
         results: list[IterationResult] = []
 
         # CPG construction happens inside AnalysisRuntime.__aenter__
@@ -518,12 +888,6 @@ class Pipeline:
                 cpg_error,
                 exc_info=cpg_error is not None,
             )
-            # Try to pull out whatever partial phase data the client recorded
-            # before it crashed; this is what you want when the build timed
-            # out and you need to know which phase was in flight.
-            partial_phase, partial_rss = _extract_joern_phase_instrumentation(
-                runtime_cm
-            )
             if runtime_cm is not None:
                 try:
                     await runtime_cm.stop()
@@ -531,31 +895,21 @@ class Pipeline:
                     logger.exception(
                         "AnalysisRuntime cleanup after __aenter__ failure failed"
                     )
-            failure_metrics: dict[str, Any] = {
-                "error": str(cpg_error) if cpg_error else "unknown CPG error",
-                "error_type": (type(cpg_error).__name__ if cpg_error else "unknown"),
-                "cpg_build_s": cpg_build_s_total,
-                "cpg_build_failed": True,
-            }
-            if partial_phase:
-                failure_metrics["cpg_phase_s"] = partial_phase
-            if partial_rss:
-                failure_metrics["cpg_rss_bytes"] = partial_rss
             return [
                 IterationResult(
                     arm=ToolArm.JOERN,
                     iteration=0,
-                    metrics=failure_metrics,
+                    metrics={
+                        "error": str(cpg_error) if cpg_error else "unknown CPG error",
+                        "error_type": (
+                            type(cpg_error).__name__ if cpg_error else "unknown"
+                        ),
+                        "cpg_build_s": cpg_build_s_total,
+                        "cpg_build_failed": True,
+                    },
                 )
             ]
         cpg_build_s_total = time.perf_counter() - cpg_start
-        backend = getattr(runtime, "backend", None)
-        cpg_phase_s_total: dict[str, Any] = dict(
-            getattr(backend, "last_connect_timings", {}) or {}
-        )
-        cpg_rss_bytes_total: dict[str, int] = dict(
-            getattr(backend, "last_connect_rss", {}) or {}
-        )
 
         try:
             joern_holder: list[JoernArm] = []
@@ -564,6 +918,7 @@ class Pipeline:
                 inst = JoernArm(
                     context_lines=self._cfg.context_lines,
                     call_graph_depth=self._cfg.call_graph_depth,
+                    modeling_mode=self._cfg.joern_modeling_mode,
                 )
                 joern_holder.append(inst)
                 return inst
@@ -580,8 +935,6 @@ class Pipeline:
                 self._llm.reset_usage()
                 # CPG build cost is a one-shot, amortise onto k=0 only.
                 cpg_build_s = cpg_build_s_total if k == 0 else 0.0
-                cpg_phase_s = cpg_phase_s_total if k == 0 else None
-                cpg_rss_bytes = cpg_rss_bytes_total if k == 0 else None
 
                 joern = joern_holder[0] if joern_holder else None
                 catalog_pre = _joern_catalog_snapshot(joern) if joern else {}
@@ -595,12 +948,94 @@ class Pipeline:
                     findings = [
                         Finding(**f) if isinstance(f, dict) else f for f in raw_findings
                     ]
+                    findings, reducer_metrics = _reduce_joern_findings(
+                        findings,
+                        self._cfg.joern_max_triage_candidates,
+                        enabled=self._cfg.joern_candidate_reducer_enabled,
+                        high_risk_cap=self._cfg.joern_high_risk_candidate_cap,
+                        low_risk_cap=self._cfg.joern_low_risk_candidate_cap,
+                    )
                     joern = joern_holder[0]
                     findings = joern.get_findings_with_context(findings, repo_path)
 
+                coverage_probe: dict[str, Any] = {}
+                probe_target = self._cfg.joern_coverage_probe_targets.get(cve_id, {})
+                if self._cfg.joern_emit_coverage_probe and probe_target:
+                    probe_resp = await runtime.send_message(
+                        Request(
+                            type="task.joern_coverage_probe",
+                            payload={
+                                "gt_file": probe_target.get("vulnerable_file", ""),
+                                "gt_lines": probe_target.get("vulnerable_lines", []),
+                            },
+                        ),
+                        AgentId("joern_arm", "default"),
+                    )
+                    if probe_resp.success and isinstance(probe_resp.data, dict):
+                        coverage_probe = probe_resp.data
+                    else:
+                        coverage_probe = {
+                            "gt_file_seen": False,
+                            "method_count": 0,
+                            "gt_sink_count": 0,
+                            "external_source_count": 0,
+                            "methods_in_gt_file": [],
+                            "probe_skipped": [],
+                            "probe_failed": ["message_failed"],
+                        }
+
                 tokens_before_triage = self._llm.usage.to_dict()
                 with _stopwatch() as triage_t:
-                    triage_results = await self._triage.triage_batch(findings)
+                    flow_path_retry_count = 0
+                    flow_path_retry_tokens = 0
+                    flow_path_retry_tp_delta = 0
+                    if self._cfg.joern_skip_triage:
+                        structural_evidence_map: dict[int, str] = {}
+                        triage_results: list[TriageResult] = []
+                    else:
+                        structural_evidence_map = _joern_structural_evidence_map(
+                            findings,
+                            include_flow_path=self._cfg.joern_prompt_flow_path,
+                        )
+                        triage_results = await self._triage.triage_batch(
+                            findings,
+                            structural_evidence_map=structural_evidence_map,
+                        )
+                    if (
+                        not self._cfg.joern_skip_triage
+                        and self._cfg.joern_retry_uncertain_with_flow_path
+                        and self._cfg.joern_flow_path_retry_limit > 0
+                    ):
+                        full_evidence_map = _joern_structural_evidence_map(
+                            findings,
+                            include_flow_path=True,
+                        )
+                        retry_indices = [
+                            idx
+                            for idx, result in enumerate(triage_results)
+                            if result.verdict == Verdict.UNCERTAIN
+                            and idx in full_evidence_map
+                        ][: self._cfg.joern_flow_path_retry_limit]
+                        for idx in retry_indices:
+                            retry_before = self._llm.usage.to_dict()
+                            old_is_tp = (
+                                triage_results[idx].verdict == Verdict.TRUE_POSITIVE
+                            )
+                            retried = await self._triage.triage(
+                                findings[idx],
+                                full_evidence_map[idx],
+                            )
+                            triage_results[idx] = retried
+                            flow_path_retry_count += 1
+                            flow_path_retry_tokens += _llm_tokens_delta(
+                                retry_before,
+                                self._llm.usage.to_dict(),
+                            )
+                            if (
+                                not old_is_tp
+                                and retried.verdict == Verdict.TRUE_POSITIVE
+                            ):
+                                flow_path_retry_tp_delta += 1
                 llm_tokens_triage = _llm_tokens_delta(
                     tokens_before_triage, self._llm.usage.to_dict()
                 )
@@ -609,57 +1044,169 @@ class Pipeline:
                 call_graph_s = 0.0
                 refinement_s = 0.0
                 llm_tokens_refinement = 0
+                refinement_candidates_seen = 0
+                refinement_candidates_applied = 0
+                refinement_candidates_rejected_by_verification = 0
+                refinement_added_sources = 0
+                refinement_added_sinks = 0
+                refinement_added_sanitizers = 0
 
-                if k < self._cfg.max_iterations:
-                    for f in findings:
-                        if not f.sink_api:
-                            continue
-                        with _stopwatch() as cg_t:
-                            cg_resp = await runtime.send_message(
-                                Request(
-                                    type="task.joern_call_graph",
-                                    payload={"sink_method": f.sink_api},
-                                ),
-                                AgentId("joern_arm", "default"),
-                            )
-                        call_graph_s += cg_t[0]
-                        neighbors = cg_resp.data if cg_resp.success else []
-                        if not neighbors:
-                            continue
+                if k < self._cfg.max_iterations and not self._cfg.joern_skip_triage:
+                    finding_files = sorted(
+                        {f.file for f in findings if getattr(f, "file", "")}
+                    )[:10]
+                    cap_per_bucket = max(
+                        1, int(self._cfg.joern_refinement_candidate_cap)
+                    )
+                    with _stopwatch() as cg_t:
+                        candidates_resp = await runtime.send_message(
+                            Request(
+                                type="task.joern_refinement_candidates",
+                                payload={
+                                    "finding_files": finding_files,
+                                    "cap_per_bucket": cap_per_bucket,
+                                },
+                            ),
+                            AgentId("joern_arm", "default"),
+                        )
+                    call_graph_s += cg_t[0]
+                    buckets: dict[str, list[dict[str, Any]]] = (
+                        candidates_resp.data
+                        if candidates_resp.success
+                        and isinstance(candidates_resp.data, dict)
+                        else {}
+                    )
+                    pooled: dict[str, dict[str, Any]] = {}
+                    for bucket_name, bucket_items in buckets.items():
+                        for item in bucket_items or []:
+                            name = str(item.get("name", "") or "")
+                            if not name:
+                                continue
+                            pooled_item = pooled.setdefault(name, dict(item))
+                            existing = list(pooled_item.get("buckets", []) or [])
+                            if bucket_name not in existing:
+                                existing.append(bucket_name)
+                            pooled_item["buckets"] = existing
+                    ranked = JoernArm.rank_wrapper_candidates(
+                        list(pooled.values()),
+                        finding_files=finding_files,
+                        cap=cap_per_bucket,
+                    )
+                    refinement_candidates_seen = len(ranked)
+                    if ranked:
                         tokens_before_ref = self._llm.usage.to_dict()
                         with _stopwatch() as refine_t:
                             classification = (
                                 await self._refinement.classify_helpers_joern(
-                                    call_graph_neighborhood=neighbors,
+                                    call_graph_neighborhood=ranked,
                                     current_sources=joern.sources,
                                     current_sinks=joern.sinks,
                                     current_sanitizers=joern.sanitizers,
                                 )
                             )
-                            refinement_actions.append(asdict(classification))
-                            new_sources = [
-                                n
-                                for n, r in classification.classifications.items()
-                                if r == HelperRole.SOURCE_WRAPPER
-                            ]
-                            new_sinks = [
-                                n
-                                for n, r in classification.classifications.items()
-                                if r == HelperRole.SINK_WRAPPER
-                            ]
-                            new_sanitizers = [
-                                n
-                                for n, r in classification.classifications.items()
-                                if r == HelperRole.SANITIZER
-                            ]
-                            joern.expand_sources(new_sources)
-                            joern.expand_sinks(new_sinks)
-                            joern.expand_sanitizers(new_sanitizers)
                         refinement_s += refine_t[0]
                         llm_tokens_refinement += _llm_tokens_delta(
                             tokens_before_ref, self._llm.usage.to_dict()
                         )
-                        break  # one expansion per iteration
+
+                        proposed_sources = [
+                            n
+                            for n, r in classification.classifications.items()
+                            if r == HelperRole.SOURCE_WRAPPER
+                        ]
+                        proposed_sinks = [
+                            n
+                            for n, r in classification.classifications.items()
+                            if r == HelperRole.SINK_WRAPPER
+                        ]
+                        proposed_sanitizers = [
+                            n
+                            for n, r in classification.classifications.items()
+                            if r == HelperRole.SANITIZER
+                        ]
+
+                        if self._cfg.joern_refinement_verify and (
+                            proposed_sources or proposed_sinks or proposed_sanitizers
+                        ):
+                            with _stopwatch() as verify_t:
+                                verify_resp = await runtime.send_message(
+                                    Request(
+                                        type="task.joern_verify_wrappers",
+                                        payload={
+                                            "sources": proposed_sources,
+                                            "sinks": proposed_sinks,
+                                            "sanitizers": proposed_sanitizers,
+                                        },
+                                    ),
+                                    AgentId("joern_arm", "default"),
+                                )
+                            call_graph_s += verify_t[0]
+                            verified = (
+                                verify_resp.data
+                                if verify_resp.success
+                                and isinstance(verify_resp.data, dict)
+                                else {}
+                            )
+                            verified_sources = list(verified.get("sources", []) or [])
+                            verified_sinks = list(verified.get("sinks", []) or [])
+                            verified_sanitizers = list(
+                                verified.get("sanitizers", []) or []
+                            )
+                        else:
+                            verified_sources = list(proposed_sources)
+                            verified_sinks = list(proposed_sinks)
+                            verified_sanitizers = list(proposed_sanitizers)
+
+                        rejected_sources = sorted(
+                            set(proposed_sources) - set(verified_sources)
+                        )
+                        rejected_sinks = sorted(
+                            set(proposed_sinks) - set(verified_sinks)
+                        )
+                        rejected_sanitizers = sorted(
+                            set(proposed_sanitizers) - set(verified_sanitizers)
+                        )
+                        refinement_candidates_rejected_by_verification = (
+                            len(rejected_sources)
+                            + len(rejected_sinks)
+                            + len(rejected_sanitizers)
+                        )
+
+                        if not self._cfg.joern_refinement_apply_multiple:
+                            verified_sources = verified_sources[:1]
+                            verified_sinks = verified_sinks[:1]
+                            verified_sanitizers = verified_sanitizers[:1]
+
+                        joern.expand_sources(verified_sources)
+                        joern.expand_sinks(verified_sinks)
+                        joern.expand_sanitizers(verified_sanitizers)
+                        refinement_added_sources = len(verified_sources)
+                        refinement_added_sinks = len(verified_sinks)
+                        refinement_added_sanitizers = len(verified_sanitizers)
+                        refinement_candidates_applied = (
+                            refinement_added_sources
+                            + refinement_added_sinks
+                            + refinement_added_sanitizers
+                        )
+
+                        action_record = asdict(classification)
+                        action_record["candidates_seen"] = refinement_candidates_seen
+                        action_record["verified"] = {
+                            "sources": verified_sources,
+                            "sinks": verified_sinks,
+                            "sanitizers": verified_sanitizers,
+                        }
+                        action_record["rejected"] = {
+                            "sources": rejected_sources,
+                            "sinks": rejected_sinks,
+                            "sanitizers": rejected_sanitizers,
+                        }
+                        action_record["candidate_buckets"] = {
+                            cand.get("name", ""): list(cand.get("buckets", []) or [])
+                            for cand in ranked
+                            if cand.get("name")
+                        }
+                        refinement_actions.append(action_record)
 
                 elapsed = time.perf_counter() - t0
 
@@ -683,8 +1230,6 @@ class Pipeline:
                     llm_usage=self._llm.usage.to_dict(),
                     llm_tokens_triage=llm_tokens_triage,
                     llm_tokens_refinement=llm_tokens_refinement,
-                    cpg_phase_s=cpg_phase_s,
-                    cpg_rss_bytes=cpg_rss_bytes,
                 )
                 catalog_post = _joern_catalog_snapshot(joern)
                 metrics["joern_catalog_pre"] = catalog_pre
@@ -698,6 +1243,23 @@ class Pipeline:
                     > len(catalog_pre.get("sanitizers", []))
                 )
                 metrics["findings_hash"] = _findings_hash(findings)
+                metrics.update(reducer_metrics)
+                metrics["joern_structural_evidence_count"] = len(
+                    structural_evidence_map
+                )
+                metrics["joern_prompt_flow_path_enabled"] = (
+                    self._cfg.joern_prompt_flow_path
+                )
+                metrics["joern_modeling_mode"] = self._cfg.joern_modeling_mode
+                metrics["joern_skip_triage"] = self._cfg.joern_skip_triage
+                if coverage_probe:
+                    metrics["joern_coverage_probe"] = coverage_probe
+                metrics["joern_flow_path_retry_enabled"] = (
+                    self._cfg.joern_retry_uncertain_with_flow_path
+                )
+                metrics["joern_flow_path_retry_count"] = flow_path_retry_count
+                metrics["joern_flow_path_retry_tokens"] = flow_path_retry_tokens
+                metrics["joern_flow_path_retry_tp_delta"] = flow_path_retry_tp_delta
                 _log_phase_breakdown(cve_id=cve_id, arm="joern", k=k, metrics=metrics)
 
                 results.append(
@@ -758,7 +1320,7 @@ def _pick_refinement_target(
          the LLM can propose complementary ``add_rule`` suggestions.
       4. First finding as an unconditional fallback.
     """
-    pairs = list(zip(findings, triage_results))
+    pairs = list(zip(findings, triage_results, strict=False))
     for verdict in (Verdict.FALSE_POSITIVE, Verdict.UNCERTAIN, Verdict.TRUE_POSITIVE):
         for f, t in pairs:
             if t.verdict == verdict:

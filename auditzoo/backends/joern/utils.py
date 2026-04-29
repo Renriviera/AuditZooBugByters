@@ -6,6 +6,22 @@ from typing import Any
 
 from auditzoo.core.ir.backend_api import BackendResponseError
 
+_REPL_ASSIGNMENT_RE = re.compile(
+    r"^(?:(val|var|def)\s+\w+\s*:\s*[^=]+|(\w+))\s*=\s*(.*)",
+    re.DOTALL,
+)
+_REPL_ASSIGNMENT_LINE_RE = re.compile(
+    r"(?m)^(?:(?:val|var|def)\s+\w+\s*:\s*[^=\n]+|(?:\w+))\s*="
+)
+
+
+def _strip_repl_diagnostics_prefix(raw: str) -> str:
+    """Drop warning/error text before Joern's final REPL assignment, if present."""
+    matches = list(_REPL_ASSIGNMENT_LINE_RE.finditer(raw))
+    if not matches:
+        return raw
+    return raw[matches[-1].start() :].strip()
+
 
 def _parse_to_json(raw: str, max_unwrap: int = 10) -> Any:
     """Helper to parse a raw string to JSON, handling multiple layers of encoding.
@@ -75,9 +91,12 @@ def parse_joern_response(raw: str, response_ty: str = "json", **kwargs) -> Any:
         #   i.  (val|var|def) identifier: Type = value
         #   ii. identifier = value
         # We want to extract everything after the = that follows the type declaration
-        m = re.match(
-            r"^(?:(val|var|def)\s+\w+\s*:\s*[^=]+|(\w+))\s*=\s*(.*)", s, re.DOTALL
-        )
+        stripped = _strip_repl_diagnostics_prefix(s)
+        if stripped != s:
+            s = stripped
+            updated = True
+
+        m = _REPL_ASSIGNMENT_RE.match(s)
         if m:
             s = m.group(3).strip()
             updated = True

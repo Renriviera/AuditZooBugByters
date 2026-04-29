@@ -4,17 +4,12 @@ Low-level wrapper for interacting with Joern and querying the CPG.
 """
 
 import asyncio
-import contextlib
-import errno
-import fcntl
-import json
 import logging
 import os
 import re
 import socket
 import subprocess  # nosec B404 - subprocess needed for Joern interaction
 import time
-from collections.abc import Iterator
 from pathlib import Path
 
 import psutil
@@ -25,81 +20,6 @@ from auditzoo.backends.joern.utils import parse_joern_response
 from auditzoo.core.ir.backend_api import BackendConnectionError, BackendQueryError
 
 logger = logging.getLogger(__name__)
-
-ALLOWED_OVERLAYS: frozenset[str] = frozenset(
-    {"controlflow", "callgraph", "dataflow", "typerelations"}
-)
-
-_META_FILENAME = "_auditzoo_meta.json"
-
-
-def _dir_size_bytes(path: Path) -> int:
-    """Return cumulative byte size of all files under *path* (best-effort)."""
-    total = 0
-    try:
-        for entry in path.rglob("*"):
-            try:
-                if entry.is_file():
-                    total += entry.stat().st_size
-            except OSError:
-                continue
-    except OSError:
-        return total
-    return total
-
-
-def prune_cpg_cache(cache_dir: str | os.PathLike, max_bytes: int) -> list[str]:
-    """Prune a Joern CPG cache dir down to ``max_bytes``.
-
-    Deletes entries (Joern project subdirectories at the top level) in
-    ascending order of mtime until the aggregate tree size is under the
-    budget.  Returns the list of removed project names.  Non-project
-    entries (stray files, lock files) are ignored by the eviction policy
-    but still counted in the size.
-    """
-    import shutil as _shutil
-
-    cache_path = Path(cache_dir).expanduser()
-    if not cache_path.exists() or max_bytes <= 0:
-        return []
-
-    entries: list[tuple[Path, float, int]] = []
-    for child in cache_path.iterdir():
-        if not child.is_dir():
-            continue
-        try:
-            mtime = child.stat().st_mtime
-        except OSError:
-            continue
-        entries.append((child, mtime, _dir_size_bytes(child)))
-
-    total = sum(sz for _, _, sz in entries)
-    if total <= max_bytes:
-        return []
-
-    entries.sort(key=lambda t: t[1])
-    removed: list[str] = []
-    for child, _mtime, size in entries:
-        if total <= max_bytes:
-            break
-        try:
-            _shutil.rmtree(child, ignore_errors=True)
-            total -= size
-            removed.append(child.name)
-            lock = cache_path / f"{child.name}.lock"
-            if lock.exists():
-                try:
-                    lock.unlink()
-                except OSError:
-                    pass
-        except OSError as exc:
-            logger.warning(
-                "prune_cpg_cache: failed to remove %s: %s",
-                child,
-                exc,
-            )
-    return removed
-
 
 # Regex for the Scala 3 compiler's transient "extension-method recursion limit"
 # output.  When the server hits this, the REPL's response "succeeds" but the
@@ -113,7 +33,9 @@ def prune_cpg_cache(cache_dir: str | os.PathLike, max_bytes: int) -> list[str]:
 # These are recoverable: a warm-up query plus -Xss=16m typically stops them
 # happening, and a single retry cleans up any stragglers where the first
 # invocation's implicit-search cache got into a bad state.
-_RECURSION_LIMIT_RE = re.compile(r"Recursion limit exceeded", re.MULTILINE)
+_RECURSION_LIMIT_RE = re.compile(
+    r"Recursion limit exceeded", re.MULTILINE
+)
 
 
 def _looks_like_transient_compile_error(raw: str) -> bool:
@@ -196,15 +118,6 @@ class JoernClient:
         self._process: subprocess.Popen | None = None
         self._connected_core: CPGQLSClient | None = None
         self._workspace_dir: Path | None = None
-
-        # Per-connect instrumentation; populated by ``connect`` and readable
-        # by the backend proxy / pipeline for phase-level attribution.
-        self.last_connect_timings: dict[str, float | bool] = {}
-        self.last_connect_rss: dict[str, int] = {}
-        # When set (via AUDITZOO_JOERN_GC_LOG), the dir we passed to the JVM
-        # for unified GC logging.  Useful to point ops at the log file that
-        # was active during a timed-out build.
-        self.gc_log_path: str | None = None
 
     @property
     def workspace_dir(self) -> Path | None:
@@ -292,142 +205,6 @@ class JoernClient:
                 f"Failed to get supported languages: {e}"
             ) from e
 
-    @staticmethod
-    def _validate_overlays(run_overlays: list[str] | None) -> list[str]:
-        """Normalise and validate an overlays list.
-
-        An empty list (``[]``) is legal and means "skip overlays entirely".
-        ``None`` is treated as "use defaults" and resolves to
-        ``["controlflow", "callgraph"]`` for backwards compatibility.
-        """
-        if run_overlays is None:
-            return ["controlflow", "callgraph"]
-        cleaned: list[str] = []
-        for raw in run_overlays:
-            token = str(raw).strip()
-            if not token:
-                continue
-            if token not in ALLOWED_OVERLAYS:
-                raise BackendConnectionError(
-                    f"Unknown Joern overlay {token!r}. Allowed: "
-                    f"{sorted(ALLOWED_OVERLAYS)}"
-                )
-            cleaned.append(token)
-        return cleaned
-
-    def _sample_rss(self) -> int:
-        """Sample the Joern server RSS in bytes, or 0 on error.
-
-        The shipped ``joern`` launcher is a POSIX shell wrapper that
-        spawns ``repl-bridge`` (another shell wrapper) which in turn
-        spawns the actual JVM — none of them ``exec`` the child, so
-        sampling just ``self._process.pid`` returns the outer shell's
-        RSS (a few MiB) and misses the JVM entirely.  Walk the process
-        tree and sum ``rss`` across the root + every descendant so the
-        reported number is the real JVM footprint.
-        """
-        proc = self._process
-        if proc is None:
-            return 0
-        try:
-            root = psutil.Process(proc.pid)
-        except (psutil.Error, OSError):
-            return 0
-        total = 0
-        try:
-            total += int(root.memory_info().rss)
-        except (psutil.Error, OSError):
-            pass
-        try:
-            for child in root.children(recursive=True):
-                try:
-                    total += int(child.memory_info().rss)
-                except (psutil.Error, OSError):
-                    continue
-        except (psutil.Error, OSError):
-            pass
-        return total
-
-    def _record_rss(self, label: str) -> None:
-        """Record an RSS sample under *label* and update ``peak_bytes``."""
-        rss = self._sample_rss()
-        self.last_connect_rss[f"{label}_bytes"] = rss
-        prev_peak = int(self.last_connect_rss.get("peak_bytes", 0))
-        if rss > prev_peak:
-            self.last_connect_rss["peak_bytes"] = rss
-
-    @contextlib.contextmanager
-    def _phase_timer(self, label: str) -> Iterator[None]:
-        """Context manager that records wall-clock seconds under ``label``."""
-        start = time.perf_counter()
-        try:
-            yield
-        finally:
-            self.last_connect_timings[label] = time.perf_counter() - start
-
-    @staticmethod
-    @contextlib.contextmanager
-    def _cache_flock(lock_path: Path) -> Iterator[None]:
-        """Advisory POSIX lock around a cache project.
-
-        Concurrent eval workers hitting the same ``<cache>/<project>.lock``
-        will serialise on the importCode + overlays section so only one
-        worker writes to the CPG directory; the rest re-enter the
-        ``workspace.projects.exists`` branch on release.  Failures
-        (e.g. on filesystems that don't support flock) degrade to a warning
-        and proceed unlocked.
-        """
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
-        fd: int | None = None
-        try:
-            fd = os.open(
-                str(lock_path),
-                os.O_CREAT | os.O_RDWR,
-                0o644,
-            )
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX)
-            except OSError as exc:
-                if exc.errno in (errno.ENOLCK, errno.ENOSYS, errno.EINVAL):
-                    logger.warning(
-                        "Joern CPG cache: flock unsupported on %s (%s); "
-                        "proceeding without a lock.",
-                        lock_path,
-                        exc,
-                    )
-                else:
-                    raise
-            yield
-        finally:
-            if fd is not None:
-                try:
-                    fcntl.flock(fd, fcntl.LOCK_UN)
-                except OSError:
-                    pass
-                try:
-                    os.close(fd)
-                except OSError:
-                    pass
-
-    @staticmethod
-    def _read_cache_meta(meta_path: Path) -> dict | None:
-        try:
-            return json.loads(meta_path.read_text())
-        except (OSError, ValueError):
-            return None
-
-    @staticmethod
-    def _write_cache_meta(meta_path: Path, meta: dict) -> None:
-        try:
-            meta_path.parent.mkdir(parents=True, exist_ok=True)
-            meta_path.write_text(json.dumps(meta, sort_keys=True))
-        except OSError as exc:
-            logger.warning(
-                "Joern CPG cache: failed to write meta %s: %s",
-                meta_path,
-                exc,
-            )
-
     async def connect(
         self,
         language: str,
@@ -435,8 +212,6 @@ class JoernClient:
         analysis_path: str,
         project_name: str,
         force_create_cpg: bool = False,
-        run_overlays: list[str] | None = None,
-        cache_enabled: bool = False,
     ) -> None:
         """Connect to Joern and create/load CPG.
 
@@ -458,26 +233,10 @@ class JoernClient:
             analysis_path: Path to store analysis artifacts
             project_name: Name of the project
             force_create_cpg: Whether to force create a new CPG even if one exists
-            run_overlays: Ordered list of overlays to run after ``importCode``.
-                ``None`` defaults to ``["controlflow", "callgraph"]``; an
-                empty list skips overlays entirely.
-            cache_enabled: When True, (a) treat a pre-existing project with
-                matching overlay metadata as a cache hit (skip import +
-                overlays) and (b) guard the import/overlay section with an
-                advisory POSIX flock so concurrent workers don't race on
-                the same CPG directory.
 
         Raises:
             BackendConnectionError: If connection fails
         """
-        overlays = self._validate_overlays(run_overlays)
-
-        # Reset instrumentation for this connect attempt so partial state
-        # from a failed earlier build doesn't bleed through.
-        self.last_connect_timings = {"cache_hit": False}
-        self.last_connect_rss = {}
-        connect_start = time.perf_counter()
-
         if self._connected_core is not None:
             if self._workspace_dir != Path(analysis_path):
                 raise BackendConnectionError(
@@ -510,105 +269,34 @@ class JoernClient:
             self._workspace_dir = None
             raise BackendConnectionError(f"Failed to start Joern server: {e}") from e
 
-        self._record_rss("start")
-
         self._connected_core = CPGQLSClient(f"{self.host}:{self.port}")
 
         # Set up the workspace and import the project
         # Note that this also flushes buffer from initial connection
-        with self._phase_timer("switch_workspace_s"):
-            await self.query(f'switchWorkspace("{self._workspace_dir}")')
+        await self.query(f'switchWorkspace("{self._workspace_dir}")')
 
-        with self._phase_timer("project_exists_check_s"):
-            exists: bool = parse_joern_response(
-                await self.query(
-                    f'workspace.projects.exists(_.name == "{project_name}")'
-                ),
-                "bool",
-            )
-
-        # Cache-hit gate: when caching is on, verify that the persisted
-        # overlay set matches what we were asked to run.  A mismatch must
-        # force a rebuild or downstream queries may silently rely on missing
-        # passes (e.g. callgraph).
-        meta_path = self._workspace_dir / project_name / _META_FILENAME
-        cached_meta = self._read_cache_meta(meta_path) if cache_enabled else None
-        overlays_match = (
-            cached_meta is not None
-            and list(cached_meta.get("run_overlays", [])) == overlays
+        # Check whether project already exists
+        exists: bool = parse_joern_response(
+            await self.query(f'workspace.projects.exists(_.name == "{project_name}")'),
+            "bool",
         )
-        cache_hit = cache_enabled and exists and not force_create_cpg and overlays_match
-        if cache_enabled and exists and not overlays_match and not force_create_cpg:
-            logger.info(
-                "Joern CPG cache: overlay mismatch for project %s "
-                "(cached=%s, requested=%s); rebuilding.",
-                project_name,
-                cached_meta.get("run_overlays") if cached_meta else None,
-                overlays,
-            )
-            force_create_cpg = True
 
-        self.last_connect_timings["cache_hit"] = bool(cache_hit)
-
-        lock_cm: contextlib.AbstractContextManager = contextlib.nullcontext()
-        if cache_enabled and not cache_hit:
-            lock_cm = self._cache_flock(self._workspace_dir / f"{project_name}.lock")
-
-        with lock_cm:
-            # Re-check existence under the lock so concurrent workers that
-            # lost the race do not double-import the same project.
-            if cache_enabled and not cache_hit:
-                with self._phase_timer("project_exists_recheck_s"):
-                    exists = parse_joern_response(
-                        await self.query(
-                            f'workspace.projects.exists(_.name == "{project_name}")'
-                        ),
-                        "bool",
-                    )
-                cached_meta = self._read_cache_meta(meta_path)
-                overlays_match = (
-                    cached_meta is not None
-                    and list(cached_meta.get("run_overlays", [])) == overlays
+        if not exists or force_create_cpg:
+            # Create new project
+            if language == "auto":
+                await self.query(
+                    f'importCode(inputPath="{source_path}", projectName="{project_name}")'
                 )
-                if exists and overlays_match and not force_create_cpg:
-                    cache_hit = True
-                    self.last_connect_timings["cache_hit"] = True
-
-            if not exists or force_create_cpg or not cache_hit:
-                with self._phase_timer("import_code_s"):
-                    if language == "auto":
-                        await self.query(
-                            f'importCode(inputPath="{source_path}", '
-                            f'projectName="{project_name}")'
-                        )
-                    else:
-                        await self.query(
-                            f'importCode(inputPath="{source_path}", '
-                            f'projectName="{project_name}", '
-                            f'language="{language}")'
-                        )
-                self._record_rss("after_import")
-
-                for overlay in overlays:
-                    with self._phase_timer(f"overlay_{overlay}_s"):
-                        await self.query(f"run.{overlay}")
-                self._record_rss("after_overlays")
-
-                if cache_enabled:
-                    self._write_cache_meta(
-                        meta_path,
-                        {
-                            "run_overlays": list(overlays),
-                            "language": language,
-                            "project_name": project_name,
-                            "created_at": time.time(),
-                        },
-                    )
             else:
-                with self._phase_timer("open_existing_s"):
-                    await self.query(f'open("{project_name}")')
-                    await self.query(f'workspace.setActiveProject("{project_name}")')
-                self._record_rss("after_open")
+                await self.query(
+                    f'importCode(inputPath="{source_path}", projectName="{project_name}", language="{language}")'
+                )
+            await self.query("run.controlflow")
+            await self.query("run.callgraph")
+        else:
+            # Load existing project
+            await self.query(f'open("{project_name}")')
+            await self.query(f'workspace.setActiveProject("{project_name}")')
 
         # Warm up the Scala compiler's extension-method cache.  Running a
         # cheap reference to each ``Cpg`` extension we later rely on forces
@@ -617,31 +305,7 @@ class JoernClient:
         # against a large CPG often hits "Recursion limit exceeded" even with
         # -Xss bumped.  Failures here are logged but non-fatal — the retry
         # wrapper in ``query`` will still handle transient hits later.
-        with self._phase_timer("warmup_s"):
-            await self._warm_up_extensions()
-        self._record_rss("after_warmup")
-
-        self.last_connect_timings["total_connect_s"] = (
-            time.perf_counter() - connect_start
-        )
-        self.last_connect_timings["overlays"] = list(overlays)
-        logger.info(
-            "Joern connect finished: project=%s cache_hit=%s total=%.2fs "
-            "import=%.2fs overlays=%s warmup=%.2fs rss_peak=%.1fMiB",
-            project_name,
-            self.last_connect_timings.get("cache_hit"),
-            float(self.last_connect_timings.get("total_connect_s", 0.0)),
-            float(self.last_connect_timings.get("import_code_s", 0.0)),
-            {
-                o: round(
-                    float(self.last_connect_timings.get(f"overlay_{o}_s", 0.0)),
-                    2,
-                )
-                for o in overlays
-            },
-            float(self.last_connect_timings.get("warmup_s", 0.0)),
-            self.last_connect_rss.get("peak_bytes", 0) / (1024 * 1024),
-        )
+        await self._warm_up_extensions()
 
     async def _warm_up_extensions(self) -> None:
         """Touch the common ``Cpg`` extension entry points once.
@@ -653,10 +317,10 @@ class JoernClient:
         queries either succeed outright or at least be retry-eligible.
         """
         warm_ups = [
-            "cpg.method.size",  # used by get_code_units / callees
-            "cpg.call.size",  # taint-reachability entry point
-            "cpg.file.size",  # used by file-level lookups
-            "cpg.tag.size",  # used by get_unit_tags
+            "cpg.method.size",       # used by get_code_units / callees
+            "cpg.call.size",         # taint-reachability entry point
+            "cpg.file.size",         # used by file-level lookups
+            "cpg.tag.size",          # used by get_unit_tags
             "cpg.fieldAccess.size",  # used by source matching
         ]
         for q in warm_ups:
@@ -664,9 +328,7 @@ class JoernClient:
                 await self.query(q)
             except (BackendQueryError, BackendConnectionError) as exc:
                 logger.warning(
-                    "Joern warm-up query %r failed (continuing): %s",
-                    q,
-                    exc,
+                    "Joern warm-up query %r failed (continuing): %s", q, exc,
                 )
 
     def _build_server_env(self) -> dict[str, str]:
@@ -675,44 +337,17 @@ class JoernClient:
         Adds ``-Xss<size>`` (and any ``jvm_extra_opts``) to ``JAVA_OPTS`` so
         the Scala 3 compiler has enough stack to resolve deep extension-method
         search trees without tripping "Recursion limit exceeded".
-
-        When ``AUDITZOO_JOERN_GC_LOG`` is set to a directory, also wires
-        unified JVM GC logging to ``<dir>/joern-gc-<timestamp>.log`` so
-        timed-out builds can be diagnosed as heap thrash vs stuck pass.
         """
         env = os.environ.copy()
         extra: list[str] = []
         if self.jvm_stack_size:
             extra.append(f"-Xss{self.jvm_stack_size}")
         extra.extend(self.jvm_extra_opts)
-
-        gc_log_dir = os.environ.get("AUDITZOO_JOERN_GC_LOG", "").strip()
-        if gc_log_dir:
-            try:
-                gc_log_dir_abs = os.path.abspath(os.path.expanduser(gc_log_dir))
-                os.makedirs(gc_log_dir_abs, exist_ok=True)
-                gc_log_file = os.path.join(gc_log_dir_abs, "joern-gc-%t.log")
-                extra.append(
-                    f"-Xlog:gc*,safepoint:file={gc_log_file}" ":tags,time,uptime,level"
-                )
-                self.gc_log_path = gc_log_dir_abs
-                logger.info("Joern GC logging enabled -> %s", gc_log_dir_abs)
-            except OSError as exc:
-                logger.warning(
-                    "Joern GC log dir %r unusable (%s); skipping.",
-                    gc_log_dir,
-                    exc,
-                )
-                self.gc_log_path = None
-        else:
-            self.gc_log_path = None
-
         if extra:
             existing = env.get("JAVA_OPTS", "").strip()
             env["JAVA_OPTS"] = (existing + " " + " ".join(extra)).strip()
             logger.debug(
-                "Joern JVM JAVA_OPTS set to: %s",
-                env["JAVA_OPTS"],
+                "Joern JVM JAVA_OPTS set to: %s", env["JAVA_OPTS"],
             )
         return env
 
@@ -786,7 +421,6 @@ class JoernClient:
         project_name: str,
         language: str = "auto",
         force_create_cpg: bool = False,
-        run_overlays: list[str] | None = None,
     ) -> None:
         """Load a project into Joern.
 
@@ -805,8 +439,6 @@ class JoernClient:
         if not self._connected_core or not self._workspace_dir:
             raise BackendConnectionError("Cannot reload CPG: not connected to Joern.")
 
-        overlays = self._validate_overlays(run_overlays)
-
         if force_create_cpg:
             if language == "auto":
                 await self.query(
@@ -816,8 +448,6 @@ class JoernClient:
                 await self.query(
                     f'importCode(inputPath="{source_path}", projectName="{project_name}", language="{language}")'
                 )
-            for overlay in overlays:
-                await self.query(f"run.{overlay}")
         else:
             # Load existing project
             await self.query(f'open("{project_name}")')
@@ -942,9 +572,7 @@ class JoernClient:
             logger.warning(
                 "Joern query hit transient Scala compile error "
                 "(attempt %d/%d); retrying in %.2fs. Query head: %s",
-                attempt,
-                attempts,
-                self.query_retry_sleep_s,
+                attempt, attempts, self.query_retry_sleep_s,
                 query_str[:120].replace("\n", " "),
             )
             if self.query_retry_sleep_s > 0:
