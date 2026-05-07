@@ -1,0 +1,359 @@
+{
+  "schema_version": 1,
+  "archive_kind": "joern_per_cve_timeout",
+  "description": "CWE-78 dataset records that exceeded the Joern per-CVE wall-clock budget of 1800s during the 20260423_034702 sweep. These records are archived (not deleted) and replaced 1:1 with Joern-buildable records of comparable severity in the active metadata.json.",
+  "per_cve_timeout_s": 1800.0,
+  "source_results_dir": "results/joern/20260423_034702",
+  "archived_at": "2026-05-06T20:24:37Z",
+  "count": 10,
+  "records": [
+    {
+      "cve_id": "CVE-2020-11981",
+      "archived_record": {
+        "cve_id": "CVE-2020-11981",
+        "ghsa_id": "GHSA-976r-qfjj-c24w",
+        "package": "apache-airflow",
+        "repo_url": "https://github.com/apache/airflow",
+        "vulnerable_commit": "b4b84a1933d055a2803b80b990482a7257a203ff",
+        "patch_commit": "1dda6fdde7c6bcaf0d6534786beeeba868006dd2",
+        "patch_diff_path": "diffs/CVE-2020-11981.diff",
+        "vulnerable_file": "airflow/executors/celery_executor.py",
+        "vulnerable_lines": [
+          79
+        ],
+        "sink_api": "unknown",
+        "loc": 465,
+        "cvss_score": 9.8,
+        "cvss_severity": "critical",
+        "source_db": "ghsa",
+        "taint_hops": null,
+        "notes": "Command injection via Celery broker in Apache Airflow",
+        "manual_review_status": "pending"
+      },
+      "timeout_evidence": {
+        "source_result_path": "results/joern/20260423_034702/results.json",
+        "source_run_config_path": "results/joern/20260423_034702/run_config.json",
+        "sweep": "joern",
+        "per_cve_timeout_s": 1800.0,
+        "observed_repo_url": "https://github.com/apache/airflow",
+        "observed_loc": 260716,
+        "skipped_status": "timeout"
+      },
+      "replacement_status": "replaced"
+    },
+    {
+      "cve_id": "CVE-2020-11978",
+      "archived_record": {
+        "cve_id": "CVE-2020-11978",
+        "ghsa_id": "GHSA-rvmq-4x66-q7j3",
+        "package": "apache-airflow",
+        "repo_url": "https://github.com/apache/airflow",
+        "vulnerable_commit": "4918b85cdbf1ca3b4f45e8fd346c8ed3985c8d06",
+        "patch_commit": "2fa51576e1283f5732e38fada686fd248d9c3a1e",
+        "patch_diff_path": "diffs/CVE-2020-11978.diff",
+        "vulnerable_file": "airflow/example_dags/example_trigger_target_dag.py",
+        "vulnerable_lines": [
+          69,
+          70
+        ],
+        "sink_api": "run",
+        "loc": 73,
+        "cvss_score": 8.8,
+        "cvss_severity": "high",
+        "source_db": "ghsa",
+        "taint_hops": null,
+        "notes": "Remote code execution (RCE) in Apache Airflow",
+        "manual_review_status": "pending"
+      },
+      "timeout_evidence": {
+        "source_result_path": "results/joern/20260423_034702/results.json",
+        "source_run_config_path": "results/joern/20260423_034702/run_config.json",
+        "sweep": "joern",
+        "per_cve_timeout_s": 1800.0,
+        "observed_repo_url": "https://github.com/apache/airflow",
+        "observed_loc": 179661,
+        "skipped_status": "timeout"
+      },
+      "replacement_status": "replaced"
+    },
+    {
+      "cve_id": "CVE-2021-41228",
+      "archived_record": {
+        "cve_id": "CVE-2021-41228",
+        "ghsa_id": "GHSA-3rcw-9p9x-582v",
+        "package": "tensorflow",
+        "repo_url": "https://github.com/tensorflow/tensorflow",
+        "vulnerable_commit": "349172cf0ac29ba1346d244a40dc4761b4600f2e",
+        "patch_commit": "8b202f08d52e8206af2bdb2112a62fafbc546ec7",
+        "patch_diff_path": "diffs/CVE-2021-41228.diff",
+        "vulnerable_file": "tensorflow/python/tools/saved_model_cli.py",
+        "vulnerable_lines": [
+          524,
+          532,
+          548,
+          549,
+          662,
+          926,
+          927
+        ],
+        "sink_api": "unknown",
+        "loc": 931,
+        "cvss_score": 7.5,
+        "cvss_severity": "high",
+        "source_db": "ghsa",
+        "taint_hops": null,
+        "notes": "Code injection in `saved_model_cli`",
+        "manual_review_status": "pending"
+      },
+      "timeout_evidence": {
+        "source_result_path": "results/joern/20260423_034702/results.json",
+        "source_run_config_path": "results/joern/20260423_034702/run_config.json",
+        "sweep": "joern",
+        "per_cve_timeout_s": 1800.0,
+        "observed_repo_url": "https://github.com/tensorflow/tensorflow",
+        "observed_loc": 978620,
+        "skipped_status": "timeout"
+      },
+      "replacement_status": "replaced"
+    },
+    {
+      "cve_id": "CVE-2019-14904",
+      "archived_record": {
+        "cve_id": "CVE-2019-14904",
+        "ghsa_id": "GHSA-gwr8-5j83-483c",
+        "package": "ansible",
+        "repo_url": "https://github.com/ansible/ansible",
+        "vulnerable_commit": "b3a0ccc485979528940e6b37a9e2f9c404fca478",
+        "patch_commit": "589a415f887b6f2bb65cd07fe6b2e9d0a8156b69",
+        "patch_diff_path": "diffs/CVE-2019-14904.diff",
+        "vulnerable_file": "lib/ansible/modules/system/solaris_zone.py",
+        "vulnerable_lines": [
+          190
+        ],
+        "sink_api": "unknown",
+        "loc": 189,
+        "cvss_score": 7.3,
+        "cvss_severity": "high",
+        "source_db": "ghsa",
+        "taint_hops": null,
+        "notes": "OS Command Injection and Improper Input Validation in ansible",
+        "manual_review_status": "pending"
+      },
+      "timeout_evidence": {
+        "source_result_path": "results/joern/20260423_034702/results.json",
+        "source_run_config_path": "results/joern/20260423_034702/run_config.json",
+        "sweep": "joern",
+        "per_cve_timeout_s": 1800.0,
+        "observed_repo_url": "https://github.com/ansible/ansible",
+        "observed_loc": 1280202,
+        "skipped_status": "timeout"
+      },
+      "replacement_status": "replaced"
+    },
+    {
+      "cve_id": "CVE-2026-25130",
+      "archived_record": {
+        "cve_id": "CVE-2026-25130",
+        "ghsa_id": "GHSA-jfpc-wj3m-qw2m",
+        "package": "cai-framework",
+        "repo_url": "https://github.com/aliasrobotics/cai",
+        "vulnerable_commit": "e38ac2b031dc87ee2b608ee43a59ac9d913fdd74",
+        "patch_commit": "e22a1220f764e2d7cf9da6d6144926f53ca01cde",
+        "patch_diff_path": "diffs/CVE-2026-25130.diff",
+        "vulnerable_file": "src/cai/tools/reconnaissance/filesystem.py",
+        "vulnerable_lines": [
+          67
+        ],
+        "sink_api": "unknown",
+        "loc": 66,
+        "cvss_score": 9.6,
+        "cvss_severity": "critical",
+        "source_db": "ghsa",
+        "taint_hops": null,
+        "notes": "CAI find_file Agent Tool has Command Injection Vulnerability Through Argument Injection",
+        "manual_review_status": "pending"
+      },
+      "timeout_evidence": {
+        "source_result_path": "results/joern/20260423_034702/results.json",
+        "source_run_config_path": "results/joern/20260423_034702/run_config.json",
+        "sweep": "joern",
+        "per_cve_timeout_s": 1800.0,
+        "observed_repo_url": "https://github.com/aliasrobotics/cai",
+        "observed_loc": 70544,
+        "skipped_status": "timeout"
+      },
+      "replacement_status": "replaced"
+    },
+    {
+      "cve_id": "CVE-2026-26331",
+      "archived_record": {
+        "cve_id": "CVE-2026-26331",
+        "ghsa_id": "GHSA-g3gw-q23r-pgqm",
+        "package": "yt-dlp",
+        "repo_url": "https://github.com/yt-dlp/yt-dlp",
+        "vulnerable_commit": "c105461647315f7f479091194944713b392ca729",
+        "patch_commit": "1fbbe29b99dc61375bf6d786f824d9fcf6ea9c1a",
+        "patch_diff_path": "diffs/CVE-2026-26331.diff",
+        "vulnerable_file": "test/test_InfoExtractor.py",
+        "vulnerable_lines": [
+          84
+        ],
+        "sink_api": "unknown",
+        "loc": 1391,
+        "cvss_score": 8.8,
+        "cvss_severity": "high",
+        "source_db": "ghsa",
+        "taint_hops": null,
+        "notes": "yt-dlp: Arbitrary Command Injection when using the `--netrc-cmd` option",
+        "manual_review_status": "pending"
+      },
+      "timeout_evidence": {
+        "source_result_path": "results/joern/20260423_034702/results.json",
+        "source_run_config_path": "results/joern/20260423_034702/run_config.json",
+        "sweep": "joern",
+        "per_cve_timeout_s": 1800.0,
+        "observed_repo_url": "https://github.com/yt-dlp/yt-dlp",
+        "observed_loc": 229216,
+        "skipped_status": "timeout"
+      },
+      "replacement_status": "replaced"
+    },
+    {
+      "cve_id": "CVE-2026-34955",
+      "archived_record": {
+        "cve_id": "CVE-2026-34955",
+        "ghsa_id": "GHSA-r4f2-3m54-pp7q",
+        "package": "praisonai",
+        "repo_url": "https://github.com/MervinPraison/PraisonAI",
+        "vulnerable_commit": "d476379f450ea4204f0ca0a48d3a0c622b917a6f",
+        "patch_commit": "06eb6b197cf9c9ccd0839d7a7cefcc25a0d86e82",
+        "patch_diff_path": "diffs/CVE-2026-34955.diff",
+        "vulnerable_file": "src/praisonai/praisonai/deploy.py",
+        "vulnerable_lines": [
+          60
+        ],
+        "sink_api": "unknown",
+        "loc": 5061,
+        "cvss_score": 8.8,
+        "cvss_severity": "high",
+        "source_db": "ghsa",
+        "taint_hops": null,
+        "notes": "PraisonAI Has Sandbox Escape via shell=True and Bypassable Blocklist in SubprocessSandbox",
+        "manual_review_status": "pending"
+      },
+      "timeout_evidence": {
+        "source_result_path": "results/joern/20260423_034702/results.json",
+        "source_run_config_path": "results/joern/20260423_034702/run_config.json",
+        "sweep": "joern",
+        "per_cve_timeout_s": 1800.0,
+        "observed_repo_url": "https://github.com/MervinPraison/PraisonAI",
+        "observed_loc": 529006,
+        "skipped_status": "timeout"
+      },
+      "replacement_status": "replaced"
+    },
+    {
+      "cve_id": "CVE-2026-34935",
+      "archived_record": {
+        "cve_id": "CVE-2026-34935",
+        "ghsa_id": "GHSA-9gm9-c8mq-vq7m",
+        "package": "praisonai",
+        "repo_url": "https://github.com/MervinPraison/PraisonAI",
+        "vulnerable_commit": "66bd9ee2a9c8c1e14514fe4d135b7e73e96a66fc",
+        "patch_commit": "47bff65413beaa3c21bf633c1fae4e684348368c",
+        "patch_diff_path": "diffs/CVE-2026-34935.diff",
+        "vulnerable_file": "src/praisonai/praisonai/cli/features/mcp.py",
+        "vulnerable_lines": [
+          97
+        ],
+        "sink_api": "unknown",
+        "loc": 2585,
+        "cvss_score": 9.8,
+        "cvss_severity": "critical",
+        "source_db": "ghsa",
+        "taint_hops": null,
+        "notes": "PraisonAI: OS Command Injection in MCPHandler.parse_mcp_command()",
+        "manual_review_status": "pending"
+      },
+      "timeout_evidence": {
+        "source_result_path": "results/joern/20260423_034702/results.json",
+        "source_run_config_path": "results/joern/20260423_034702/run_config.json",
+        "sweep": "joern",
+        "per_cve_timeout_s": 1800.0,
+        "observed_repo_url": "https://github.com/MervinPraison/PraisonAI",
+        "observed_loc": 514590,
+        "skipped_status": "timeout"
+      },
+      "replacement_status": "replaced"
+    },
+    {
+      "cve_id": "CVE-2026-35043",
+      "archived_record": {
+        "cve_id": "CVE-2026-35043",
+        "ghsa_id": "GHSA-fgv4-6jr3-jgfw",
+        "package": "bentoml",
+        "repo_url": "https://github.com/bentoml/BentoML",
+        "vulnerable_commit": "716daf4ebd1e8a7c8ba48d1cad69836489b43644",
+        "patch_commit": "009d68ea713cce4203f5ad8bb734ff55b15a2f2c",
+        "patch_diff_path": "diffs/CVE-2026-35043.diff",
+        "vulnerable_file": "src/bentoml/_internal/bento/build_config.py",
+        "vulnerable_lines": [
+          47
+        ],
+        "sink_api": "unknown",
+        "loc": 133,
+        "cvss_score": 7.8,
+        "cvss_severity": "high",
+        "source_db": "ghsa",
+        "taint_hops": null,
+        "notes": "BentoML: Command Injection in cloud deployment setup script",
+        "manual_review_status": "pending"
+      },
+      "timeout_evidence": {
+        "source_result_path": "results/joern/20260423_034702/results.json",
+        "source_run_config_path": "results/joern/20260423_034702/run_config.json",
+        "sweep": "joern",
+        "per_cve_timeout_s": 1800.0,
+        "observed_repo_url": "https://github.com/bentoml/BentoML",
+        "observed_loc": 65005,
+        "skipped_status": "timeout"
+      },
+      "replacement_status": "replaced"
+    },
+    {
+      "cve_id": "CVE-2026-33641",
+      "archived_record": {
+        "cve_id": "CVE-2026-33641",
+        "ghsa_id": "GHSA-qhj7-v7h7-q4c7",
+        "package": "Glances",
+        "repo_url": "https://github.com/nicolargo/glances",
+        "vulnerable_commit": "bf6fcb7a5442d7eb4dbbac2420c87a90d33d7822",
+        "patch_commit": "358d76a225fc21a9f95d2c4d7e46fafe64a644c6",
+        "patch_diff_path": "diffs/CVE-2026-33641.diff",
+        "vulnerable_file": "glances/config.py",
+        "vulnerable_lines": [
+          131,
+          365
+        ],
+        "sink_api": "system",
+        "loc": 2137,
+        "cvss_score": 7.8,
+        "cvss_severity": "high",
+        "source_db": "ghsa",
+        "taint_hops": null,
+        "notes": "Glances Vulnerable to Command Injection via Dynamic Configuration Values",
+        "manual_review_status": "pending"
+      },
+      "timeout_evidence": {
+        "source_result_path": "results/joern/20260423_034702/results.json",
+        "source_run_config_path": "results/joern/20260423_034702/run_config.json",
+        "sweep": "joern",
+        "per_cve_timeout_s": 1800.0,
+        "observed_repo_url": "https://github.com/nicolargo/glances",
+        "observed_loc": 33114,
+        "skipped_status": "timeout"
+      },
+      "replacement_status": "replaced"
+    }
+  ]
+}

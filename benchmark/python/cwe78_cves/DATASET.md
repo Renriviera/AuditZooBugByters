@@ -12,10 +12,11 @@ tools (Semgrep, Joern) with LLM-augmented triage.
 | Target CWE      | CWE-78 (OS Command Injection)   |
 | Language         | Python                           |
 | Total records    | 105                              |
-| CVE year range   | 2015 – 2026                      |
+| CVE year range   | 2014 – 2026                      |
 | Random seed      | 235711                           |
-| Collection date  | 2026-04-07                       |
+| Collection date  | 2026-04-07 (last refresh: 2026-05-06) |
 | Config file      | `conf/dataset.yaml`              |
+| Joern verifier   | `pysrc2cpg` + OssDataFlow @ `--per-cve-timeout=1800` |
 
 ---
 
@@ -23,8 +24,19 @@ tools (Semgrep, Joern) with LLM-augmented triage.
 
 ```
 benchmark/python/cwe78_cves/
-├── metadata.json          # All 105 records (authoritative)
-├── diffs/                 # 106 unified-diff files (one per CVE)
+├── metadata.json          # All 105 active records (authoritative)
+├── joern_1800_timeout_archive.json
+│                          # 10 records archived from the active set after they
+│                          # exceeded the Joern 1800s per-CVE wall-clock budget,
+│                          # plus the timeout evidence (results/joern/...)
+├── joern_1800_replacement_verification.json
+│                          # Joern build evidence (importCode.python +
+│                          # run.ossdataflow, build_s, n_method, n_call) for
+│                          # the 10 replacement CVEs that took the timeout
+│                          # archive's place. All builds completed well under
+│                          # 1800s.
+├── diffs/                 # Unified-diff files; includes diffs for both
+│   │                      # active and archived (timeout) CVEs
 │   ├── CVE-YYYY-NNNNN.diff
 │   └── ...
 ├── spot_check.json        # 10-sample subset for manual QA
@@ -86,9 +98,9 @@ Each entry in `metadata.json` is a JSON object with these fields:
 
 | Source             | Records | Description                                                   |
 |--------------------|---------|---------------------------------------------------------------|
-| `ghsa`             | 69      | GitHub Advisory Database, reviewed section, ecosystem = PyPI  |
+| `ghsa`             | 59      | GitHub Advisory Database, reviewed section, ecosystem = PyPI  |
+| `osv`              | 22      | OSV.dev (PyPI snapshot, GHSA + PYSEC), incl. v1.2 refresh     |
 | `ghsa_unreviewed`  | 16      | GHSA unreviewed section, matched via Python keyword heuristics|
-| `osv`              | 12      | OSV.dev API queries for PyPI packages with CWE-78 history     |
 | `huntr`            | 8       | huntr.dev bug bounties surfaced via OSV.dev and NVD references|
 
 ---
@@ -99,9 +111,9 @@ Each entry in `metadata.json` is a JSON object with these fields:
 
 | Severity | Count |
 |----------|-------|
-| Critical | 37    |
-| High     | 57    |
-| Medium   | 10    |
+| Critical | 35    |
+| High     | 55    |
+| Medium   | 14    |
 | Low      | 1     |
 
 ### LOC Distribution
@@ -109,52 +121,51 @@ Each entry in `metadata.json` is a JSON object with these fields:
 | Bin              | Range       | Count |
 |------------------|-------------|-------|
 | Small            | < 100       | 22    |
-| Medium           | 100 – 500   | 48    |
-| Large            | 500 – 2000  | 23    |
-| Very large       | > 2000      | 12    |
+| Medium           | 100 – 500   | 49    |
+| Large            | 500 – 2000  | 25    |
+| Very large       | > 2000      | 9     |
 
-LOC stats: min=4, max=33546, median=282, mean=1098
-
-### CVSS Score Stats
-
-min=4.5, max=10.0, median=8.8, mean=8.4
+LOC stats: min=4, max=33546, median=285, mean=1032
 
 ### CVE Year Distribution
 
 | Year | Count | Year | Count |
 |------|-------|------|-------|
-| 2015 | 1     | 2021 | 12    |
-| 2017 | 3     | 2022 | 11    |
-| 2018 | 1     | 2023 | 17    |
-| 2019 | 2     | 2024 | 17    |
-| 2020 | 6     | 2025 | 17    |
-|      |       | 2026 | 16    |
+| 2014 | 1     | 2021 | 12    |
+| 2015 | 1     | 2022 | 12    |
+| 2017 | 3     | 2023 | 20    |
+| 2018 | 1     | 2024 | 18    |
+| 2019 | 2     | 2025 | 17    |
+| 2020 | 5     | 2026 | 11    |
 
 ### Top Packages
 
 | Package           | Count |
 |-------------------|-------|
-| apache-airflow    | 9     |
+| apache-airflow    | 7     |
 | mlflow            | 6     |
 | PaddlePaddle      | 4     |
-| ansible           | 3     |
-| yt-dlp            | 3     |
 | gerapy            | 3     |
 | salt              | 3     |
-| cai-framework     | 2     |
-| praisonai         | 2     |
-| bentoml           | 2     |
+| ansible           | 2     |
+| yt-dlp            | 2     |
+| pgadmin4          | 2     |
+| motioneye         | 2     |
+| fastmcp           | 2     |
 
 ### Sink API Distribution
 
 | Sink API           | Count |
 |--------------------|-------|
-| unknown            | 67    |
-| subprocess.run     | 11    |
-| subprocess.call    | 10    |
-| os.system          | 10    |
-| subprocess.Popen   | 6     |
-| commands.getoutput | 1     |
+| unknown            | 69    |
+| run                | 10    |
+| call               | 8     |
+| os.system          | 7     |
+| Popen              | 3     |
+| subprocess.Popen   | 3     |
+| subprocess.call    | 2     |
+| system             | 2     |
+| getoutput          | 1     |
 
 ---
 
@@ -316,3 +327,65 @@ See `conf/dataset.yaml`:
 |---------|------------|---------|----------------------------------------------|
 | 1.0     | 2026-04-07 | 85      | Initial collection from GHSA + NVD            |
 | 1.1     | 2026-04-07 | 105     | Supplement from OSV.dev + huntr (+20 records) |
+| 1.2     | 2026-05-06 | 105     | Joern 1800s timeout refresh: archived 10 records to `joern_1800_timeout_archive.json` and replaced them 1:1 with new Joern-buildable CWE-78 (and tightly-related CWE-77/CWE-94 OS command injection) records. See [Joern Timeout Refresh](#joern-timeout-refresh-v12) below. |
+
+---
+
+## Joern Timeout Refresh (v1.2)
+
+The active dataset previously contained 10 entries whose vulnerable repositories
+exceeded the Joern per-CVE wall-clock budget of **1800 seconds** (`pysrc2cpg` +
+`OssDataFlow`) during the
+[`results/joern/20260423_034702`](../../../results/joern/20260423_034702)
+sweep — that run had `per_cve_timeout: 1800.0` and an empty `skip_cves` list,
+so the timeouts in `results.json` are direct evidence (`skipped: timeout`).
+
+### Archived records
+
+The 10 timeout records, together with their original metadata and the timeout
+evidence (`source_result_path`, `source_run_config_path`, `per_cve_timeout_s`,
+observed `loc`, observed `repo_url`, `skipped_status`), are preserved in
+[`joern_1800_timeout_archive.json`](joern_1800_timeout_archive.json):
+
+| CVE             | Repository                                | Joern repo LOC |
+|-----------------|--------------------------------------------|----------------|
+| CVE-2020-11981  | `apache/airflow`                           | 260,716        |
+| CVE-2020-11978  | `apache/airflow`                           | 179,661        |
+| CVE-2021-41228  | `tensorflow/tensorflow`                    | 978,620        |
+| CVE-2019-14904  | `ansible/ansible`                          | 1,280,202      |
+| CVE-2026-25130  | `aliasrobotics/cai`                        | 70,544         |
+| CVE-2026-26331  | `yt-dlp/yt-dlp`                            | 229,216        |
+| CVE-2026-34955  | `MervinPraison/PraisonAI`                  | 529,006        |
+| CVE-2026-34935  | `MervinPraison/PraisonAI`                  | 514,590        |
+| CVE-2026-35043  | `bentoml/BentoML`                          | 65,005         |
+| CVE-2026-33641  | `nicolargo/glances`                        | 33,114         |
+
+### Replacement records
+
+Each archived record was replaced by a Joern-buildable, non-duplicate entry
+(no overlap on `cve_id` / `ghsa_id` / `(repo_url, vulnerable_file,
+sorted(vulnerable_lines[:5]))` against the active dataset, and **no entry**
+in any of the 8 timeout repositories above):
+
+| New CVE           | Package                       | Repository                              | Joern build (s) |
+|-------------------|-------------------------------|-----------------------------------------|-----------------|
+| CVE-2022-42906    | `powerline-gitstatus`         | `jaspernbrouwer/powerline-gitstatus`    | 4.6             |
+| CVE-2023-1000     | `dcnnt`                       | `cyanomiko/dcnnt-py`                    | 5.7             |
+| CVE-2019-7537     | `donfig`                      | `pytroll/donfig`                        | 5.3             |
+| CVE-2021-23556    | `guake`                       | `Guake/guake`                           | 8.8             |
+| CVE-2023-39523    | `scancodeio`                  | `nexB/scancode.io`                      | 10.5            |
+| CVE-2014-6633     | `trytond`                     | `tryton/trytond`                        | 12.8            |
+| CVE-2020-35459    | `crmsh`                       | `ClusterLabs/crmsh`                     | 12.5            |
+| CVE-2024-53526    | `composio-julep`              | `ComposioHQ/composio`                   | 13.4            |
+| CVE-2026-33154    | `dynaconf`                    | `dynaconf/dynaconf`                     | 11.3            |
+| CVE-2023-34233    | `snowflake-connector-python`  | `snowflakedb/snowflake-connector-python`| 13.1            |
+
+Each replacement was verified by importing the repository at
+`vulnerable_commit` with `pysrc2cpg`, applying the `OssDataFlow` overlay and
+confirming a non-zero method/call count under the same 1800 s budget. Build
+times above are end-to-end including Joern startup; all are well within the
+budget.
+
+The replacement diffs live alongside the original diffs under
+[`diffs/`](diffs); the archived timeout diffs are intentionally retained so
+that the archive entries remain self-contained and reproducible.

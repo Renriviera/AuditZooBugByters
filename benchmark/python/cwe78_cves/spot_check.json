@@ -1,58 +1,74 @@
 [
   {
-    "cve_id": "CVE-2015-8557",
-    "package": "Pygments",
+    "cve_id": "CVE-2021-3583",
+    "package": "ansible",
+    "sink_api": "unknown",
+    "repo_url": "https://github.com/ansible/ansible",
+    "patch_commit": "03aff644cc1c00e1f7551195c68fbd0d13a39e6e",
+    "manual_review_status": "pending"
+  },
+  {
+    "cve_id": "CVE-2023-34540",
+    "package": "langchain",
     "sink_api": "call",
-    "repo_url": "https://github.com/pygments/pygments",
-    "patch_commit": "db6dd826f8624179e563aaded391efe824462f51",
+    "repo_url": "https://github.com/hwchase17/langchain",
+    "patch_commit": "a2f191a32229256dd41deadf97786fe41ce04cbb",
     "manual_review_status": "pending"
   },
   {
-    "cve_id": "CVE-2026-27602",
-    "package": "modoboa",
-    "sink_api": "unknown",
-    "repo_url": "https://github.com/modoboa/modoboa",
-    "patch_commit": "27a7aa133d3608fe8c25ae39125d1012c333cbfa",
-    "manual_review_status": "pending"
-  },
-  {
-    "cve_id": "CVE-2026-33718",
-    "package": "openhands",
-    "sink_api": "run",
-    "repo_url": "https://github.com/OpenHands/OpenHands",
-    "patch_commit": "698cfc2520cdc50eac5fa869c6c1ba5c8fee9e13",
-    "manual_review_status": "pending"
-  },
-  {
-    "cve_id": "CVE-2023-22884",
-    "package": "apache-airflow",
-    "sink_api": "call",
-    "repo_url": "https://github.com/apache/airflow",
-    "patch_commit": "45dd0c484e16ff56800cc9c047f56b4a909d2d0d",
-    "manual_review_status": "pending"
-  },
-  {
-    "cve_id": "CVE-2026-33482",
-    "package": "wwbn/avideo",
-    "sink_api": "unknown",
-    "repo_url": "https://github.com/WWBN/AVideo",
-    "patch_commit": "25c8ab90269e3a01fb4cf205b40a373487f022e1",
-    "manual_review_status": "pending"
-  },
-  {
-    "cve_id": "CVE-2025-67511",
-    "package": "cai-framework",
-    "sink_api": "unknown",
-    "repo_url": "https://github.com/aliasrobotics/cai",
-    "patch_commit": "09ccb6e0baccf56c40e6cb429c698750843a999c",
-    "manual_review_status": "pending"
-  },
-  {
-    "cve_id": "CVE-2023-4033",
+    "cve_id": "CVE-2023-6018",
     "package": "mlflow",
     "sink_api": "unknown",
     "repo_url": "https://github.com/mlflow/mlflow",
-    "patch_commit": "6dde93758d42455cb90ef324407919ed67668b9b",
+    "patch_commit": "55c72d02380e8db8118595a4fdae7879cb7ac5bd",
+    "manual_review_status": "pending"
+  },
+  {
+    "cve_id": "CVE-2025-14287",
+    "package": "mlflow",
+    "sink_api": "os.system",
+    "repo_url": "https://github.com/mlflow/mlflow",
+    "patch_commit": "8b8792a7034fb33a14b0b31cabcaa9b912d3485f",
+    "manual_review_status": "pending"
+  },
+  {
+    "cve_id": "CVE-2023-5002",
+    "package": "pgadmin4",
+    "sink_api": "getoutput",
+    "repo_url": "https://github.com/pgadmin-org/pgadmin4",
+    "patch_commit": "35f05e49b3632a0a674b9b36535a7fe2d93dd0c2",
+    "manual_review_status": "pending"
+  },
+  {
+    "cve_id": "CVE-2025-22237",
+    "package": "salt",
+    "sink_api": "unknown",
+    "repo_url": "https://github.com/saltstack/salt",
+    "patch_commit": "9445f496fed61b15dc4364818007e5b765b0746f",
+    "manual_review_status": "pending"
+  },
+  {
+    "cve_id": "CVE-2023-52310",
+    "package": "PaddlePaddle",
+    "sink_api": "unknown",
+    "repo_url": "https://github.com/PaddlePaddle/Paddle",
+    "patch_commit": "49bec176053595975c1941cff9749c55f7203ea9",
+    "manual_review_status": "pending"
+  },
+  {
+    "cve_id": "CVE-2022-40954",
+    "package": "apache-airflow",
+    "sink_api": "unknown",
+    "repo_url": "https://github.com/apache/airflow",
+    "patch_commit": "93589288156d56aff4b1f822b77695e3c58e4568",
+    "manual_review_status": "pending"
+  },
+  {
+    "cve_id": "CVE-2021-43857",
+    "package": "gerapy",
+    "sink_api": "Popen",
+    "repo_url": "https://github.com/Gerapy/Gerapy",
+    "patch_commit": "49bcb19be5e0320e7e1535f34fe00f16a3cf3b28",
     "manual_review_status": "pending"
   },
   {
@@ -61,22 +77,6 @@
     "sink_api": "unknown",
     "repo_url": "https://github.com/Gerapy/Gerapy",
     "patch_commit": "157fe7966876640414efbf126edddfcfb1ab6dfd",
-    "manual_review_status": "pending"
-  },
-  {
-    "cve_id": "CVE-2025-62703",
-    "package": "fugue",
-    "sink_api": "unknown",
-    "repo_url": "https://github.com/fugue-project/fugue",
-    "patch_commit": "6f25326779fd1f528198098d6287c5a863176fc0",
-    "manual_review_status": "pending"
-  },
-  {
-    "cve_id": "CVE-2025-54941",
-    "package": "apache-airflow",
-    "sink_api": "unknown",
-    "repo_url": "https://github.com/apache/airflow",
-    "patch_commit": "c8f60cc2f1cd8064ea1806bde1ed6726191c60d5",
     "manual_review_status": "pending"
   }
 ]

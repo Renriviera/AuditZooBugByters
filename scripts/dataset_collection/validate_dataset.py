@@ -50,8 +50,19 @@ REQUIRED_FIELDS = [
 ]
 
 
-def validate(metadata_path: Path, check_remote: bool = False) -> bool:
-    """Run all validations. Returns True if all pass."""
+def validate(
+    metadata_path: Path,
+    check_remote: bool = False,
+    strict: bool = False,
+) -> bool:
+    """Run all validations. Returns True if all pass.
+
+    The ``strict`` flag promotes structural-but-historical issues
+    (currently: duplicate vulnerable locations that already exist in the
+    shipped dataset due to diff-parser artifacts on version/test files)
+    from warnings to errors. Use ``strict=True`` in CI/refresh workflows
+    where every duplicate must be triaged before landing.
+    """
     logger.info("Validating dataset: %s", metadata_path)
 
     if not metadata_path.exists():
@@ -81,6 +92,44 @@ def validate(metadata_path: Path, check_remote: bool = False) -> bool:
     dupes = [cid for cid, cnt in Counter(cve_ids).items() if cnt > 1]
     if dupes:
         errors.append(f"Duplicate CVE IDs: {dupes}")
+
+    # 2b. No duplicate vulnerable locations
+    # Mirrors the dedup key in scripts/dataset_collection/collect_cwe78_dataset.py
+    # phase5_filter_and_dedup: (repo_url, vulnerable_file, sorted(vuln_lines[:5]))
+    # Two distinct CVEs landing on the exact same vulnerable location in the same
+    # repo is almost always an accidental duplicate inserted during a refresh.
+    seen_loc: dict[tuple[str, str, str], str] = {}
+    loc_dupes: list[str] = []
+    for rec in records:
+        loc_key = (
+            rec.get("repo_url", ""),
+            rec.get("vulnerable_file", ""),
+            str(sorted((rec.get("vulnerable_lines") or [])[:5])),
+        )
+        # Only enforce when the key is meaningful (file + lines present);
+        # records still pending a vulnerable_file/lines extraction would
+        # otherwise spuriously collide on ("", "", "[]").
+        if not loc_key[1] or loc_key[2] == "[]":
+            continue
+        prior = seen_loc.get(loc_key)
+        if prior:
+            loc_dupes.append(
+                f"{rec.get('cve_id', '?')} duplicates {prior} at "
+                f"{loc_key[0]}::{loc_key[1]}::{loc_key[2]}"
+            )
+        else:
+            seen_loc[loc_key] = rec.get("cve_id", "?")
+    if loc_dupes:
+        msg = (
+            "Duplicate vulnerable locations (repo_url + vulnerable_file + "
+            f"sorted(vulnerable_lines[:5])): {loc_dupes}"
+        )
+        # Some pre-existing duplicates exist in shipped data because the
+        # diff parser sometimes locks onto a version.py / test_*.py file
+        # before reaching the real vulnerable file. Surface the problem
+        # loudly (warning by default; error under --strict) but do not
+        # block historical refreshes that don't introduce new collisions.
+        (errors if strict else warnings).append(msg)
 
     # 3. Diff files exist and are non-empty
     base_dir = metadata_path.parent
@@ -249,9 +298,21 @@ def main() -> None:
                         help="Path to metadata.json")
     parser.add_argument("--check-remote", action="store_true",
                         help="Verify commits are accessible via GitHub API")
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help=(
+            "Promote duplicate-vulnerable-location findings from "
+            "warnings to errors (use in CI / refresh workflows)."
+        ),
+    )
     args = parser.parse_args()
 
-    ok = validate(Path(args.metadata), check_remote=args.check_remote)
+    ok = validate(
+        Path(args.metadata),
+        check_remote=args.check_remote,
+        strict=args.strict,
+    )
     sys.exit(0 if ok else 1)
 
 
