@@ -44,30 +44,43 @@ source /workspace/setup_env.sh
 ### Semgrep sweep
 
 ```bash
-# Full sweep (105 CVEs, k=0..3, 900 s budget, patched commit run)
+# Full model-seeded sweep (selected CVEs split 25% train / 75% validate)
 python -m splitEvaluations.run_semgrep_sweep
 
-# Smoke run against the two CVEs flagged in the B3 plan
+# Smoke run: select 10 eligible CVEs, seed rules from 3, evaluate on 7
 python -m splitEvaluations.run_semgrep_sweep \
-    --only-cves CVE-2024-52803 CVE-2023-40267
+    --dataset-size 10 --max-k 0 --no-patched \
+    --llm-model GPT5.5mini --seed-model GPT5.5mini
 ```
 
 The sweep ends with an auto-audit; `rules_hash_summary.csv` and
-`rules_hash_audit.json` are written next to `results.json`.
+`rules_hash_audit.json` are written next to `results.json`.  The run
+directory also includes `training_split.json`, `model_seed_semgrep.yaml`,
+and `model_seed_prompt.json`.
 
 ### Joern sweep
 
 ```bash
-# Full sweep (105 CVEs, k=0..3, 1800 s budget, no patched re-scan)
+# Full model-seeded sweep (selected CVEs split 25% train / 75% validate)
 python -m splitEvaluations.run_joern_sweep
 
-# Smoke run
+# Smoke run: select 10 eligible CVEs, seed catalogs from 3, evaluate on 7
 python -m splitEvaluations.run_joern_sweep \
-    --only-cves CVE-2024-52803 CVE-2023-40267
+    --dataset-size 10 --max-k 0 \
+    --llm-model GPT5.5mini --seed-model GPT5.5mini
 ```
 
 Use `--run-patched` to opt back into the "alerts-on-patched = FP"
 signal (expect ~2x wall time).
+
+### Dataset sizing and splits
+
+Both sweeps accept `--dataset-size` before the train/validation split, so
+`--dataset-size 10`, `--dataset-size 30`, `--dataset-size 100`, and
+`--dataset-size full` all use the same deterministic selection logic.  The
+default `--train-fraction 0.25` uses the training records only for the
+one-time GPT-5.5-mini seed-generation call; `results.json` is computed only
+on the remaining validation records.
 
 ### Standalone rules-hash audit
 

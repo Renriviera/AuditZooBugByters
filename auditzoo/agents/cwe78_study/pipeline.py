@@ -11,12 +11,13 @@ import asyncio
 import hashlib
 import logging
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
-from autogen_core import AgentId, MessageContext
+from autogen_core import AgentId
 
 from auditzoo.backends.ingestion import auto_detect_backend
 from auditzoo.core.protocol.requests import Request
@@ -29,7 +30,6 @@ from .schemas import (
     Finding,
     HelperRole,
     IterationResult,
-    RefinementAction,
     RunResult,
     ToolArm,
     Verdict,
@@ -233,6 +233,10 @@ class PipelineConfig:
         joern_port: int = 12345,
         call_graph_depth: int = 3,
         llm_log_io_path: str | None = None,
+        semgrep_rules_yaml: str | None = None,
+        joern_sources: list[str] | None = None,
+        joern_sinks: list[str] | None = None,
+        joern_sanitizers: list[str] | None = None,
     ) -> None:
         self.max_iterations = max_iterations
         self.seed = seed
@@ -246,6 +250,12 @@ class PipelineConfig:
         self.joern_port = joern_port
         self.call_graph_depth = call_graph_depth
         self.llm_log_io_path = llm_log_io_path
+        self.semgrep_rules_yaml = semgrep_rules_yaml
+        self.joern_sources = list(joern_sources) if joern_sources is not None else None
+        self.joern_sinks = list(joern_sinks) if joern_sinks is not None else None
+        self.joern_sanitizers = (
+            list(joern_sanitizers) if joern_sanitizers is not None else None
+        )
 
 
 class Pipeline:
@@ -289,7 +299,10 @@ class Pipeline:
     async def _run_semgrep_arm(
         self, repo_path: str, *, cve_id: str = ""
     ) -> list[IterationResult]:
-        arm = SemgrepArm(context_lines=self._cfg.context_lines)
+        arm = SemgrepArm(
+            rules_yaml=self._cfg.semgrep_rules_yaml,
+            context_lines=self._cfg.context_lines,
+        )
         results: list[IterationResult] = []
 
         for k in range(self._cfg.max_iterations + 1):
@@ -438,6 +451,9 @@ class Pipeline:
 
             def _joern_factory() -> JoernArm:
                 inst = JoernArm(
+                    sources=self._cfg.joern_sources,
+                    sinks=self._cfg.joern_sinks,
+                    sanitizers=self._cfg.joern_sanitizers,
                     context_lines=self._cfg.context_lines,
                     call_graph_depth=self._cfg.call_graph_depth,
                 )
@@ -616,7 +632,7 @@ def _pick_refinement_target(
          the LLM can propose complementary ``add_rule`` suggestions.
       4. First finding as an unconditional fallback.
     """
-    pairs = list(zip(findings, triage_results))
+    pairs = list(zip(findings, triage_results, strict=False))
     for verdict in (Verdict.FALSE_POSITIVE, Verdict.UNCERTAIN, Verdict.TRUE_POSITIVE):
         for f, t in pairs:
             if t.verdict == verdict:

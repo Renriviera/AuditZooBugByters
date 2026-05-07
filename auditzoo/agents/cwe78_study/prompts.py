@@ -117,6 +117,47 @@ Both ``source_expr`` and ``sink_expr`` MUST be exact substrings of the \
 provided snippet text when non-empty.  Hallucinated source/sink \
 expressions will be rejected."""
 
+# ---------------------------------------------------------------------------
+# Seed-generation prompts
+# ---------------------------------------------------------------------------
+
+SYSTEM_PROMPT_SEED_SEMGREP = """\
+You are a security engineer designing initial Semgrep rules for CWE-78 \
+(OS Command Injection) detection in Python.
+
+You will receive training examples containing vulnerable and patched commits. \
+Infer a compact, precision-oriented Semgrep ruleset that should generalize to \
+held-out repositories.
+
+Respond with ONLY a valid YAML document. The top-level object MUST be:
+rules:
+  - id: <unique-rule-id>
+    patterns: ...
+    message: <short message>
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: "CWE-78"
+      sink_api: "<sink api or family>"
+
+Do not include prose, markdown fences, comments, or non-YAML text. Optimize \
+for precision: prefer fewer high-confidence rules over broad noisy rules."""
+
+SYSTEM_PROMPT_SEED_JOERN = """\
+You are a security engineer designing initial Joern taint-analysis catalogs \
+for CWE-78 (OS Command Injection) detection in Python.
+
+You will receive training examples containing vulnerable and patched commits. \
+Infer catalogs that should generalize to held-out repositories.
+
+Respond with ONLY a valid JSON object with exactly these keys:
+{"sources": ["..."], "sinks": ["..."], "sanitizers": ["..."]}
+
+Catalog values must be strings. Sources should name attacker-controlled data \
+patterns or wrapper functions. Sinks should name OS command execution APIs or \
+wrappers. Sanitizers should name escaping, allowlist, or safe command \
+construction APIs. Do not include prose or markdown fences."""
+
 
 # ---------------------------------------------------------------------------
 # User prompt builders
@@ -209,6 +250,60 @@ def build_user_prompt_call2(
             f"\nStructural evidence:\n{_truncate(structural_evidence, MAX_CONTEXT_LINES)}"
         )
     return "\n".join(parts)
+
+
+def build_user_prompt_seed_semgrep(training_examples: list[dict[str, Any]]) -> str:
+    """Build the one-time prompt for model-seeded Semgrep rules."""
+    return _build_seed_examples_prompt(
+        intro=(
+            "Create the initial Semgrep YAML rules for the evaluation run from "
+            "these CWE-78 training examples."
+        ),
+        training_examples=training_examples,
+    )
+
+
+def build_user_prompt_seed_joern(training_examples: list[dict[str, Any]]) -> str:
+    """Build the one-time prompt for model-seeded Joern catalogs."""
+    return _build_seed_examples_prompt(
+        intro=(
+            "Create the initial Joern source/sink/sanitizer catalogs for the "
+            "evaluation run from these CWE-78 training examples."
+        ),
+        training_examples=training_examples,
+    )
+
+
+def _build_seed_examples_prompt(
+    *, intro: str, training_examples: list[dict[str, Any]]
+) -> str:
+    blocks = [intro, ""]
+    for idx, example in enumerate(training_examples, start=1):
+        blocks.extend(
+            [
+                f"Example {idx}: {example.get('cve_id', '')}",
+                f"Package: {example.get('package', '')}",
+                f"Repository: {example.get('repo_url', '')}",
+                f"Vulnerable file: {example.get('vulnerable_file', '')}",
+                f"Vulnerable lines: {example.get('vulnerable_lines', [])}",
+                f"Known sink API: {example.get('sink_api', '')}",
+                f"Advisory notes: {_truncate(str(example.get('notes', '') or ''), 6)}",
+                "Vulnerable snippet:",
+                "```python",
+                _truncate(str(example.get("vulnerable_snippet", "") or ""), 30),
+                "```",
+                "Patched snippet:",
+                "```python",
+                _truncate(str(example.get("patched_snippet", "") or ""), 30),
+                "```",
+                "Patch diff excerpt:",
+                "```diff",
+                _truncate(str(example.get("patch_diff", "") or ""), 40),
+                "```",
+                "",
+            ]
+        )
+    return "\n".join(blocks)
 
 
 def _truncate(text: str, max_lines: int) -> str:

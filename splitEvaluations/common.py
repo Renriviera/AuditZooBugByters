@@ -15,7 +15,10 @@ from __future__ import annotations
 
 import argparse
 import logging
+import math
+import random
 from pathlib import Path
+from typing import Any
 
 from scripts.run_evaluation import (  # noqa: F401 — re-exports
     DEFAULT_CLONE_DIR,
@@ -45,6 +48,23 @@ def add_common_sweep_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--seed", type=int, default=235711)
     p.add_argument("--llm-url", default="http://localhost:8000/v1")
     p.add_argument("--llm-model", default="Qwen/Qwen2.5-Coder-7B-Instruct")
+    p.add_argument(
+        "--seed-model",
+        default="GPT5.5mini",
+        help="Model used for the one-time initial rule/catalog seeding call.",
+    )
+    p.add_argument(
+        "--dataset-size",
+        default="full",
+        help="Number of eligible CVEs to use before the train/validation split "
+        "(for example 10, 30, 100, or 'full').",
+    )
+    p.add_argument(
+        "--train-fraction",
+        type=float,
+        default=0.25,
+        help="Fraction of the selected dataset used to seed initial rules/catalogs.",
+    )
     p.add_argument("--line-tolerance", type=int, default=LINE_TOLERANCE)
     p.add_argument("--skip-empty-gt", action="store_true", default=True)
     p.add_argument(
@@ -72,6 +92,94 @@ def filter_dataset(dataset: list[dict], only: list[str]) -> list[dict]:
         len(out), len(dataset), sorted(keep),
     )
     return out
+
+
+def eligible_dataset(
+    dataset: list[dict[str, Any]],
+    *,
+    skip_cves: list[str] | None = None,
+    skip_empty_gt: bool = True,
+) -> list[dict[str, Any]]:
+    """Apply eligibility filters before selecting the run subset."""
+    skip = set(skip_cves or [])
+    out: list[dict[str, Any]] = []
+    for cve in dataset:
+        cve_id = str(cve.get("cve_id", ""))
+        if cve_id in skip:
+            continue
+        if skip_empty_gt and not cve.get("vulnerable_lines"):
+            continue
+        out.append(cve)
+    return out
+
+
+def parse_dataset_size(dataset_size: str | int | None, total: int) -> int:
+    """Resolve ``--dataset-size`` to a bounded integer count."""
+    if dataset_size is None:
+        return total
+    if isinstance(dataset_size, int):
+        requested = dataset_size
+    else:
+        raw = str(dataset_size).strip().lower()
+        if raw in {"", "full", "all"}:
+            return total
+        requested = int(raw)
+    if requested <= 0:
+        raise ValueError("dataset_size must be positive or 'full'")
+    return min(requested, total)
+
+
+def select_dataset_subset(
+    dataset: list[dict[str, Any]], dataset_size: str | int | None, seed: int
+) -> list[dict[str, Any]]:
+    """Select a deterministic shuffled subset of eligible CVE records."""
+    n = parse_dataset_size(dataset_size, len(dataset))
+    rng = random.Random(seed)
+    indexed = list(enumerate(dataset))
+    rng.shuffle(indexed)
+    chosen = sorted(indexed[:n], key=lambda item: item[0])
+    return [item for _, item in chosen]
+
+
+def split_train_validate(
+    dataset: list[dict[str, Any]], train_fraction: float, seed: int
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Deterministically split *dataset* into train and validation partitions."""
+    if not 0 < train_fraction < 1:
+        raise ValueError("train_fraction must be between 0 and 1")
+    if not dataset:
+        return [], []
+    train_n = min(len(dataset) - 1, max(1, math.ceil(len(dataset) * train_fraction)))
+    rng = random.Random(seed)
+    indexed = list(enumerate(dataset))
+    rng.shuffle(indexed)
+    train_indices = {idx for idx, _ in indexed[:train_n]}
+    train = [item for idx, item in indexed[:train_n]]
+    validate = [item for idx, item in enumerate(dataset) if idx not in train_indices]
+    return train, validate
+
+
+def build_split_metadata(
+    *,
+    selected_dataset: list[dict[str, Any]],
+    training_dataset: list[dict[str, Any]],
+    validation_dataset: list[dict[str, Any]],
+    dataset_size: str | int | None,
+    train_fraction: float,
+    seed: int,
+) -> dict[str, Any]:
+    """Return audit metadata for a model-seeded train/validation split."""
+    return {
+        "dataset_size": dataset_size if dataset_size is not None else "full",
+        "train_fraction": train_fraction,
+        "seed": seed,
+        "selected_count": len(selected_dataset),
+        "training_count": len(training_dataset),
+        "validation_count": len(validation_dataset),
+        "selected_cves": [str(c.get("cve_id", "")) for c in selected_dataset],
+        "training_cves": [str(c.get("cve_id", "")) for c in training_dataset],
+        "validation_cves": [str(c.get("cve_id", "")) for c in validation_dataset],
+    }
 
 
 def configure_logging() -> None:

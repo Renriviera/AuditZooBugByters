@@ -25,15 +25,23 @@ import asyncio
 import json
 import logging
 from datetime import datetime
-from pathlib import Path
 
+from auditzoo.agents.cwe78_study.llm_client import LLMClient, LLMConfig
+from auditzoo.agents.cwe78_study.model_seed import (
+    collect_training_examples,
+    generate_joern_seed,
+)
 from auditzoo.agents.cwe78_study.pipeline import PipelineConfig
 from splitEvaluations.common import (
     _save_json,
     add_common_sweep_args,
+    build_split_metadata,
     configure_logging,
+    eligible_dataset,
     filter_dataset,
     run_main_comparison,
+    select_dataset_subset,
+    split_train_validate,
 )
 
 logger = logging.getLogger(__name__)
@@ -66,10 +74,53 @@ async def main() -> None:
     dataset = json.loads(args.dataset.read_text())
     logger.info("Loaded %d CVEs from %s", len(dataset), args.dataset)
     dataset = filter_dataset(dataset, args.only_cves)
+    eligible = eligible_dataset(
+        dataset, skip_cves=args.skip_cves, skip_empty_gt=args.skip_empty_gt
+    )
+    selected = select_dataset_subset(eligible, args.dataset_size, args.seed)
+    training_dataset, validation_dataset = split_train_validate(
+        selected, args.train_fraction, args.seed
+    )
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = args.output / "joern" / timestamp
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    split_metadata = build_split_metadata(
+        selected_dataset=selected,
+        training_dataset=training_dataset,
+        validation_dataset=validation_dataset,
+        dataset_size=args.dataset_size,
+        train_fraction=args.train_fraction,
+        seed=args.seed,
+    )
+    _save_json(split_metadata, output_dir / "training_split.json")
+
+    logger.info(
+        "Generating Joern seed catalog from %d training CVEs using %s",
+        len(training_dataset),
+        args.seed_model,
+    )
+    training_examples = collect_training_examples(
+        training_dataset=training_dataset,
+        clone_dir=args.clone_dir,
+        dataset_path=args.dataset,
+    )
+    seed_llm = LLMClient(
+        LLMConfig(
+            base_url=args.llm_url,
+            model=args.seed_model,
+            api_key="not-needed",
+            seed=args.seed,
+            log_io_path=str(args.log_llm_io) if args.log_llm_io else None,
+        )
+    )
+    joern_catalog, seed_prompt = await generate_joern_seed(
+        llm=seed_llm,
+        training_examples=training_examples,
+    )
+    _save_json(joern_catalog.to_dict(), output_dir / "model_seed_joern_catalog.json")
+    _save_json(seed_prompt, output_dir / "model_seed_prompt.json")
 
     pipeline_cfg = PipelineConfig(
         max_iterations=args.max_k,
@@ -79,25 +130,29 @@ async def main() -> None:
         llm_model=args.llm_model,
         joern_port=args.joern_port,
         llm_log_io_path=str(args.log_llm_io) if args.log_llm_io else None,
+        joern_sources=joern_catalog.sources,
+        joern_sinks=joern_catalog.sinks,
+        joern_sanitizers=joern_catalog.sanitizers,
     )
 
     _save_json(
-        {**vars(args), "sweep": "joern"},
+        {**vars(args), "sweep": "joern", **split_metadata},
         output_dir / "run_config.json",
     )
 
     logger.info(
-        "Joern sweep: %d CVEs, k=0..%d, per_cve_timeout=%.0fs, "
-        "run_patched=%s, skip=%d",
-        len(dataset), args.max_k, args.per_cve_timeout,
+        "Joern sweep: %d selected CVEs (%d train / %d validate), "
+        "k=0..%d, per_cve_timeout=%.0fs, run_patched=%s, skip=%d",
+        len(selected), len(training_dataset), len(validation_dataset),
+        args.max_k, args.per_cve_timeout,
         args.run_patched, len(args.skip_cves),
     )
     await run_main_comparison(
-        dataset, pipeline_cfg, args.clone_dir, output_dir,
+        validation_dataset, pipeline_cfg, args.clone_dir, output_dir,
         line_tolerance=args.line_tolerance,
-        skip_empty_gt=args.skip_empty_gt,
+        skip_empty_gt=False,
         per_cve_timeout=args.per_cve_timeout,
-        skip_cves=args.skip_cves,
+        skip_cves=[],
         run_patched=args.run_patched,
     )
 
