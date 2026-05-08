@@ -39,6 +39,8 @@ from splitEvaluations.common import (
     configure_logging,
     eligible_dataset,
     filter_dataset,
+    redacted_sweep_args,
+    resolve_llm_api_key,
     run_main_comparison,
     select_dataset_subset,
     split_train_validate,
@@ -52,17 +54,21 @@ def parse_args() -> argparse.Namespace:
     add_common_sweep_args(ap)
     ap.add_argument("--joern-port", type=int, default=12345)
     ap.add_argument(
-        "--per-cve-timeout", type=float, default=1800.0,
+        "--per-cve-timeout",
+        type=float,
+        default=1800.0,
         help="Wall-clock seconds budget per CVE.  Default 1800 s "
-             "(vs 900 s for the legacy combined sweep) because Joern "
-             "CPG construction on Python projects is O(10 min) for "
-             "many of our CVEs.  0 disables the budget.",
+        "(vs 900 s for the legacy combined sweep) because Joern "
+        "CPG construction on Python projects is O(10 min) for "
+        "many of our CVEs.  0 disables the budget.",
     )
     ap.add_argument(
-        "--run-patched", action="store_true", default=False,
+        "--run-patched",
+        action="store_true",
+        default=False,
         help="Re-scan the patched commit to obtain an 'alerts on "
-             "patched = FP' signal.  OFF by default (v1) so Joern "
-             "doesn't have to build two CPGs per CVE.",
+        "patched = FP' signal.  OFF by default (v1) so Joern "
+        "doesn't have to build two CPGs per CVE.",
     )
     return ap.parse_args()
 
@@ -70,6 +76,7 @@ def parse_args() -> argparse.Namespace:
 async def main() -> None:
     args = parse_args()
     configure_logging()
+    llm_api_key = resolve_llm_api_key(args.llm_api_key)
 
     dataset = json.loads(args.dataset.read_text())
     logger.info("Loaded %d CVEs from %s", len(dataset), args.dataset)
@@ -85,6 +92,15 @@ async def main() -> None:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = args.output / "joern" / timestamp
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Default the LLM I/O trace to ``<output_dir>/llm_io.jsonl`` when the
+    # caller did not pass ``--log-llm-io``.  Each chat completion appends
+    # one JSONL line including the provider's ``usage`` block, which is
+    # the only durable way to recover token totals from the seed call
+    # (those bytes are not currently persisted in ``results.json``).
+    if args.log_llm_io is None:
+        args.log_llm_io = output_dir / "llm_io.jsonl"
+        logger.info("Defaulting --log-llm-io to %s", args.log_llm_io)
 
     split_metadata = build_split_metadata(
         selected_dataset=selected,
@@ -110,7 +126,7 @@ async def main() -> None:
         LLMConfig(
             base_url=args.llm_url,
             model=args.seed_model,
-            api_key="not-needed",
+            api_key=llm_api_key,
             seed=args.seed,
             log_io_path=str(args.log_llm_io) if args.log_llm_io else None,
         )
@@ -128,27 +144,38 @@ async def main() -> None:
         arms=["joern"],
         llm_base_url=args.llm_url,
         llm_model=args.llm_model,
+        llm_api_key=llm_api_key,
         joern_port=args.joern_port,
         llm_log_io_path=str(args.log_llm_io) if args.log_llm_io else None,
         joern_sources=joern_catalog.sources,
         joern_sinks=joern_catalog.sinks,
         joern_sanitizers=joern_catalog.sanitizers,
+        cpg_cache_dir=args.cpg_cache_dir,
     )
+    if args.cpg_cache_dir is not None:
+        logger.info("CPG cache directory: %s", args.cpg_cache_dir)
 
     _save_json(
-        {**vars(args), "sweep": "joern", **split_metadata},
+        {**redacted_sweep_args(args), "sweep": "joern", **split_metadata},
         output_dir / "run_config.json",
     )
 
     logger.info(
         "Joern sweep: %d selected CVEs (%d train / %d validate), "
         "k=0..%d, per_cve_timeout=%.0fs, run_patched=%s, skip=%d",
-        len(selected), len(training_dataset), len(validation_dataset),
-        args.max_k, args.per_cve_timeout,
-        args.run_patched, len(args.skip_cves),
+        len(selected),
+        len(training_dataset),
+        len(validation_dataset),
+        args.max_k,
+        args.per_cve_timeout,
+        args.run_patched,
+        len(args.skip_cves),
     )
     await run_main_comparison(
-        validation_dataset, pipeline_cfg, args.clone_dir, output_dir,
+        validation_dataset,
+        pipeline_cfg,
+        args.clone_dir,
+        output_dir,
         line_tolerance=args.line_tolerance,
         skip_empty_gt=False,
         per_cve_timeout=args.per_cve_timeout,

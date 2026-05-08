@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import logging
 import math
+import os
 import random
 from pathlib import Path
 from typing import Any
@@ -47,10 +48,16 @@ def add_common_sweep_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--max-k", type=int, default=3)
     p.add_argument("--seed", type=int, default=235711)
     p.add_argument("--llm-url", default="http://localhost:8000/v1")
-    p.add_argument("--llm-model", default="Qwen/Qwen2.5-Coder-7B-Instruct")
+    p.add_argument("--llm-model", default="gpt-5.4-mini")
+    p.add_argument(
+        "--llm-api-key",
+        default=None,
+        help="API key for the OpenAI-compatible LLM endpoint. Defaults to "
+        "AUDITZOO_LLM_API_KEY, then OPENAI_API_KEY, then 'not-needed'.",
+    )
     p.add_argument(
         "--seed-model",
-        default="GPT5.5mini",
+        default="gpt-5.4-mini",
         help="Model used for the one-time initial rule/catalog seeding call.",
     )
     p.add_argument(
@@ -68,17 +75,49 @@ def add_common_sweep_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--line-tolerance", type=int, default=LINE_TOLERANCE)
     p.add_argument("--skip-empty-gt", action="store_true", default=True)
     p.add_argument(
-        "--skip-cves", nargs="+", default=[],
+        "--skip-cves",
+        nargs="+",
+        default=[],
         help="CVE IDs to skip entirely (e.g. pathologically large repos).",
     )
     p.add_argument(
-        "--only-cves", nargs="+", default=[],
+        "--only-cves",
+        nargs="+",
+        default=[],
         help="If non-empty, restrict evaluation to these CVE IDs only.",
     )
     p.add_argument(
-        "--log-llm-io", type=Path, default=None,
+        "--log-llm-io",
+        type=Path,
+        default=None,
         help="Append every LLM chat round-trip as JSONL to this path.",
     )
+    p.add_argument(
+        "--cpg-cache-dir",
+        type=Path,
+        default=None,
+        help="Stable workspace directory for cached Joern CPGs, keyed by "
+        "sha256(repo_url, commit, language).  When set, a re-run of the "
+        "same CVE skips the expensive importCode step entirely.",
+    )
+
+
+def resolve_llm_api_key(cli_value: str | None = None) -> str:
+    """Resolve the LLM API key without hardcoding or requiring one."""
+    if cli_value:
+        return cli_value
+    return (
+        os.getenv("AUDITZOO_LLM_API_KEY") or os.getenv("OPENAI_API_KEY") or "not-needed"
+    )
+
+
+def redacted_sweep_args(args: argparse.Namespace) -> dict[str, Any]:
+    """Return ``vars(args)`` with LLM credentials removed for run_config.json."""
+    out = dict(vars(args))
+    api_key = resolve_llm_api_key(out.get("llm_api_key"))
+    out["llm_api_key"] = "<redacted>" if api_key != "not-needed" else "not-needed"
+    out["llm_api_key_provided"] = api_key != "not-needed"
+    return out
 
 
 def filter_dataset(dataset: list[dict], only: list[str]) -> list[dict]:
@@ -89,7 +128,9 @@ def filter_dataset(dataset: list[dict], only: list[str]) -> list[dict]:
     out = [c for c in dataset if c.get("cve_id") in keep]
     logger.info(
         "Restricted dataset to %d/%d CVEs via --only-cves: %s",
-        len(out), len(dataset), sorted(keep),
+        len(out),
+        len(dataset),
+        sorted(keep),
     )
     return out
 

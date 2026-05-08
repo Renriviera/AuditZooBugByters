@@ -24,6 +24,7 @@ import os
 import random
 import resource
 import shutil
+import socket
 import subprocess
 import time
 from dataclasses import asdict
@@ -50,6 +51,7 @@ DEFAULT_OUTPUT = ROOT / "results"
 DEFAULT_CLONE_DIR = Path("/tmp/auditzoo_eval")
 
 LINE_TOLERANCE = 5
+DEFAULT_GIT_TIMEOUT_S = 300
 
 _REASONING_CAP = 200
 
@@ -58,15 +60,19 @@ _REASONING_CAP = 200
 # Evidence serialisation
 # ======================================================================
 
+
 def _snippet_for(f: Finding) -> str:
     """Return the text that ``source_expr`` / ``sink_expr`` are validated against."""
-    return (getattr(f, "surrounding_context", "") or "") + "\n" + (
-        getattr(f, "code_snippet", "") or ""
+    return (
+        (getattr(f, "surrounding_context", "") or "")
+        + "\n"
+        + (getattr(f, "code_snippet", "") or "")
     )
 
 
 def serialize_triage_verdicts(
-    findings: list[Finding], triage_results: list[TriageResult],
+    findings: list[Finding],
+    triage_results: list[TriageResult],
 ) -> list[dict[str, Any]]:
     """Produce an audit-friendly, length-aligned list of triage decisions.
 
@@ -121,8 +127,12 @@ def serialize_triage_verdicts(
 # Ground-truth labelling
 # ======================================================================
 
+
 def _gt_line_match(
-    f: Finding, vuln_file: str, vuln_lines: set[int], line_tolerance: int,
+    f: Finding,
+    vuln_file: str,
+    vuln_lines: set[int],
+    line_tolerance: int,
 ) -> tuple[bool, int | None]:
     """Return ``(is_match, matched_gt_line)`` for a finding against GT."""
     if not vuln_lines:
@@ -190,16 +200,23 @@ def label_findings(
     fp_by_hallucinated_source = 0  # subset of fp: TPs with source_expr not in snippet
     labels: list[str] = []
 
-    matched_vuln_lines: set[int] = set()  # matched by a surviving (non-suppressed, non-hallucinated) finding
+    matched_vuln_lines: set[int] = (
+        set()
+    )  # matched by a surviving (non-suppressed, non-hallucinated) finding
 
     for f, t in zip(findings, triage_results):
         is_match, matched_line = _gt_line_match(
-            f, vuln_file, vuln_lines, line_tolerance,
+            f,
+            vuln_file,
+            vuln_lines,
+            line_tolerance,
         )
 
         source_expr = (getattr(t, "source_expr", "") or "").strip()
-        snippet = (getattr(f, "surrounding_context", "") or "") + "\n" + (
-            getattr(f, "code_snippet", "") or ""
+        snippet = (
+            (getattr(f, "surrounding_context", "") or "")
+            + "\n"
+            + (getattr(f, "code_snippet", "") or "")
         )
         # Parity: empty source_expr ⇒ treat as "present" so pre-evidence
         # runs aren't mass-flagged as hallucinations.
@@ -248,7 +265,11 @@ def label_findings(
 
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+    f1 = (
+        2 * precision * recall / (precision + recall)
+        if (precision + recall) > 0
+        else 0.0
+    )
 
     return {
         "tp": tp,
@@ -268,6 +289,7 @@ def label_findings(
 # Repo management
 # ======================================================================
 
+
 def clone_and_checkout(
     repo_url: str, commit: str, dest: Path, *, shallow: bool = True
 ) -> bool:
@@ -277,19 +299,29 @@ def clone_and_checkout(
     dest.mkdir(parents=True, exist_ok=True)
 
     try:
+        git_timeout = int(os.environ.get("AUDITZOO_CLONE_TIMEOUT", DEFAULT_GIT_TIMEOUT_S))
         clone_cmd = ["git", "clone"]
         if shallow:
             clone_cmd += ["--depth", "1"]
         clone_cmd += [repo_url, str(dest)]
-        subprocess.run(clone_cmd, capture_output=True, text=True, timeout=120, check=True)
+        subprocess.run(
+            clone_cmd, capture_output=True, text=True, timeout=git_timeout, check=True
+        )
 
         subprocess.run(
             ["git", "fetch", "--depth=1", "origin", commit],
-            cwd=str(dest), capture_output=True, text=True, timeout=120,
+            cwd=str(dest),
+            capture_output=True,
+            text=True,
+            timeout=git_timeout,
         )
         subprocess.run(
             ["git", "checkout", commit],
-            cwd=str(dest), capture_output=True, text=True, timeout=60, check=True,
+            cwd=str(dest),
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=True,
         )
         return True
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
@@ -302,7 +334,9 @@ def count_loc(repo_path: Path) -> int:
     try:
         result = subprocess.run(
             ["tokei", "-t", "Python", "-o", "json", str(repo_path)],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         if result.returncode == 0:
             data = json.loads(result.stdout)
@@ -330,6 +364,7 @@ def count_loc(repo_path: Path) -> int:
 # Resource monitoring
 # ======================================================================
 
+
 def get_resource_snapshot() -> dict[str, Any]:
     proc = psutil.Process(os.getpid())
     mem = proc.memory_info()
@@ -345,42 +380,91 @@ def get_resource_snapshot() -> dict[str, Any]:
 # Main evaluation loop
 # ======================================================================
 
-def _cleanup_stray_joern() -> None:
+
+def _is_port_in_use(port: int, host: str = "localhost", timeout: float = 0.5) -> bool:
+    """Return ``True`` if a TCP listener is bound to ``(host, port)``.
+
+    A successful ``connect`` proves the socket is bound (likely by a
+    lingering Joern JVM).  ``ConnectionRefusedError`` or any other socket
+    error is treated as "free".  We deliberately do not distinguish
+    "port closed" from "port reset" — both let us proceed.
+    """
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except (OSError, socket.timeout):
+        return False
+
+
+def _cleanup_stray_joern(
+    port: int | None = None,
+    *,
+    wait_s: float = 30.0,
+    poll_s: float = 0.5,
+) -> bool:
     """Best-effort kill of any lingering Joern server subprocesses.
 
-    Called after a per-CVE timeout fires.  The pipeline's ``finally`` block
-    should normally tear Joern down, but a cancellation mid-query can leave
-    the JVM running and port 12345 bound, which would poison the next CVE.
+    The 20260507_145628 sweep degraded after CVE 11 because a stuck JVM
+    held port 12345 for the rest of the run; ``pkill`` returns immediately
+    while the kernel still has the listener bound.  When *port* is given
+    we poll until the port is actually free or *wait_s* elapses, so the
+    next CVE has a clean Joern to connect to.
+
+    Returns ``True`` if the port is free (or no port check was requested),
+    ``False`` if it was still bound when the wait elapsed.
     """
     try:
         subprocess.run(
             ["pkill", "-9", "-f", "joern-cli/joern|ReplBridge"],
-            check=False, timeout=10,
+            check=False,
+            timeout=10,
         )
     except Exception:
-        logger.exception("_cleanup_stray_joern failed")
+        logger.exception("_cleanup_stray_joern pkill failed")
+
+    if port is None:
+        return True
+
+    deadline = time.time() + max(0.0, wait_s)
+    while time.time() < deadline:
+        if not _is_port_in_use(port):
+            return True
+        time.sleep(poll_s)
+    logger.warning(
+        "Joern port %d still in use after %.0fs cleanup wait", port, wait_s
+    )
+    return False
 
 
 async def _run_with_timeout(
-    pipeline: Pipeline, repo_path: str, cve_id: str, timeout_s: float,
+    pipeline: Pipeline,
+    repo_path: str,
+    cve_id: str,
+    timeout_s: float,
+    *,
+    joern_port: int | None = None,
 ) -> tuple[Any, bool]:
     """Run ``pipeline.run`` with a wall-clock budget.
 
     Returns ``(run_result, timed_out)``.  On timeout we cancel, reap any
-    stray Joern subprocesses, and return ``(None, True)``.
+    stray Joern subprocesses, and return ``(None, True)``.  ``joern_port``
+    is forwarded to the cleanup so we wait for the JVM's TCP listener to
+    actually drop before the caller starts the next CVE.
     """
     if timeout_s and timeout_s > 0:
         try:
             result = await asyncio.wait_for(
-                pipeline.run(repo_path, cve_id=cve_id), timeout=timeout_s,
+                pipeline.run(repo_path, cve_id=cve_id),
+                timeout=timeout_s,
             )
             return result, False
         except asyncio.TimeoutError:
             logger.warning(
                 "  %s: pipeline.run exceeded %.0fs budget, aborting this CVE",
-                cve_id, timeout_s,
+                cve_id,
+                timeout_s,
             )
-            _cleanup_stray_joern()
+            _cleanup_stray_joern(joern_port)
             return None, True
     else:
         return await pipeline.run(repo_path, cve_id=cve_id), False
@@ -401,6 +485,19 @@ async def run_main_comparison(
     """Run 2 tools x 4 k-levels x N CVEs x 2 commits."""
     all_results: list[dict[str, Any]] = []
     skip_set = set(skip_cves or [])
+    joern_port = (
+        getattr(pipeline_cfg, "joern_port", None) if "joern" in pipeline_cfg.arms else None
+    )
+
+    # Pre-flight: a stuck Joern from a previous (possibly killed) run will
+    # cause every CVE to fail with "port already in use".  Reap it once
+    # before we start so the first CVE has a clean slate.
+    if joern_port is not None and _is_port_in_use(joern_port):
+        logger.warning(
+            "Joern port %d already bound at sweep start; reaping stray JVMs",
+            joern_port,
+        )
+        _cleanup_stray_joern(joern_port)
 
     for idx, cve in enumerate(dataset):
         cve_id = cve["cve_id"]
@@ -422,6 +519,21 @@ async def run_main_comparison(
             vuln_commit = cve["vulnerable_commit"]
             patch_commit = cve["patch_commit"]
 
+            # Per-CVE restart guard: even with the post-CVE polling
+            # cleanup below, a JVM that crashed mid-query (e.g. OOM with
+            # ExitOnOutOfMemoryError disabled, or SIGKILL'd by the OOM
+            # killer) can leave the listening socket in TIME_WAIT for
+            # multiple seconds.  Polling here gives the kernel time to
+            # release the port and turns "port already in use" cascades
+            # into a deterministic short wait.
+            if joern_port is not None and _is_port_in_use(joern_port):
+                logger.warning(
+                    "  %s: Joern port %d still bound at CVE start; reaping",
+                    cve_id,
+                    joern_port,
+                )
+                _cleanup_stray_joern(joern_port)
+
             # --- vulnerable commit ---
             ok = clone_and_checkout(repo_url, vuln_commit, repo_dest)
             if not ok:
@@ -433,15 +545,24 @@ async def run_main_comparison(
             res_before = get_resource_snapshot()
             pipeline = Pipeline(pipeline_cfg)
             vuln_run, timed_out = await _run_with_timeout(
-                pipeline, str(repo_dest), cve_id, per_cve_timeout,
+                pipeline,
+                str(repo_dest),
+                cve_id,
+                per_cve_timeout,
+                joern_port=joern_port,
             )
             res_after = get_resource_snapshot()
 
             if timed_out:
-                all_results.append({
-                    "cve_id": cve_id, "repo_url": repo_url, "loc": loc,
-                    "skipped": "timeout", "per_cve_timeout_s": per_cve_timeout,
-                })
+                all_results.append(
+                    {
+                        "cve_id": cve_id,
+                        "repo_url": repo_url,
+                        "loc": loc,
+                        "skipped": "timeout",
+                        "per_cve_timeout_s": per_cve_timeout,
+                    }
+                )
                 _save_json(all_results, output_dir / "results.json")
                 shutil.rmtree(repo_dest, ignore_errors=True)
                 continue
@@ -459,7 +580,11 @@ async def run_main_comparison(
                 if ok_patch:
                     pipeline_patch = Pipeline(pipeline_cfg)
                     patch_run, patch_timed_out = await _run_with_timeout(
-                        pipeline_patch, str(repo_dest), cve_id, per_cve_timeout,
+                        pipeline_patch,
+                        str(repo_dest),
+                        cve_id,
+                        per_cve_timeout,
+                        joern_port=joern_port,
                     )
                     if patch_timed_out:
                         patch_run = None
@@ -476,7 +601,10 @@ async def run_main_comparison(
             for iteration in vuln_run.iterations:
                 arm_key = f"{iteration.arm}_{iteration.iteration}"
                 gt_labels = label_findings(
-                    iteration.findings, iteration.triage_results, cve, line_tolerance=line_tolerance
+                    iteration.findings,
+                    iteration.triage_results,
+                    cve,
+                    line_tolerance=line_tolerance,
                 )
                 fp_kloc = gt_labels["fp"] / (loc / 1000) if loc > 0 else 0.0
 
@@ -490,8 +618,7 @@ async def run_main_comparison(
                     ),
                     "refinement_actions": list(iteration.refinement_actions or []),
                     "resource_delta": {
-                        k: res_after[k] - res_before.get(k, 0)
-                        for k in res_after
+                        k: res_after[k] - res_before.get(k, 0) for k in res_after
                     },
                 }
                 if iteration.metrics.get("cpg_build_failed"):
@@ -525,19 +652,30 @@ async def run_main_comparison(
             # so callers can shut the whole sweep down cleanly.
             _save_json(all_results, output_dir / "results.json")
             shutil.rmtree(repo_dest, ignore_errors=True)
+            _cleanup_stray_joern(joern_port)
             raise
         except Exception as exc:  # noqa: BLE001 — isolate per-CVE failures
             logger.exception("  %s: unhandled error, skipping CVE: %s", cve_id, exc)
-            all_results.append({
-                "cve_id": cve_id,
-                "repo_url": cve.get("repo_url"),
-                "skipped": "error",
-                "error": f"{type(exc).__name__}: {exc}",
-            })
+            all_results.append(
+                {
+                    "cve_id": cve_id,
+                    "repo_url": cve.get("repo_url"),
+                    "skipped": "error",
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
             _save_json(all_results, output_dir / "results.json")
-            _cleanup_stray_joern()
+            _cleanup_stray_joern(joern_port)
         finally:
             shutil.rmtree(repo_dest, ignore_errors=True)
+            # Proactive per-CVE cleanup: even on the success path the
+            # pipeline's runtime ``stop()`` occasionally leaves a JVM
+            # holding port ``joern_port`` for several seconds, which then
+            # poisons the next CVE.  Polling the port before moving on
+            # turns the failure mode in 20260507_145628 (CVE 12+ all
+            # ``port already in use``) into a deterministic short wait.
+            if joern_port is not None and _is_port_in_use(joern_port):
+                _cleanup_stray_joern(joern_port)
 
     return all_results
 
@@ -584,7 +722,8 @@ async def run_variance_analysis(
             run_result = await pipeline.run(str(repo_dest), cve_id=cve_id)
 
             last_iter = [
-                it for it in run_result.iterations
+                it
+                for it in run_result.iterations
                 if it.arm == ToolArm.SEMGREP and it.iteration == 3
             ]
             if last_iter:
@@ -597,9 +736,7 @@ async def run_variance_analysis(
                     "finding_ids": [
                         f"{f.file_path}:{f.line_start}" for f in last_iter[0].findings
                     ],
-                    "verdicts": [
-                        t.verdict.value for t in last_iter[0].triage_results
-                    ],
+                    "verdicts": [t.verdict.value for t in last_iter[0].triage_results],
                 }
 
         all_results.append(seed_results)
@@ -618,6 +755,7 @@ def _save_json(data: Any, path: Path) -> None:
 # CLI entry point
 # ======================================================================
 
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="CWE-78 evaluation harness")
     p.add_argument("--dataset", type=Path, default=DEFAULT_DATASET)
@@ -627,11 +765,18 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--max-k", type=int, default=3)
     p.add_argument("--seed", type=int, default=235711)
     p.add_argument("--llm-url", default="http://localhost:8000/v1")
-    p.add_argument("--llm-model", default="Qwen/Qwen2.5-Coder-7B-Instruct")
+    p.add_argument("--llm-model", default="gpt-5.4-mini")
     p.add_argument("--joern-port", type=int, default=12345)
-    p.add_argument("--variance", action="store_true", help="Run variance analysis instead")
+    p.add_argument(
+        "--variance", action="store_true", help="Run variance analysis instead"
+    )
     p.add_argument("--variance-n", type=int, default=20)
-    p.add_argument("--variance-seeds", nargs="+", type=int, default=[235711, 123456, 654321, 111111, 999999])
+    p.add_argument(
+        "--variance-seeds",
+        nargs="+",
+        type=int,
+        default=[235711, 123456, 654321, 111111, 999999],
+    )
     p.add_argument("--line-tolerance", type=int, default=LINE_TOLERANCE)
     p.add_argument("--skip-empty-gt", action="store_true", default=True)
     p.add_argument(
@@ -667,7 +812,9 @@ def parse_args() -> argparse.Namespace:
 
 async def main() -> None:
     args = parse_args()
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
     # Silence the very chatty autogen-core message envelope logs so the eval
     # log stays readable (each agent round-trip otherwise produces ~10 KB of
     # INFO-level JSON).  The analysis-relevant info we care about is emitted
@@ -698,25 +845,42 @@ async def main() -> None:
         dataset = [c for c in dataset if c.get("cve_id") in keep]
         logger.info(
             "Restricted dataset to %d/%d CVEs via --only-cves: %s",
-            len(dataset), before, sorted(keep),
+            len(dataset),
+            before,
+            sorted(keep),
         )
 
     # Save run config
     _save_json(vars(args), output_dir / "run_config.json")
 
     if args.variance:
-        logger.info("Running variance analysis (%d repos, %d seeds)", args.variance_n, len(args.variance_seeds))
+        logger.info(
+            "Running variance analysis (%d repos, %d seeds)",
+            args.variance_n,
+            len(args.variance_seeds),
+        )
         await run_variance_analysis(
-            dataset, pipeline_cfg, args.clone_dir, output_dir,
-            n_repos=args.variance_n, seeds=args.variance_seeds,
+            dataset,
+            pipeline_cfg,
+            args.clone_dir,
+            output_dir,
+            n_repos=args.variance_n,
+            seeds=args.variance_seeds,
         )
     else:
         logger.info(
             "Running main comparison (%d CVEs, arms=%s, k=0..%d, per_cve_timeout=%.0fs, skip=%d)",
-            len(dataset), args.arms, args.max_k, args.per_cve_timeout, len(args.skip_cves),
+            len(dataset),
+            args.arms,
+            args.max_k,
+            args.per_cve_timeout,
+            len(args.skip_cves),
         )
         await run_main_comparison(
-            dataset, pipeline_cfg, args.clone_dir, output_dir,
+            dataset,
+            pipeline_cfg,
+            args.clone_dir,
+            output_dir,
             line_tolerance=args.line_tolerance,
             skip_empty_gt=args.skip_empty_gt,
             per_cve_timeout=args.per_cve_timeout,

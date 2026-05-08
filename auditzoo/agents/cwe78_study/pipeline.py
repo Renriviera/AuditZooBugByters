@@ -23,6 +23,12 @@ from auditzoo.backends.ingestion import auto_detect_backend
 from auditzoo.core.protocol.requests import Request
 from auditzoo.core.runtime import AnalysisRuntime
 
+from .cpg_cache import (
+    cpg_cache_location,
+    detect_repo_metadata,
+    is_cache_hit,
+    write_cache_metadata,
+)
 from .joern_arm import JoernArm
 from .llm_client import LLMClient, LLMConfig
 from .refinement_agent import RefinementAgent
@@ -124,7 +130,9 @@ async def _connect_joern_with_retry(
             last_exc = exc
             logger.warning(
                 "Joern CPG connect attempt %d/%d failed: %s",
-                attempt + 1, max_retries + 1, exc,
+                attempt + 1,
+                max_retries + 1,
+                exc,
             )
             try:
                 await runtime_cm.stop()
@@ -227,7 +235,7 @@ class PipelineConfig:
         max_context_tokens: int = 2000,
         arms: list[str] | None = None,
         llm_base_url: str = "http://localhost:8000/v1",
-        llm_model: str = "Qwen/Qwen2.5-Coder-7B-Instruct",
+        llm_model: str = "gpt-5.4-mini",
         llm_temperature: float = 0.1,
         llm_api_key: str = "not-needed",
         joern_port: int = 12345,
@@ -237,6 +245,7 @@ class PipelineConfig:
         joern_sources: list[str] | None = None,
         joern_sinks: list[str] | None = None,
         joern_sanitizers: list[str] | None = None,
+        cpg_cache_dir: str | Path | None = None,
     ) -> None:
         self.max_iterations = max_iterations
         self.seed = seed
@@ -256,6 +265,12 @@ class PipelineConfig:
         self.joern_sanitizers = (
             list(joern_sanitizers) if joern_sanitizers is not None else None
         )
+        # When set, every Joern run uses ``<cpg_cache_dir>/<sha256(...)>``
+        # as the analysis workspace.  The Joern client checks
+        # ``workspace.projects.exists(_.name == project_name)`` and skips
+        # importCode on a hit — turning second-and-later runs of the
+        # same (repo, commit) pair into a near-instant ``open()``.
+        self.cpg_cache_dir = Path(cpg_cache_dir) if cpg_cache_dir else None
 
 
 class Pipeline:
@@ -368,9 +383,15 @@ class Pipeline:
                 llm_triage_s=triage_t[0],
                 llm_refinement_s=refinement_s,
                 n_findings=len(findings),
-                n_tp=sum(1 for t in triage_results if t.verdict == Verdict.TRUE_POSITIVE),
-                n_fp=sum(1 for t in triage_results if t.verdict == Verdict.FALSE_POSITIVE),
-                n_uncertain=sum(1 for t in triage_results if t.verdict == Verdict.UNCERTAIN),
+                n_tp=sum(
+                    1 for t in triage_results if t.verdict == Verdict.TRUE_POSITIVE
+                ),
+                n_fp=sum(
+                    1 for t in triage_results if t.verdict == Verdict.FALSE_POSITIVE
+                ),
+                n_uncertain=sum(
+                    1 for t in triage_results if t.verdict == Verdict.UNCERTAIN
+                ),
                 llm_usage=self._llm.usage.to_dict(),
                 llm_tokens_triage=llm_tokens_triage,
                 llm_tokens_refinement=llm_tokens_refinement,
@@ -404,8 +425,55 @@ class Pipeline:
     async def _run_joern_arm(
         self, repo_path: str, *, cve_id: str = ""
     ) -> list[IterationResult]:
+        # Resolve a stable workspace + project name from the CPG cache
+        # whenever caching is configured.  When repo metadata is missing
+        # (eg. a non-git directory) we fall back to the default
+        # ``<repo>/.auditzoo`` so caching is a transparent improvement,
+        # never a regression.
+        cache_meta: dict[str, Any] = {"cpg_cache_enabled": False}
+        analysis_path: str | None = None
+        project_name: str | None = None
+        cache_loc = None
+        if self._cfg.cpg_cache_dir is not None:
+            repo_url, commit = detect_repo_metadata(repo_path)
+            if repo_url and commit:
+                cache_loc = cpg_cache_location(
+                    self._cfg.cpg_cache_dir,
+                    repo_url=repo_url,
+                    commit=commit,
+                )
+                cache_loc.workspace_dir.mkdir(parents=True, exist_ok=True)
+                analysis_path = str(cache_loc.workspace_dir)
+                project_name = cache_loc.project_name
+                hit = is_cache_hit(cache_loc)
+                cache_meta = {
+                    "cpg_cache_enabled": True,
+                    "cpg_cache_key": cache_loc.cache_key,
+                    "cpg_cache_dir": str(cache_loc.workspace_dir),
+                    "cpg_cache_hit": hit,
+                    "cpg_repo_url": repo_url,
+                    "cpg_commit": commit,
+                }
+                logger.info(
+                    "[%s | joern] CPG cache %s key=%s dir=%s",
+                    cve_id or "-",
+                    "HIT" if hit else "MISS",
+                    cache_loc.cache_key,
+                    cache_loc.workspace_dir,
+                )
+            else:
+                logger.warning(
+                    "[%s | joern] CPG cache disabled — could not detect "
+                    "repo_url/commit at %s",
+                    cve_id or "-",
+                    repo_path,
+                )
+
         backend_cfg = auto_detect_backend(
-            repo_path, port=self._cfg.joern_port
+            repo_path,
+            port=self._cfg.joern_port,
+            analysis_path=analysis_path,
+            project_name=project_name,
         )
         results: list[IterationResult] = []
 
@@ -416,20 +484,22 @@ class Pipeline:
         # "port already in use" when the previous CVE's JVM was still
         # releasing the port) we retry once after a short pause.
         cpg_start = time.perf_counter()
-        runtime_cm, runtime, cpg_error = await _connect_joern_with_retry(
-            backend_cfg
-        )
+        runtime_cm, runtime, cpg_error = await _connect_joern_with_retry(backend_cfg)
         if runtime is None:
             cpg_build_s_total = time.perf_counter() - cpg_start
             logger.error(
                 "Joern arm failed during CPG build after %.2fs (with retry): %s",
-                cpg_build_s_total, cpg_error, exc_info=cpg_error is not None,
+                cpg_build_s_total,
+                cpg_error,
+                exc_info=cpg_error is not None,
             )
             if runtime_cm is not None:
                 try:
                     await runtime_cm.stop()
                 except Exception:
-                    logger.exception("AnalysisRuntime cleanup after __aenter__ failure failed")
+                    logger.exception(
+                        "AnalysisRuntime cleanup after __aenter__ failure failed"
+                    )
             return [
                 IterationResult(
                     arm=ToolArm.JOERN,
@@ -483,8 +553,7 @@ class Pipeline:
                     )
                     raw_findings = scan_resp.data if scan_resp.success else []
                     findings = [
-                        Finding(**f) if isinstance(f, dict) else f
-                        for f in raw_findings
+                        Finding(**f) if isinstance(f, dict) else f for f in raw_findings
                     ]
                     joern = joern_holder[0]
                     findings = joern.get_findings_with_context(findings, repo_path)
@@ -519,23 +588,28 @@ class Pipeline:
                             continue
                         tokens_before_ref = self._llm.usage.to_dict()
                         with _stopwatch() as refine_t:
-                            classification = await self._refinement.classify_helpers_joern(
-                                call_graph_neighborhood=neighbors,
-                                current_sources=joern.sources,
-                                current_sinks=joern.sinks,
-                                current_sanitizers=joern.sanitizers,
+                            classification = (
+                                await self._refinement.classify_helpers_joern(
+                                    call_graph_neighborhood=neighbors,
+                                    current_sources=joern.sources,
+                                    current_sinks=joern.sinks,
+                                    current_sanitizers=joern.sanitizers,
+                                )
                             )
                             refinement_actions.append(asdict(classification))
                             new_sources = [
-                                n for n, r in classification.classifications.items()
+                                n
+                                for n, r in classification.classifications.items()
                                 if r == HelperRole.SOURCE_WRAPPER
                             ]
                             new_sinks = [
-                                n for n, r in classification.classifications.items()
+                                n
+                                for n, r in classification.classifications.items()
                                 if r == HelperRole.SINK_WRAPPER
                             ]
                             new_sanitizers = [
-                                n for n, r in classification.classifications.items()
+                                n
+                                for n, r in classification.classifications.items()
                                 if r == HelperRole.SANITIZER
                             ]
                             joern.expand_sources(new_sources)
@@ -557,9 +631,15 @@ class Pipeline:
                     llm_refinement_s=refinement_s,
                     call_graph_s=call_graph_s,
                     n_findings=len(findings),
-                    n_tp=sum(1 for t in triage_results if t.verdict == Verdict.TRUE_POSITIVE),
-                    n_fp=sum(1 for t in triage_results if t.verdict == Verdict.FALSE_POSITIVE),
-                    n_uncertain=sum(1 for t in triage_results if t.verdict == Verdict.UNCERTAIN),
+                    n_tp=sum(
+                        1 for t in triage_results if t.verdict == Verdict.TRUE_POSITIVE
+                    ),
+                    n_fp=sum(
+                        1 for t in triage_results if t.verdict == Verdict.FALSE_POSITIVE
+                    ),
+                    n_uncertain=sum(
+                        1 for t in triage_results if t.verdict == Verdict.UNCERTAIN
+                    ),
                     llm_usage=self._llm.usage.to_dict(),
                     llm_tokens_triage=llm_tokens_triage,
                     llm_tokens_refinement=llm_tokens_refinement,
@@ -568,11 +648,15 @@ class Pipeline:
                 metrics["joern_catalog_pre"] = catalog_pre
                 metrics["joern_catalog_post"] = catalog_post
                 metrics["joern_catalog_grew"] = (
-                    len(catalog_post.get("sources", [])) > len(catalog_pre.get("sources", []))
-                    or len(catalog_post.get("sinks", [])) > len(catalog_pre.get("sinks", []))
-                    or len(catalog_post.get("sanitizers", [])) > len(catalog_pre.get("sanitizers", []))
+                    len(catalog_post.get("sources", []))
+                    > len(catalog_pre.get("sources", []))
+                    or len(catalog_post.get("sinks", []))
+                    > len(catalog_pre.get("sinks", []))
+                    or len(catalog_post.get("sanitizers", []))
+                    > len(catalog_pre.get("sanitizers", []))
                 )
                 metrics["findings_hash"] = _findings_hash(findings)
+                metrics.update(cache_meta)
                 _log_phase_breakdown(cve_id=cve_id, arm="joern", k=k, metrics=metrics)
 
                 results.append(
@@ -601,6 +685,19 @@ class Pipeline:
                 await runtime_cm.__aexit__(None, None, None)
             except Exception:  # pragma: no cover - best-effort cleanup
                 logger.exception("AnalysisRuntime cleanup failed")
+            # Always drop a breadcrumb (even on error) so the cache
+            # directory has an audit trail; the next run still sees the
+            # CPG via ``is_cache_hit`` if Joern persisted ``cpg.bin``
+            # before the failure.
+            if cache_loc is not None:
+                try:
+                    write_cache_metadata(
+                        cache_loc,
+                        cve_id=cve_id,
+                        last_run_at=time.time(),
+                    )
+                except Exception:  # pragma: no cover - best-effort breadcrumb
+                    logger.exception("CPG cache metadata write failed")
 
         return results
 
@@ -618,7 +715,8 @@ def _triage_summary(triage_results: list[Any]) -> dict[str, int]:
 
 
 def _pick_refinement_target(
-    findings: list[Finding], triage_results: list[Any],
+    findings: list[Finding],
+    triage_results: list[Any],
 ) -> Finding:
     """Choose the most informative finding to anchor LLM refinement.
 

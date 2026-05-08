@@ -7,6 +7,7 @@ to run interprocedural taint-reachability queries and call-graph expansion.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,7 @@ from auditzoo.core.agents import BaseAnalysisAgent
 from auditzoo.core.protocol.requests import Request
 from auditzoo.core.protocol.responses import Response
 
+from .catalog_sanitizer import sanitize_catalog
 from .schemas import Finding, TaintFlow, ToolArm
 
 logger = logging.getLogger(__name__)
@@ -52,9 +54,18 @@ class JoernArm(BaseAnalysisAgent):
         call_graph_depth: int = 3,
     ) -> None:
         super().__init__(description="Joern CWE-78 taint analysis arm")
-        self._sources = sources if sources is not None else _load_catalog("sources")
-        self._sinks = sinks if sinks is not None else _load_catalog("sinks")
-        self._sanitizers = sanitizers if sanitizers is not None else _load_catalog("sanitizers")
+        raw_sources = sources if sources is not None else _load_catalog("sources")
+        raw_sinks = sinks if sinks is not None else _load_catalog("sinks")
+        raw_sanitizers = (
+            sanitizers if sanitizers is not None else _load_catalog("sanitizers")
+        )
+        # Defence-in-depth: even if seed parsing already cleaned these, a
+        # caller (or a per-iteration ``expand_*`` call below) may inject
+        # raw strings.  Always sanitise — drops regex-unsafe entries, dedups,
+        # and logs anything thrown out.
+        self._sources, _ = sanitize_catalog(raw_sources, label="joern sources")
+        self._sinks, _ = sanitize_catalog(raw_sinks, label="joern sinks")
+        self._sanitizers, _ = sanitize_catalog(raw_sanitizers, label="joern sanitizers")
         self._context_lines = context_lines
         self._call_graph_depth = call_graph_depth
 
@@ -71,17 +82,20 @@ class JoernArm(BaseAnalysisAgent):
         return list(self._sanitizers)
 
     def expand_sources(self, new: list[str]) -> None:
-        for s in new:
+        cleaned, _ = sanitize_catalog(new, label="joern sources (expand)")
+        for s in cleaned:
             if s not in self._sources:
                 self._sources.append(s)
 
     def expand_sinks(self, new: list[str]) -> None:
-        for s in new:
+        cleaned, _ = sanitize_catalog(new, label="joern sinks (expand)")
+        for s in cleaned:
             if s not in self._sinks:
                 self._sinks.append(s)
 
     def expand_sanitizers(self, new: list[str]) -> None:
-        for s in new:
+        cleaned, _ = sanitize_catalog(new, label="joern sanitizers (expand)")
+        for s in cleaned:
             if s not in self._sanitizers:
                 self._sanitizers.append(s)
 
@@ -208,16 +222,53 @@ class JoernArm(BaseAnalysisAgent):
             (e.g. ``input``, ``getenv``).
           * emit structured JSON records via ``.toJson`` so the backend's
             JSON parser succeeds even for empty results (``"[]"``).
+
+        Inputs are assumed to have been pushed through ``catalog_sanitizer``
+        (the JoernArm constructor enforces this) so each entry is a dotted
+        identifier.  We still ``re.escape`` defensively and verify that the
+        resulting union compiles, dropping any straggler that would trip
+        Joern's java.util.regex with ``PatternSyntaxException``.
         """
-        def _escape(s: str) -> str:
-            return s.replace("\\", "\\\\").replace("\"", "\\\"").replace(".", "\\.")
+
+        def _safe_union(entries: list[str], *, kind: str) -> str:
+            """Return a regex alternation of ``re.escape`` (entries) that compiles.
+
+            Entries that fail to compile (post-escape) are dropped with a
+            log line; the surviving union is what gets sent to Joern.
+            Returning the empty string is left to the caller to handle —
+            we never inject a syntactically invalid regex into the CPGQL.
+            """
+            survivors: list[str] = []
+            for raw in entries:
+                if not raw:
+                    continue
+                escaped = re.escape(raw)
+                try:
+                    re.compile(escaped)
+                except re.error as exc:
+                    logger.warning(
+                        "Dropping %s entry %r: regex compile failed (%s)",
+                        kind, raw, exc,
+                    )
+                    continue
+                survivors.append(escaped)
+            return "|".join(survivors)
 
         sink_names = sorted({s.rsplit(".", 1)[-1] for s in sinks if s})
-        sink_prefix_re = "(?s)^(" + "|".join(_escape(s) for s in sinks) + ")\\(.*"
+        sink_union = _safe_union(list(sinks), kind="sink")
+        # ``[^A-Za-z0-9_]`` instead of a literal ``\(`` rejects matches like
+        # ``os.systemctl`` while still accepting ``os.system( ... )``,
+        # ``os.system  (`` (whitespace), and Python attribute reads (we
+        # filter those out elsewhere).  The whole regex is wrapped in
+        # ``(?s)^(?:...).*`` so it matches the *start* of ``call.code``.
+        sink_prefix_re = (
+            f"(?s)^(?:{sink_union})(?:[^A-Za-z0-9_].*)?$" if sink_union else "(?!x)x"
+        )
         sink_names_scala = ",".join(f'"{n}"' for n in sink_names)
 
         source_tokens = [s for s in sources if s]
-        source_code_re = "(?s).*(" + "|".join(_escape(s) for s in source_tokens) + ").*"
+        source_union = _safe_union(source_tokens, kind="source")
+        source_code_re = f"(?s).*(?:{source_union}).*" if source_union else "(?!x)x"
         # Calls whose *short* name matches the last segment of the source pattern.
         # E.g. "input", "getenv" are callables; attribute reads remain field accesses.
         source_call_tails = sorted({
@@ -226,6 +277,21 @@ class JoernArm(BaseAnalysisAgent):
             if "." not in s or s.rsplit(".", 1)[-1] in {"getenv", "input"}
         })
         source_call_names_scala = ",".join(f'"{n}"' for n in source_call_tails)
+
+        # Sanity-compile the final regexes one more time — if anything
+        # slipped through (shouldn't, but the escape table differs slightly
+        # between Python and java.util.regex), fall back to a safe
+        # never-match pattern so the query syntax is still valid.
+        try:
+            re.compile(sink_prefix_re)
+        except re.error as exc:
+            logger.error("sink_prefix_re failed compile, neutralising: %s", exc)
+            sink_prefix_re = "(?!x)x"
+        try:
+            re.compile(source_code_re)
+        except re.error as exc:
+            logger.error("source_code_re failed compile, neutralising: %s", exc)
+            source_code_re = "(?!x)x"
 
         # Single-expression query: the CPGQL server echoes *every* top-level
         # val binding, so we inline everything into one chained call whose

@@ -38,6 +38,8 @@ from splitEvaluations.common import (
     configure_logging,
     eligible_dataset,
     filter_dataset,
+    redacted_sweep_args,
+    resolve_llm_api_key,
     run_main_comparison,
     select_dataset_subset,
     split_train_validate,
@@ -50,14 +52,18 @@ def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="Semgrep-only CWE-78 sweep")
     add_common_sweep_args(ap)
     ap.add_argument(
-        "--per-cve-timeout", type=float, default=900.0,
+        "--per-cve-timeout",
+        type=float,
+        default=900.0,
         help="Wall-clock seconds budget per CVE; 0 disables.",
     )
     ap.add_argument(
-        "--no-patched", action="store_true", default=False,
+        "--no-patched",
+        action="store_true",
+        default=False,
         help="Skip the patched-commit re-scan.  Semgrep is fast enough "
-             "that the default is to keep patched, but this flag exists "
-             "for parity with the Joern sweep for smoke runs.",
+        "that the default is to keep patched, but this flag exists "
+        "for parity with the Joern sweep for smoke runs.",
     )
     return ap.parse_args()
 
@@ -65,6 +71,7 @@ def parse_args() -> argparse.Namespace:
 async def main() -> None:
     args = parse_args()
     configure_logging()
+    llm_api_key = resolve_llm_api_key(args.llm_api_key)
 
     dataset = json.loads(args.dataset.read_text())
     logger.info("Loaded %d CVEs from %s", len(dataset), args.dataset)
@@ -105,7 +112,7 @@ async def main() -> None:
         LLMConfig(
             base_url=args.llm_url,
             model=args.seed_model,
-            api_key="not-needed",
+            api_key=llm_api_key,
             seed=args.seed,
             log_io_path=str(args.log_llm_io) if args.log_llm_io else None,
         )
@@ -123,24 +130,32 @@ async def main() -> None:
         arms=["semgrep"],
         llm_base_url=args.llm_url,
         llm_model=args.llm_model,
+        llm_api_key=llm_api_key,
         llm_log_io_path=str(args.log_llm_io) if args.log_llm_io else None,
         semgrep_rules_yaml=semgrep_rules_yaml,
     )
 
     _save_json(
-        {**vars(args), "sweep": "semgrep", **split_metadata},
+        {**redacted_sweep_args(args), "sweep": "semgrep", **split_metadata},
         output_dir / "run_config.json",
     )
 
     logger.info(
         "Semgrep sweep: %d selected CVEs (%d train / %d validate), "
         "k=0..%d, per_cve_timeout=%.0fs, run_patched=%s, skip=%d",
-        len(selected), len(training_dataset), len(validation_dataset),
-        args.max_k, args.per_cve_timeout,
-        not args.no_patched, len(args.skip_cves),
+        len(selected),
+        len(training_dataset),
+        len(validation_dataset),
+        args.max_k,
+        args.per_cve_timeout,
+        not args.no_patched,
+        len(args.skip_cves),
     )
     await run_main_comparison(
-        validation_dataset, pipeline_cfg, args.clone_dir, output_dir,
+        validation_dataset,
+        pipeline_cfg,
+        args.clone_dir,
+        output_dir,
         line_tolerance=args.line_tolerance,
         skip_empty_gt=False,
         per_cve_timeout=args.per_cve_timeout,
