@@ -10,6 +10,9 @@
 #   AUDITZOO_JOERN_PORT, AUDITZOO_JOERN_PATH, AUDITZOO_CLONE_TIMEOUT,
 #   AUDITZOO_JOERN_HEAP (default 8g), AUDITZOO_JOERN_JAVA_OPTS (extra JVM flags),
 #   AUDITZOO_CPG_CACHE_DIR (CPG cache root; default <output>/joern_cpg_cache),
+#   AUDITZOO_JOERN_SEED_CATALOG (pre-generated catalog JSON to load instead
+#       of regenerating; auto-detected at results/joern_seed/full_catalog.json
+#       when AUDITZOO_JOERN_SEED_CATALOG is unset),
 #   AUDITZOO_RUN_PATCHED=1
 
 set -euo pipefail
@@ -127,6 +130,20 @@ CPG_CACHE_DIR="${AUDITZOO_CPG_CACHE_DIR:-${OUTPUT_ROOT}/joern_cpg_cache}"
 mkdir -p "${CPG_CACHE_DIR}"
 echo "[run_joern_30_with_audit] CPG cache: ${CPG_CACHE_DIR}"
 
+# Pre-generated seed catalog: skip the per-sweep training-clones + LLM
+# seed call when a saved catalog exists.  Defaults to the canonical path
+# produced by ``splitEvaluations.seed_joern_catalog``; honour the explicit
+# env var when set.
+SEED_CATALOG_DEFAULT="${OUTPUT_ROOT}/joern_seed/full_catalog.json"
+SEED_CATALOG="${AUDITZOO_JOERN_SEED_CATALOG:-$SEED_CATALOG_DEFAULT}"
+seed_catalog_args=()
+if [[ -f "${SEED_CATALOG}" ]]; then
+  seed_catalog_args+=(--joern-seed-catalog "${SEED_CATALOG}")
+  echo "[run_joern_30_with_audit] Using pre-generated seed catalog: ${SEED_CATALOG}"
+else
+  echo "[run_joern_30_with_audit] No pre-generated seed catalog at ${SEED_CATALOG}; will run LLM seed step."
+fi
+
 run_patched_args=()
 if [[ "${AUDITZOO_RUN_PATCHED:-0}" == "1" ]]; then
   run_patched_args+=(--run-patched)
@@ -149,6 +166,7 @@ cmd=(
   --seed-model "$SEED_MODEL"
   --cpg-cache-dir "$CPG_CACHE_DIR"
 )
+cmd+=("${seed_catalog_args[@]}")
 cmd+=("${run_patched_args[@]}")
 "${cmd[@]}"
 

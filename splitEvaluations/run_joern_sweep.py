@@ -28,8 +28,10 @@ from datetime import datetime
 
 from auditzoo.agents.cwe78_study.llm_client import LLMClient, LLMConfig
 from auditzoo.agents.cwe78_study.model_seed import (
+    JoernSeedCatalog,
     collect_training_examples,
     generate_joern_seed,
+    parse_joern_seed_catalog,
 )
 from auditzoo.agents.cwe78_study.pipeline import PipelineConfig
 from splitEvaluations.common import (
@@ -69,6 +71,16 @@ def parse_args() -> argparse.Namespace:
         help="Re-scan the patched commit to obtain an 'alerts on "
         "patched = FP' signal.  OFF by default (v1) so Joern "
         "doesn't have to build two CPGs per CVE.",
+    )
+    ap.add_argument(
+        "--joern-seed-catalog",
+        type=Path,
+        default=None,
+        help="Pre-generated catalog JSON produced by "
+        "splitEvaluations.seed_joern_catalog.  When provided, the "
+        "expensive per-sweep training-clones + LLM seed call is "
+        "skipped entirely; the catalog is loaded verbatim and the "
+        "training split is used only for audit metadata.",
     )
     return ap.parse_args()
 
@@ -112,29 +124,46 @@ async def main() -> None:
     )
     _save_json(split_metadata, output_dir / "training_split.json")
 
-    logger.info(
-        "Generating Joern seed catalog from %d training CVEs using %s",
-        len(training_dataset),
-        args.seed_model,
-    )
-    training_examples = collect_training_examples(
-        training_dataset=training_dataset,
-        clone_dir=args.clone_dir,
-        dataset_path=args.dataset,
-    )
-    seed_llm = LLMClient(
-        LLMConfig(
-            base_url=args.llm_url,
-            model=args.seed_model,
-            api_key=llm_api_key,
-            seed=args.seed,
-            log_io_path=str(args.log_llm_io) if args.log_llm_io else None,
+    if args.joern_seed_catalog is not None:
+        logger.info(
+            "Loading pre-generated Joern seed catalog from %s "
+            "(skipping per-sweep training clones + LLM seed call)",
+            args.joern_seed_catalog,
         )
-    )
-    joern_catalog, seed_prompt = await generate_joern_seed(
-        llm=seed_llm,
-        training_examples=training_examples,
-    )
+        catalog_payload = json.loads(args.joern_seed_catalog.read_text())
+        # Strip metadata so parse_joern_seed_catalog only sees the three
+        # canonical lists; the metadata block is preserved verbatim in
+        # the breadcrumb file we write below.
+        canonical = {k: catalog_payload.get(k, []) for k in ("sources", "sinks", "sanitizers")}
+        joern_catalog = parse_joern_seed_catalog(canonical)
+        seed_prompt = {
+            "loaded_from": str(args.joern_seed_catalog),
+            "metadata": catalog_payload.get("metadata", {}),
+        }
+    else:
+        logger.info(
+            "Generating Joern seed catalog from %d training CVEs using %s",
+            len(training_dataset),
+            args.seed_model,
+        )
+        training_examples = collect_training_examples(
+            training_dataset=training_dataset,
+            clone_dir=args.clone_dir,
+            dataset_path=args.dataset,
+        )
+        seed_llm = LLMClient(
+            LLMConfig(
+                base_url=args.llm_url,
+                model=args.seed_model,
+                api_key=llm_api_key,
+                seed=args.seed,
+                log_io_path=str(args.log_llm_io) if args.log_llm_io else None,
+            )
+        )
+        joern_catalog, seed_prompt = await generate_joern_seed(
+            llm=seed_llm,
+            training_examples=training_examples,
+        )
     _save_json(joern_catalog.to_dict(), output_dir / "model_seed_joern_catalog.json")
     _save_json(seed_prompt, output_dir / "model_seed_prompt.json")
 
