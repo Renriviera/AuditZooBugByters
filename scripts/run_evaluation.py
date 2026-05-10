@@ -26,6 +26,7 @@ import resource
 import shutil
 import socket
 import subprocess
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -59,12 +60,33 @@ _REASONING_CAP = 200
 
 
 def _snippet_for(f: Finding) -> str:
-    """Return the text that ``source_expr`` / ``sink_expr`` are validated against."""
-    return (
-        (getattr(f, "surrounding_context", "") or "")
-        + "\n"
-        + (getattr(f, "code_snippet", "") or "")
-    )
+    """Return the text that ``source_expr`` / ``sink_expr`` are validated against.
+
+    Includes the finding's ``surrounding_context`` (+/- N-line slice around
+    the sink), the verbatim ``code_snippet``, and any structural
+    evidence the pipeline stamped onto ``Finding.metadata`` for the
+    triage LLM (see
+    :func:`auditzoo.agents.cwe78_study.pipeline._build_structural_evidence_map`).
+    Concatenating all three keeps the scorer's hallucination brake
+    aligned with the triage agent's brake: a ``source_expr`` the LLM
+    quoted from the structural-evidence block (typical for
+    inter-procedural CWE-78 chains where the source lives in a caller)
+    is recognised as legitimate evidence and the verdict is preserved.
+
+    Pre-evidence runs (or non-Joern arms whose findings have no
+    metadata) yield an empty structural-evidence string, so behaviour
+    is unchanged.
+    """
+    metadata = getattr(f, "metadata", None) or {}
+    structural = ""
+    if isinstance(metadata, dict):
+        structural = str(metadata.get("structural_evidence", "") or "")
+    parts = [
+        getattr(f, "surrounding_context", "") or "",
+        getattr(f, "code_snippet", "") or "",
+        structural,
+    ]
+    return "\n".join(p for p in parts if p)
 
 
 def serialize_triage_verdicts(
@@ -233,11 +255,7 @@ def label_findings(
         )
 
         source_expr = (getattr(t, "source_expr", "") or "").strip()
-        snippet = (
-            (getattr(f, "surrounding_context", "") or "")
-            + "\n"
-            + (getattr(f, "code_snippet", "") or "")
-        )
+        snippet = _snippet_for(f)
         # Parity: empty source_expr ⇒ treat as "present" so pre-evidence
         # runs aren't mass-flagged as hallucinations.  ``_snippet_for``
         # includes any structural evidence the pipeline stamped onto
@@ -423,7 +441,27 @@ def get_resource_snapshot() -> dict[str, Any]:
 # ======================================================================
 
 
-def _cleanup_stray_joern() -> None:
+def _is_port_in_use(port: int, host: str = "localhost", timeout: float = 0.5) -> bool:
+    """Return ``True`` if a TCP listener is bound to ``(host, port)``.
+
+    A successful ``connect`` proves the socket is bound (likely by a
+    lingering Joern JVM).  ``ConnectionRefusedError`` or any other socket
+    error is treated as "free".  We deliberately do not distinguish
+    "port closed" from "port reset" - both let us proceed.
+    """
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except (OSError, socket.timeout):
+        return False
+
+
+def _cleanup_stray_joern(
+    port: int | None = None,
+    *,
+    wait_s: float = 30.0,
+    poll_s: float = 0.5,
+) -> bool:
     """Best-effort kill of any lingering Joern server subprocesses.
 
     The 20260507_145628 sweep degraded after CVE 11 because a stuck JVM
@@ -463,6 +501,8 @@ async def _run_with_timeout(
     repo_path: str,
     cve_id: str,
     timeout_s: float,
+    *,
+    joern_port: int | None = None,
 ) -> tuple[Any, bool]:
     """Run ``pipeline.run`` with a wall-clock budget.
 
@@ -472,11 +512,17 @@ async def _run_with_timeout(
     actually drop before the caller starts the next CVE.
     """
     if timeout_s and timeout_s > 0:
-        try:
-            result = await asyncio.wait_for(
-                pipeline.run(repo_path, cve_id=cve_id),
-                timeout=timeout_s,
-            )
+        task = asyncio.create_task(pipeline.run(repo_path, cve_id=cve_id))
+        done, _ = await asyncio.wait({task}, timeout=timeout_s)
+        if task in done:
+            try:
+                result = task.result()
+            except asyncio.CancelledError:
+                logger.warning("  %s: pipeline.run was cancelled", cve_id)
+                _cleanup_stray_joern(joern_port)
+                return None, True
+            except Exception:
+                raise
             return result, False
 
         logger.warning(
@@ -497,10 +543,10 @@ async def _run_with_timeout(
         except asyncio.CancelledError:
             pass
         except asyncio.TimeoutError:
-            logger.warning(
-                "  %s: pipeline.run exceeded %.0fs budget, aborting this CVE",
+            logger.error(
+                "  %s: cancelled pipeline task did not settle after timeout; "
+                "exiting this sweep process so the caller can resume cleanly",
                 cve_id,
-                timeout_s,
             )
             _cleanup_stray_joern(joern_port)
             raise SystemExit(124)
