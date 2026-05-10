@@ -1,22 +1,33 @@
 """Regression test: the k-loop must be *able* to move TP/FP/FN metrics.
 
-This test pins the Phase-B1 redesign of ``label_findings``.  It replays
-the same candidate set (as would be produced by a deterministic Semgrep
-scan) against four scripted triage-verdict sequences -- one per
+This test pins the Phase-B2 redesign of ``label_findings`` (UNCERTAIN
+moved into a dedicated non-scoring bucket).  It replays the same
+candidate set (as would be produced by a deterministic Semgrep scan)
+against four scripted triage-verdict sequences -- one per
 ``k in {0, 1, 2, 3}`` -- and asserts that the GT-based counts are *not*
-identical.  If a future refactor regresses back to the old scorer that
-collapses TRUE_POSITIVE + UNCERTAIN and ignores the LLM unless it says
-FALSE_POSITIVE, this test fails immediately.
+identical and that UNCERTAIN no longer feeds into TP/FP.
+
+Phase-B2 scoring matrix (reflected in the assertions below)::
+
+    FALSE_POSITIVE on no-match  -> tn               (suppressed)
+    FALSE_POSITIVE on match     -> fn_by_llm        (LLM killed a real bug)
+    TRUE_POSITIVE  on match     -> tp               (committed positive)
+    TRUE_POSITIVE  on no-match  -> fp_by_llm_overclaim
+    UNCERTAIN      on match     -> uncertain_on_gt  (not credited; FN)
+    UNCERTAIN      on no-match  -> uncertain_off_gt (not penalised as FP)
 
 The scripted verdict schedule deliberately mirrors the behaviours we
 expect the real LLM to exhibit as k grows:
 
-  * k=0: no LLM yet -> all UNCERTAIN (baseline equal to raw candidates)
-  * k=1: LLM suppresses a wrong-line candidate as FALSE_POSITIVE -> tn
-  * k=2: LLM endorses the correct candidate as TRUE_POSITIVE + another
-         wrong-line candidate as TP (over-claim) -> fp_by_llm_overclaim
-  * k=3: LLM suppresses a *right-line* candidate as FALSE_POSITIVE
-         -> fn_by_llm rises, fn rises
+  * k=0: no LLM commitment yet -> all UNCERTAIN (no positives credited;
+         both GT lines remain FN; the off-GT candidate is parked in
+         ``uncertain_off_gt``)
+  * k=1: LLM suppresses the wrong-line literal-arg candidate as
+         FALSE_POSITIVE -> tn (still 0 TP, GT lines still FN)
+  * k=2: LLM commits to TRUE_POSITIVE on one real bug and overclaims on
+         the off-GT literal -> tp=1, fp_by_llm_overclaim=1
+  * k=3: LLM suppresses a *right-line* candidate as FALSE_POSITIVE while
+         endorsing the other -> fn_by_llm rises, tp=1
 
 We also assert that ``serialize_triage_verdicts`` emits aligned entries
 for downstream ``scripts/analyze_triage.py`` consumption.
@@ -128,33 +139,57 @@ def _score(k: int) -> dict:
 # ----------------------------------------------------------------------
 
 class TestKMovesMetrics:
-    def test_k0_baseline_matches_raw_candidates(self) -> None:
+    def test_k0_all_uncertain_does_not_credit_any_positive(self) -> None:
+        """k=0 baseline: pure UNCERTAIN must not produce TP or FP.
+
+        Replaces the Phase-B1 ``test_k0_baseline_matches_raw_candidates``
+        guard.  Under Phase-B2, UNCERTAIN is observable through the
+        ``uncertain_*`` keys but never feeds into TP/FP, so an
+        unconditioned k=0 step has TP=0, FP=0, and both GT lines remain
+        FN until the LLM commits.
+        """
         r = _score(0)
-        assert r["tp"] == 2, "Both in-tolerance findings should be TPs at k=0"
-        assert r["fp"] == 1, "Line-200 finding is an fp_by_location at k=0"
-        assert r["fn"] == 0
+        assert r["tp"] == 0
+        assert r["fp"] == 0
+        assert r["fn"] == 2, "Both GT lines remain FN until the LLM commits"
         assert r["fn_by_llm"] == 0
-        assert r["labels"] == ["tp", "tp", "fp_by_location"]
+        assert r["uncertain_total"] == 3
+        assert r["uncertain_on_gt"] == 2
+        assert r["uncertain_off_gt"] == 1
+        assert r["labels"] == [
+            "uncertain_on_gt",
+            "uncertain_on_gt",
+            "uncertain_off_gt",
+        ]
 
     def test_k1_false_positive_suppression_yields_tn(self) -> None:
+        """k=1 still has no committed positives; UNCERTAIN-on-GT stays FN.
+
+        The wrong-line literal-arg finding is FALSE_POSITIVE so it
+        becomes a ``tn`` (suppressed) instead of an
+        ``uncertain_off_gt``.  TP/FP stay at zero because no
+        TRUE_POSITIVE verdicts are issued yet.
+        """
         r = _score(1)
-        assert r["tp"] == 2
-        assert r["fp"] == 0, (
-            "k=1 must drop the line-200 FP by honouring the LLM's "
-            "FALSE_POSITIVE verdict (previously this was fp_by_llm=1)"
-        )
-        assert r["fn"] == 0
+        assert r["tp"] == 0
+        assert r["fp"] == 0
+        assert r["fn"] == 2, "Both GT lines still uncommitted -> FN"
         assert r["fn_by_llm"] == 0
         assert r["labels"].count("tn") == 1
+        assert r["labels"].count("uncertain_on_gt") == 2
+        assert "uncertain_off_gt" not in r["labels"]
 
     def test_k2_overclaim_is_counted_as_fp(self) -> None:
         r = _score(2)
-        assert r["tp"] == 2
+        # Verdicts at k=2: TP on real bug @ line 43, UNCERTAIN @ line 82,
+        # TP-overclaim @ line 200.  Only the first is a committed match.
+        assert r["tp"] == 1
         assert r["fp"] == 1
         assert "fp_by_llm_overclaim" in r["labels"], (
             "TRUE_POSITIVE on a non-GT line must produce fp_by_llm_overclaim; "
             "otherwise the LLM is incentivised to approve everything"
         )
+        assert r["uncertain_on_gt"] == 1
 
     def test_k3_llm_suppresses_true_bug_raises_fn_by_llm(self) -> None:
         r = _score(3)
@@ -170,16 +205,21 @@ class TestKMovesMetrics:
         ]
         assert len(set(tp_fp_fn)) > 1, (
             f"TP/FP/FN must differ across k, got {tp_fp_fn}. "
-            "This is the Phase-B1 regression guard."
+            "This is the Phase-B1/B2 regression guard."
         )
 
-    def test_precision_improves_when_llm_kills_wrong_line_fps(self) -> None:
+    def test_precision_improves_when_llm_commits_to_true_positives(self) -> None:
+        """Phase-B2 precision improvement: k=0 has no committed positives,
+        so precision is 0/0 = 0.0; once the LLM commits at k=2, precision
+        is non-zero (1 TP / 2 committed).  This replaces the legacy
+        ``test_precision_improves_when_llm_kills_wrong_line_fps`` whose
+        premise (UNCERTAIN counted as TP/FP) no longer applies.
+        """
         p0 = _score(0)["precision"]
-        p1 = _score(1)["precision"]
-        assert p1 > p0, (
-            "Suppressing fp_by_location via FALSE_POSITIVE verdict must "
-            "raise precision; got p(k=0)={:.3f}, p(k=1)={:.3f}".format(p0, p1)
-        )
+        p2 = _score(2)["precision"]
+        assert p0 == 0.0
+        assert p2 > 0.0
+        assert p2 == 0.5  # 1 TP / (1 TP + 1 fp_by_llm_overclaim)
 
 
 class TestTriageVerdictSerialisation:

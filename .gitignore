@@ -80,3 +80,7 @@ data/advisory-database/
 
 # Shallow repo clones used during dataset collection
 benchmark/python/cwe78_cves/repos/
+
+# Sweep + audit artifacts (regenerated on every run)
+results/
+

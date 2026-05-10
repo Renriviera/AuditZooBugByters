@@ -212,12 +212,29 @@ def build_user_prompt_call1_joern(
     current_sinks: list[str],
     current_sanitizers: list[str],
 ) -> str:
-    """Build Call 1 user prompt for Joern helper-function identification."""
-    funcs_block = "\n".join(
-        f"- {f.get('name', '?')}: callers={f.get('callers', [])}, "
-        f"callees={f.get('callees', [])}\n  source:\n{_truncate(f.get('source', ''), 30)}"
-        for f in call_graph_neighborhood
-    )
+    """Build Call 1 user prompt for Joern helper-function identification.
+
+    Each neighbour now ships with explicit ``callees`` and a longer
+    ``code`` body excerpt so the LLM can cite a structural evidence
+    string for every classification.  Pipeline downstream applies a
+    ``verify_sink_wrapper`` predicate that requires the cited evidence
+    (or a callee/body match against the current sink catalog) before
+    expanding the sink set — see
+    :func:`auditzoo.agents.cwe78_study.pipeline.verify_sink_wrapper`.
+    """
+
+    def _render(f: dict[str, Any]) -> str:
+        name = f.get("name", "?")
+        callers = f.get("callers", []) or []
+        callees = f.get("callees", []) or []
+        body_source = f.get("source") or f.get("code") or ""
+        body = _truncate(body_source, 30)
+        return (
+            f"- {name}: callers={callers}, callees={callees}\n"
+            f"  body:\n{body}"
+        )
+
+    funcs_block = "\n".join(_render(f) for f in call_graph_neighborhood)
 
     return f"""\
 Call-graph neighborhood functions requiring classification:
@@ -227,8 +244,17 @@ Current source catalog: {current_sources}
 Current sink catalog: {current_sinks}
 Current sanitizer catalog: {current_sanitizers}
 
-For each function above, classify it as one of:
-source-wrapper, sink-wrapper, transformer, sanitizer, or unrelated."""
+For each function above, classify it as exactly one of:
+source-wrapper, sink-wrapper, transformer, sanitizer, or unrelated.
+
+Additionally, return an ``evidence`` map keyed by function name with a
+short verbatim substring (a callee name or body expression) that
+justifies the role.  The substring MUST appear in either ``callees`` or
+``body`` for that function.  Use an empty string for ``unrelated``.
+
+Respond with ONLY a valid JSON object:
+{{"classifications": {{"<func>": "<role>", ...}},
+  "evidence": {{"<func>": "<verbatim callee or body substring>", ...}}}}"""
 
 
 def build_user_prompt_call2(

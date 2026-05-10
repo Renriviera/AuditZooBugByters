@@ -4,6 +4,7 @@ Common configuration, error handling, and utilities shared by all backends.
 """
 
 import os
+import sys
 from dataclasses import dataclass
 
 from auditzoo.core.ir.backend_api import BackendConfig, BackendConfigError
@@ -45,11 +46,20 @@ class JoernConfig(BackendConfig):
         if self.language is None:
             raise BackendConfigError("Language must be specified for Joern backend")
 
-        joern_path = kwargs.get("joern_path")
         if joern_path is None:
-            joern_path = os.path.join(
-                os.environ.get("CONDA_PREFIX", "/opt"), "opt/joern"
-            )
+            joern_path = kwargs.get("joern_path")
+        if joern_path is None:
+            explicit = os.environ.get("AUDITZOO_JOERN_PATH", "").strip()
+            if explicit:
+                joern_path = explicit
+            else:
+                # Joern is installed under ``$CONDA_PREFIX/opt/joern`` (see
+                # ``install.sh``).  When ``CONDA_PREFIX`` is unset — common
+                # for plain ``python -m`` invocations — fall back to
+                # ``sys.prefix`` so the active interpreter's env root is used.
+                # The old default ``/opt`` produced a broken ``/opt/opt/joern``.
+                prefix = os.environ.get("CONDA_PREFIX") or sys.prefix
+                joern_path = os.path.join(prefix, "opt", "joern")
         self.joern_path = joern_path
 
         self.host = kwargs.get("host", "localhost")

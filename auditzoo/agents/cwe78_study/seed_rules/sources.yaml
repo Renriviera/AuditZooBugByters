@@ -1,16 +1,32 @@
-# Taint sources for CWE-78 detection (12 patterns).
-# These represent entry points where attacker-controlled data enters the program.
+# Taint sources for CWE-78 detection.
+# These represent generic entry points where attacker-controlled data enters
+# the program.  Catalog is intentionally framework-broad: every entry below
+# is a documented Python web/CLI/IO idiom, not a per-CVE artefact.
 
 sources:
-  # CLI / environment
+  # CLI / environment / standard IO
   - pattern: "sys.argv"
+    category: cli
+  - pattern: "sys.stdin"
     category: cli
   - pattern: "input"
     category: cli
+  - pattern: "argparse"
+    category: cli
+  - pattern: "click.option"
+    category: cli
   - pattern: "os.environ"
+    category: environment
+  - pattern: "os.environ.get"
     category: environment
   - pattern: "os.getenv"
     category: environment
+
+  # Network IO
+  - pattern: "socket.recv"
+    category: network
+  - pattern: "socket.recvfrom"
+    category: network
 
   # Flask HTTP accessors
   - pattern: "request.args"
@@ -25,10 +41,22 @@ sources:
   - pattern: "request.get_json"
     category: http
     framework: flask
+  - pattern: "request.json"
+    category: http
+    framework: flask
   - pattern: "request.data"
     category: http
     framework: flask
   - pattern: "request.headers"
+    category: http
+    framework: flask
+  - pattern: "request.cookies"
+    category: http
+    framework: flask
+  - pattern: "request.files"
+    category: http
+    framework: flask
+  - pattern: "request.stream"
     category: http
     framework: flask
 
@@ -39,3 +67,184 @@ sources:
   - pattern: "request.POST"
     category: http
     framework: django
+  - pattern: "request.body"
+    category: http
+    framework: django
+  - pattern: "request.META"
+    category: http
+    framework: django
+  - pattern: "request.FILES"
+    category: http
+    framework: django
+  - pattern: "request.COOKIES"
+    category: http
+    framework: django
+
+  # FastAPI / Starlette HTTP accessors
+  - pattern: "request.query_params"
+    category: http
+    framework: fastapi
+  - pattern: "request.path_params"
+    category: http
+    framework: fastapi
+
+  # aiohttp HTTP accessors
+  - pattern: "request.query"
+    category: http
+    framework: aiohttp
+  - pattern: "request.match_info"
+    category: http
+    framework: aiohttp
+  - pattern: "request.post"
+    category: http
+    framework: aiohttp
+
+  # Tornado HTTP accessors
+  - pattern: "self.get_argument"
+    category: http
+    framework: tornado
+  - pattern: "self.get_body_argument"
+    category: http
+    framework: tornado
+  - pattern: "self.get_query_argument"
+    category: http
+    framework: tornado
+  - pattern: "self.request.arguments"
+    category: http
+    framework: tornado
+
+  # Bottle HTTP accessors
+  - pattern: "request.params"
+    category: http
+    framework: bottle
+  - pattern: "request.forms"
+    category: http
+    framework: bottle
+
+  # Django REST framework: serializer.validated_data is the canonical
+  # post-validation dict the view layer hands to the view body; serializer.data
+  # is the pre-save snapshot.  Both are attacker-controlled because the
+  # serializer only validates *types*, not whether the resulting strings
+  # are safe to splice into a shell.  Documented in the DRF tutorial under
+  # "Saving the serializer".
+  - pattern: "serializer.validated_data"
+    category: http
+    framework: drf
+  - pattern: "serializer.data"
+    category: http
+    framework: drf
+
+  # Pyramid: request.matchdict carries the URL placeholder values the
+  # router parsed from the path (see Pyramid docs, "URL Dispatch").
+  - pattern: "request.matchdict"
+    category: http
+    framework: pyramid
+
+  # Falcon: req.media is the parsed body payload, req.context is the
+  # ASGI/WSGI request-scoped state bag (Falcon "Request and Response" docs).
+  - pattern: "req.media"
+    category: http
+    framework: falcon
+  - pattern: "req.context"
+    category: http
+    framework: falcon
+
+  # aiohttp extras: text() and read() are coroutines returning the raw
+  # request body.  WebSocketResponse.receive_str / receive_bytes are
+  # the documented WS frame readers.
+  - pattern: "request.text"
+    category: http
+    framework: aiohttp
+  - pattern: "request.read"
+    category: http
+    framework: aiohttp
+  - pattern: "WebSocketResponse.receive_str"
+    category: websocket
+    framework: aiohttp
+  - pattern: "WebSocketResponse.receive_bytes"
+    category: websocket
+    framework: aiohttp
+
+  # FastAPI parameter readers: each of these classes, when used as a
+  # default value on a path-operation parameter, instructs FastAPI to
+  # decode the incoming request body / query / path / form / file /
+  # header / cookie segment into the parameter (FastAPI "Body" /
+  # "Query" / "Path" / "Form" / "File" / "Header" / "Cookie" docs).
+  - pattern: "Body"
+    category: http
+    framework: fastapi
+  - pattern: "Query"
+    category: http
+    framework: fastapi
+  - pattern: "Path"
+    category: http
+    framework: fastapi
+  - pattern: "Form"
+    category: http
+    framework: fastapi
+  - pattern: "File"
+    category: http
+    framework: fastapi
+  - pattern: "Header"
+    category: http
+    framework: fastapi
+  - pattern: "Cookie"
+    category: http
+    framework: fastapi
+
+  # Generic deserialization entry points: every one of these takes a
+  # bytes/str blob and reconstructs Python objects from it; the docs
+  # for pickle, marshal, yaml, toml, xmltodict, and ElementTree all
+  # explicitly warn about untrusted input.
+  - pattern: "pickle.loads"
+    category: deserialization
+  - pattern: "marshal.loads"
+    category: deserialization
+  - pattern: "yaml.load"
+    category: deserialization
+  - pattern: "yaml.unsafe_load"
+    category: deserialization
+  - pattern: "toml.loads"
+    category: deserialization
+  - pattern: "xmltodict.parse"
+    category: deserialization
+  - pattern: "xml.etree.ElementTree.fromstring"
+    category: deserialization
+
+  # WebSocket: Starlette's WebSocket interface is the FastAPI/Starlette
+  # primitive both for receive_text/bytes/json (see Starlette docs).
+  - pattern: "websocket.receive_text"
+    category: websocket
+    framework: starlette
+  - pattern: "websocket.receive_bytes"
+    category: websocket
+    framework: starlette
+  - pattern: "websocket.receive_json"
+    category: websocket
+    framework: starlette
+
+  # IPC: multiprocessing Pipe.recv / Queue.get carry attacker-controlled
+  # bytes only when the peer process is itself untrusted, but the call
+  # surface is sufficiently rare in CWE-78 traces that keeping it costs
+  # us nothing.  Popen.communicate / Popen.stdout.read were intentionally
+  # removed — those return the *output* of an already-executed command,
+  # not an attacker channel for unsanitised input, and including them
+  # surfaced sink-coloured "Source: subprocess.Popen" self-flows in the
+  # 20260510_051918 validation audit.  See
+  # splitEvaluations/clean_seed_catalog.py for the standing blacklist.
+  - pattern: "multiprocessing.Pipe.recv"
+    category: ipc
+  - pattern: "multiprocessing.Queue.get"
+    category: ipc
+
+  # Filesystem reads (path-controlled): pathlib.Path.read_text and
+  # read_bytes return the file contents; if an attacker controls the
+  # path or the file content they control this string (pathlib docs).
+  - pattern: "pathlib.Path.read_text"
+    category: filesystem
+  - pattern: "pathlib.Path.read_bytes"
+    category: filesystem
+
+  # Email: get_payload returns the raw message body (email.message docs).
+  - pattern: "email.message.Message.get_payload"
+    category: email

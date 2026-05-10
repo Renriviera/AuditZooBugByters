@@ -157,4 +157,18 @@ class RefinementAgent:
             except ValueError:
                 classifications[func_name] = HelperRole.UNRELATED
 
-        return JoernHelperClassification(classifications=classifications)
+        raw_evidence = data.get("evidence") or {}
+        evidence: dict[str, str] = {}
+        if isinstance(raw_evidence, dict):
+            for func_name, value in raw_evidence.items():
+                # Coerce to str defensively; the prompt asks for short
+                # verbatim substrings but malformed LLM output should
+                # not crash refinement.
+                evidence[str(func_name)] = (
+                    "" if value is None else str(value)
+                )
+
+        return JoernHelperClassification(
+            classifications=classifications,
+            evidence=evidence,
+        )

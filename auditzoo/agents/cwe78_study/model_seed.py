@@ -13,6 +13,7 @@ import yaml
 
 from scripts.run_evaluation import clone_and_checkout
 
+from .catalog_sanitizer import sanitize_catalog
 from .llm_client import LLMClient
 from .prompts import (
     SYSTEM_PROMPT_SEED_JOERN,
@@ -178,16 +179,24 @@ def _normalize_catalog_list(data: dict[str, Any], key: str) -> list[str]:
     raw = data.get(key)
     if not isinstance(raw, list):
         raise ValueError(f"Joern seed key {key!r} must be a list")
-    out: list[str] = []
+    string_items: list[str] = []
     for item in raw:
         if not isinstance(item, str):
             raise ValueError(f"Joern seed key {key!r} contains a non-string item")
-        value = item.strip()
-        if value and value not in out:
-            out.append(value)
-    if key in {"sources", "sinks"} and not out:
-        raise ValueError(f"Joern seed key {key!r} must not be empty")
-    return out
+        string_items.append(item)
+    # Apply the dotted-identifier validator at parse time so the catalog
+    # the rest of the pipeline sees is provably regex-safe.  Anything the
+    # LLM emitted with stray ``(`` / comments / metacharacters is dropped
+    # with a WARNING — keeping the run going on the valid majority instead
+    # of failing the whole catalog with a PatternSyntaxException at scan
+    # time.
+    kept, _ = sanitize_catalog(string_items, label=f"joern seed {key}")
+    if key in {"sources", "sinks"} and not kept:
+        raise ValueError(
+            f"Joern seed key {key!r} has no valid dotted-identifier entries "
+            f"(received {len(string_items)} raw items)"
+        )
+    return kept
 
 
 def _strip_markdown_fence(text: str) -> str:

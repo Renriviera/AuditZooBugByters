@@ -24,6 +24,7 @@ import os
 import random
 import resource
 import shutil
+import socket
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -47,6 +48,7 @@ DEFAULT_OUTPUT = ROOT / "results"
 DEFAULT_CLONE_DIR = Path("/tmp/auditzoo_eval")
 
 LINE_TOLERANCE = 5
+DEFAULT_GIT_TIMEOUT_S = 300
 
 _REASONING_CAP = 200
 
@@ -98,6 +100,15 @@ def serialize_triage_verdicts(
         # mass-flagged as hallucinations.
         source_in_snippet = (not source_expr) or (source_expr in snippet)
         sink_in_snippet = (not sink_expr) or (sink_expr in snippet)
+        # Joern recovery passes (taint / relaxed / def_use / direct_sink)
+        # tag every Finding with ``metadata["recovery_kind"]``.  Surface
+        # it here so the offline audit can attribute TP/FP/FN to the
+        # exact CPGQL pass that produced the candidate.  Findings from
+        # pre-recovery runs (or non-Joern arms) lack the field — emit
+        # an empty string so the audit CSV stays stable.
+        metadata = getattr(f, "metadata", {}) or {}
+        recovery_kind = str(metadata.get("recovery_kind", "") or "")
+        recovery_kinds_seen = list(metadata.get("recovery_kinds_seen") or [])
         out.append(
             {
                 "file": f.file_path,
@@ -113,6 +124,10 @@ def serialize_triage_verdicts(
                 "source_in_snippet": source_in_snippet,
                 "sink_in_snippet": sink_in_snippet,
                 "downgrade_reason": getattr(t, "downgrade_reason", "") or "",
+                "recovery_kind": recovery_kind,
+                "recovery_kinds_seen": ";".join(
+                    sorted({str(k) for k in recovery_kinds_seen if k})
+                ),
             }
         )
     return out
@@ -161,7 +176,7 @@ def label_findings(
     the LLM triage step incapable of moving TP/FP/FN and was the primary
     cause of the k-invariant metrics documented in ``results/full/...``.
 
-    The redesigned matrix (Phase-B1 + evidence extension)::
+    The redesigned matrix (Phase-B1 + evidence + uncertain-bucket extension)::
 
         verdict           gt_match  source_in_snippet -> label                      TP FP FN
         -------           --------  -----------------    ------                     -- -- --
@@ -171,15 +186,23 @@ def label_findings(
         TRUE_POSITIVE     match           false       -> fp_by_hallucinated_source  .  1  . (TP on GT line but source_expr invented)
         TRUE_POSITIVE     no_match        true        -> fp_by_llm_overclaim        .  1  .
         TRUE_POSITIVE     no_match        false       -> fp_by_hallucinated_source  .  1  .
-        UNCERTAIN         match           any         -> tp                         1  .  . (parity w/ previous)
-        UNCERTAIN         no_match        any         -> fp_by_location             .  1  . (parity w/ previous)
+        UNCERTAIN         match           any         -> uncertain_on_gt            .  .  .  (no positive credit; GT line stays FN)
+        UNCERTAIN         no_match        any         -> uncertain_off_gt           .  .  .  (separate bucket)
+
+    Rationale for the UNCERTAIN bucket: under the post-LLM precision
+    interpretation we only count findings the LLM has actually
+    *committed* to as positives.  Routing UNCERTAIN through TP/FP
+    (the previous parity branch) was the dominant cause of the
+    ``scanner_location_fp`` blow-up seen in the
+    ``20260508_234404`` audit (4340/4366 FP rows were UNCERTAIN).
+    Counts are still observable through the ``uncertain_*`` keys in
+    the returned dict so triage behaviour can be audited offline.
 
     FN over the whole CVE is ``|vuln_lines - matched_lines|`` where
-    ``matched_lines`` only counts findings the LLM did *not* suppress
-    *and* did not justify with a hallucinated ``source_expr``.  If the
-    LLM suppresses a finding that *was* on a ground-truth line, that
-    ground-truth line becomes an ``fn_by_llm`` (since a true alert was
-    retracted) in addition to still contributing to the ``fn`` count.
+    ``matched_lines`` only counts findings the LLM committed to with
+    ``TRUE_POSITIVE`` *and* did not justify with a hallucinated
+    ``source_expr``.  An UNCERTAIN verdict on a GT line therefore
+    leaves that line in FN — recall measures committed detections.
 
     Back-compat: when ``TriageResult.source_expr == ""`` (pre-evidence
     runs or scripted results that predate the field)
@@ -193,6 +216,8 @@ def label_findings(
     fp = 0
     fn_by_llm = 0  # ground-truth alerts the LLM retracted (subset of total FN)
     fp_by_hallucinated_source = 0  # subset of fp: TPs with source_expr not in snippet
+    uncertain_on_gt = 0  # UNCERTAIN findings that landed on a GT line
+    uncertain_off_gt = 0  # UNCERTAIN findings off any GT line
     labels: list[str] = []
 
     matched_vuln_lines: set[int] = (
@@ -214,7 +239,10 @@ def label_findings(
             + (getattr(f, "code_snippet", "") or "")
         )
         # Parity: empty source_expr ⇒ treat as "present" so pre-evidence
-        # runs aren't mass-flagged as hallucinations.
+        # runs aren't mass-flagged as hallucinations.  ``_snippet_for``
+        # includes any structural evidence the pipeline stamped onto
+        # the finding so this brake stays in lock-step with the triage
+        # agent's brake (see ``_snippet_for`` docstring).
         source_in_snippet = (not source_expr) or (source_expr in snippet)
 
         if t.verdict == Verdict.FALSE_POSITIVE:
@@ -246,17 +274,20 @@ def label_findings(
                 labels.append("fp_by_llm_overclaim")
             continue
 
-        # UNCERTAIN (and any unexpected verdict): parity with previous logic.
+        # UNCERTAIN (and any unexpected verdict): non-scoring bucket.
+        # The LLM has not committed to a positive, so we do not count
+        # the finding as TP or FP.  We still emit a label per finding
+        # for audit visibility, and the UNCERTAIN-on-GT case does NOT
+        # credit the GT line — it remains an FN.
         if is_match:
-            tp += 1
-            if matched_line is not None:
-                matched_vuln_lines.add(matched_line)
-            labels.append("tp")
+            uncertain_on_gt += 1
+            labels.append("uncertain_on_gt")
         else:
-            fp += 1
-            labels.append("fp_by_location")
+            uncertain_off_gt += 1
+            labels.append("uncertain_off_gt")
 
     fn = len(vuln_lines - matched_vuln_lines)
+    uncertain_total = uncertain_on_gt + uncertain_off_gt
 
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
@@ -272,6 +303,9 @@ def label_findings(
         "fn": fn,
         "fn_by_llm": fn_by_llm,
         "fp_by_hallucinated_source": fp_by_hallucinated_source,
+        "uncertain_total": uncertain_total,
+        "uncertain_on_gt": uncertain_on_gt,
+        "uncertain_off_gt": uncertain_off_gt,
         "precision": precision,
         "recall": recall,
         "f1": f1,
@@ -299,6 +333,7 @@ def clone_and_checkout(
     dest.mkdir(parents=True, exist_ok=True)
 
     try:
+        git_timeout = int(os.environ.get("AUDITZOO_CLONE_TIMEOUT", DEFAULT_GIT_TIMEOUT_S))
         clone_cmd = ["git", "clone"]
         if shallow:
             clone_cmd += ["--depth", "1"]
@@ -391,9 +426,14 @@ def get_resource_snapshot() -> dict[str, Any]:
 def _cleanup_stray_joern() -> None:
     """Best-effort kill of any lingering Joern server subprocesses.
 
-    Called after a per-CVE timeout fires.  The pipeline's ``finally`` block
-    should normally tear Joern down, but a cancellation mid-query can leave
-    the JVM running and port 12345 bound, which would poison the next CVE.
+    The 20260507_145628 sweep degraded after CVE 11 because a stuck JVM
+    held port 12345 for the rest of the run; ``pkill`` returns immediately
+    while the kernel still has the listener bound.  When *port* is given
+    we poll until the port is actually free or *wait_s* elapses, so the
+    next CVE has a clean Joern to connect to.
+
+    Returns ``True`` if the port is free (or no port check was requested),
+    ``False`` if it was still bound when the wait elapsed.
     """
     try:
         subprocess.run(
@@ -402,7 +442,20 @@ def _cleanup_stray_joern() -> None:
             timeout=10,
         )
     except Exception:
-        logger.exception("_cleanup_stray_joern failed")
+        logger.exception("_cleanup_stray_joern pkill failed")
+
+    if port is None:
+        return True
+
+    deadline = time.time() + max(0.0, wait_s)
+    while time.time() < deadline:
+        if not _is_port_in_use(port):
+            return True
+        time.sleep(poll_s)
+    logger.warning(
+        "Joern port %d still in use after %.0fs cleanup wait", port, wait_s
+    )
+    return False
 
 
 async def _run_with_timeout(
@@ -414,7 +467,9 @@ async def _run_with_timeout(
     """Run ``pipeline.run`` with a wall-clock budget.
 
     Returns ``(run_result, timed_out)``.  On timeout we cancel, reap any
-    stray Joern subprocesses, and return ``(None, True)``.
+    stray Joern subprocesses, and return ``(None, True)``.  ``joern_port``
+    is forwarded to the cleanup so we wait for the JVM's TCP listener to
+    actually drop before the caller starts the next CVE.
     """
     if timeout_s and timeout_s > 0:
         try:
@@ -423,14 +478,33 @@ async def _run_with_timeout(
                 timeout=timeout_s,
             )
             return result, False
+
+        logger.warning(
+            "  %s: pipeline.run exceeded %.0fs budget, aborting this CVE",
+            cve_id,
+            timeout_s,
+        )
+        # ``asyncio.wait_for`` cancels and then waits for the awaited
+        # coroutine to acknowledge cancellation.  In practice the Joern
+        # path can hang inside runtime cleanup after cancellation, leaving
+        # the sweep process alive but the log/results frozen.  Cancel the
+        # task without awaiting its cleanup, reap Joern, and let the
+        # caller record a timeout row and continue to the next CVE.
+        task.cancel()
+        _cleanup_stray_joern(joern_port)
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
+        except asyncio.CancelledError:
+            pass
         except asyncio.TimeoutError:
             logger.warning(
                 "  %s: pipeline.run exceeded %.0fs budget, aborting this CVE",
                 cve_id,
                 timeout_s,
             )
-            _cleanup_stray_joern()
-            return None, True
+            _cleanup_stray_joern(joern_port)
+            raise SystemExit(124)
+        return None, True
     else:
         return await pipeline.run(repo_path, cve_id=cve_id), False
 
@@ -447,10 +521,52 @@ async def run_main_comparison(
     clone_timeout_s: float = 300.0,
     skip_cves: list[str] | None = None,
     run_patched: bool = True,
+    resume_existing: bool = False,
 ) -> list[dict[str, Any]]:
-    """Run 2 tools x 4 k-levels x N CVEs x 2 commits."""
+    """Run 2 tools x 4 k-levels x N CVEs x 2 commits.
+
+    When ``resume_existing`` is True and ``output_dir/results.json``
+    exists, the previously-written CVE rows are pre-loaded into
+    ``all_results`` so this run's incremental writes APPEND to (rather
+    than overwrite) the partial sweep on disk.  Used by the resume loop
+    in ``splitEvaluations/run_joern_validation_full.sh`` to recover
+    from the v2-style "task_done() called too many times" stalls
+    without losing any completed CVEs.
+    """
     all_results: list[dict[str, Any]] = []
+    if resume_existing:
+        existing_path = output_dir / "results.json"
+        if existing_path.exists():
+            try:
+                loaded = json.loads(existing_path.read_text())
+                if isinstance(loaded, list):
+                    all_results = list(loaded)
+                    logger.info(
+                        "Resume: pre-loaded %d existing CVE rows from %s",
+                        len(all_results),
+                        existing_path,
+                    )
+            except (OSError, json.JSONDecodeError) as exc:
+                logger.warning(
+                    "Resume requested but %s could not be read (%s); "
+                    "starting from empty results list",
+                    existing_path,
+                    exc,
+                )
     skip_set = set(skip_cves or [])
+    joern_port = (
+        getattr(pipeline_cfg, "joern_port", None) if "joern" in pipeline_cfg.arms else None
+    )
+
+    # Pre-flight: a stuck Joern from a previous (possibly killed) run will
+    # cause every CVE to fail with "port already in use".  Reap it once
+    # before we start so the first CVE has a clean slate.
+    if joern_port is not None and _is_port_in_use(joern_port):
+        logger.warning(
+            "Joern port %d already bound at sweep start; reaping stray JVMs",
+            joern_port,
+        )
+        _cleanup_stray_joern(joern_port)
 
     for idx, cve in enumerate(dataset):
         cve_id = cve["cve_id"]
@@ -471,6 +587,21 @@ async def run_main_comparison(
             repo_url = cve["repo_url"]
             vuln_commit = cve["vulnerable_commit"]
             patch_commit = cve["patch_commit"]
+
+            # Per-CVE restart guard: even with the post-CVE polling
+            # cleanup below, a JVM that crashed mid-query (e.g. OOM with
+            # ExitOnOutOfMemoryError disabled, or SIGKILL'd by the OOM
+            # killer) can leave the listening socket in TIME_WAIT for
+            # multiple seconds.  Polling here gives the kernel time to
+            # release the port and turns "port already in use" cascades
+            # into a deterministic short wait.
+            if joern_port is not None and _is_port_in_use(joern_port):
+                logger.warning(
+                    "  %s: Joern port %d still bound at CVE start; reaping",
+                    cve_id,
+                    joern_port,
+                )
+                _cleanup_stray_joern(joern_port)
 
             # --- vulnerable commit ---
             ok = clone_and_checkout(
@@ -592,6 +723,7 @@ async def run_main_comparison(
             # so callers can shut the whole sweep down cleanly.
             _save_json(all_results, output_dir / "results.json")
             shutil.rmtree(repo_dest, ignore_errors=True)
+            _cleanup_stray_joern(joern_port)
             raise
         except Exception as exc:  # noqa: BLE001 — isolate per-CVE failures
             logger.exception("  %s: unhandled error, skipping CVE: %s", cve_id, exc)
@@ -604,9 +736,17 @@ async def run_main_comparison(
                 }
             )
             _save_json(all_results, output_dir / "results.json")
-            _cleanup_stray_joern()
+            _cleanup_stray_joern(joern_port)
         finally:
             shutil.rmtree(repo_dest, ignore_errors=True)
+            # Proactive per-CVE cleanup: even on the success path the
+            # pipeline's runtime ``stop()`` occasionally leaves a JVM
+            # holding port ``joern_port`` for several seconds, which then
+            # poisons the next CVE.  Polling the port before moving on
+            # turns the failure mode in 20260507_145628 (CVE 12+ all
+            # ``port already in use``) into a deterministic short wait.
+            if joern_port is not None and _is_port_in_use(joern_port):
+                _cleanup_stray_joern(joern_port)
 
     return all_results
 

@@ -115,6 +115,32 @@ def add_common_sweep_args(p: argparse.ArgumentParser) -> None:
         default=None,
         help="Append every LLM chat round-trip as JSONL to this path.",
     )
+    p.add_argument(
+        "--cpg-cache-dir",
+        type=Path,
+        default=None,
+        help="Stable workspace directory for cached Joern CPGs, keyed by "
+        "sha256(repo_url, commit, language).  When set, a re-run of the "
+        "same CVE skips the expensive importCode step entirely.",
+    )
+
+
+def resolve_llm_api_key(cli_value: str | None = None) -> str:
+    """Resolve the LLM API key without hardcoding or requiring one."""
+    if cli_value:
+        return cli_value
+    return (
+        os.getenv("AUDITZOO_LLM_API_KEY") or os.getenv("OPENAI_API_KEY") or "not-needed"
+    )
+
+
+def redacted_sweep_args(args: argparse.Namespace) -> dict[str, Any]:
+    """Return ``vars(args)`` with LLM credentials removed for run_config.json."""
+    out = dict(vars(args))
+    api_key = resolve_llm_api_key(out.get("llm_api_key"))
+    out["llm_api_key"] = "<redacted>" if api_key != "not-needed" else "not-needed"
+    out["llm_api_key_provided"] = api_key != "not-needed"
+    return out
 
 
 def filter_dataset(dataset: list[dict], only: list[str]) -> list[dict]:
