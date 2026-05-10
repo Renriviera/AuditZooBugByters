@@ -153,6 +153,26 @@ def test_build_audit_classifies_fp_categories_and_patched_alerts() -> None:
     assert "patched_commit_alert" in fp_causes
 
 
+def test_classify_fp_routes_uncertain_labels_to_separate_bucket() -> None:
+    """Phase-B2 labels (``uncertain_*``) must classify as
+    ``uncertain_unscored``, not as ``scanner_location_fp``.  Legacy rows
+    with verdict=uncertain but no label still map to
+    ``scanner_location_fp`` for backwards compatibility.
+    """
+    from splitEvaluations.audit_joern_results import classify_fp
+
+    base = {"patched": False, "triage": {"verdict": "uncertain"}}
+
+    assert classify_fp({**base, "label": "uncertain_off_gt"}) == "uncertain_unscored"
+    assert classify_fp({**base, "label": "uncertain_on_gt"}) == "uncertain_unscored"
+    # Legacy: pre-Phase-B2 sweep where UNCERTAIN was counted as fp_by_location.
+    assert (
+        classify_fp({**base, "label": "fp_by_location"}) == "scanner_location_fp"
+    )
+    # Legacy: missing label, only verdict.
+    assert classify_fp({**base, "label": ""}) == "scanner_location_fp"
+
+
 def test_build_audit_classifies_fn_causes() -> None:
     audit = build_audit(_results(), _dataset(), line_tolerance=5)
     k0_rows = [

@@ -101,9 +101,18 @@ class SemgrepRefinement:
 
 @dataclass
 class JoernHelperClassification:
-    """LLM Call 1 output for the Joern arm."""
+    """LLM Call 1 output for the Joern arm.
+
+    ``evidence`` carries the verbatim callee/body substring the LLM
+    cited to justify each classification.  The pipeline-level
+    ``verify_sink_wrapper`` predicate uses it (along with the neighbour
+    metadata) to decide whether a claimed ``sink-wrapper`` is allowed
+    to expand the Joern sink catalog.  Empty / missing entries are
+    tolerated for backward compatibility with pre-Phase-B2 fixtures.
+    """
 
     classifications: dict[str, HelperRole] = field(default_factory=dict)
+    evidence: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass

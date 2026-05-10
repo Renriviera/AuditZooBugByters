@@ -25,6 +25,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime
+from pathlib import Path
 
 from auditzoo.agents.cwe78_study.llm_client import LLMClient, LLMConfig
 from auditzoo.agents.cwe78_study.model_seed import (
@@ -82,6 +83,19 @@ def parse_args() -> argparse.Namespace:
         "skipped entirely; the catalog is loaded verbatim and the "
         "training split is used only for audit metadata.",
     )
+    ap.add_argument(
+        "--output-subdir",
+        type=str,
+        default=None,
+        help="If provided, write the sweep into "
+        "``<output>/joern/<output-subdir>`` instead of a fresh "
+        "``<output>/joern/<timestamp>`` directory.  Used by "
+        "``run_joern_validation_full.sh`` to resume a stalled run "
+        "into the same directory: the harness streams completed "
+        "CVE rows into ``results.json`` after every CVE so a fresh "
+        "invocation with the same subdir + ``--only-cves "
+        "<remaining>`` picks up exactly where the previous one died.",
+    )
     return ap.parse_args()
 
 
@@ -97,13 +111,29 @@ async def main() -> None:
         dataset, skip_cves=args.skip_cves, skip_empty_gt=args.skip_empty_gt
     )
     selected = select_dataset_subset(eligible, args.dataset_size, args.seed)
-    training_dataset, validation_dataset = split_train_validate(
-        selected, args.train_fraction, args.seed
-    )
+    if args.joern_seed_catalog is not None:
+        # The seed catalog is loaded verbatim, so the training partition
+        # is unused.  Evaluate every selected CVE rather than carving out
+        # ~train_fraction of them as a phantom "training" split that
+        # never gets touched.
+        training_dataset, validation_dataset = [], list(selected)
+    else:
+        training_dataset, validation_dataset = split_train_validate(
+            selected, args.train_fraction, args.seed
+        )
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = args.output / "joern" / timestamp
+    subdir_name = args.output_subdir or datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_dir = args.output / "joern" / subdir_name
     output_dir.mkdir(parents=True, exist_ok=True)
+    resume_existing = (
+        args.output_subdir is not None and (output_dir / "results.json").exists()
+    )
+    if resume_existing:
+        logger.info(
+            "Resuming into existing sweep dir %s (results.json present); "
+            "previously-completed CVEs will be preserved.",
+            output_dir,
+        )
 
     # Default the LLM I/O trace to ``<output_dir>/llm_io.jsonl`` when the
     # caller did not pass ``--log-llm-io``.  Each chat completion appends
@@ -210,6 +240,7 @@ async def main() -> None:
         per_cve_timeout=args.per_cve_timeout,
         skip_cves=[],
         run_patched=args.run_patched,
+        resume_existing=resume_existing,
     )
 
     logger.info("Results saved to %s", output_dir)

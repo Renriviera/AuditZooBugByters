@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import re
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -101,6 +102,224 @@ def _findings_hash(findings: list[Finding]) -> str:
     return _stable_hash("\n".join(keys))
 
 
+# ----------------------------------------------------------------------
+# Structural evidence (Phase-B hallucination-brake countermeasure)
+# ----------------------------------------------------------------------
+#
+# The triage agent (see :mod:`auditzoo.agents.cwe78_study.triage_agent`)
+# enforces a precision brake that downgrades any LLM ``true_positive``
+# whose cited ``source_expr`` is not a literal substring of the snippet
+# text it received.  The snippet is by default just the ±N-line slice
+# around the *sink* — fine for intra-procedural Semgrep matches but
+# pathological for inter-procedural Joern taint flows, where the source
+# expression lives in a caller dozens of lines away.  The 20260509
+# validation audit traced the bulk of ``joern_candidate_missing`` FNs
+# (e.g. CVE-2021-43857 line 259 with ``nearest_distance=0`` but
+# ``verdict=uncertain``) to this exact downgrade.
+#
+# Joern findings already carry the source expression, source file/line,
+# sink expression, sink api, recovery kind, and a deduplicated set of
+# alternative source variants in ``Finding.metadata``.  Rendering those
+# fields into a structural-evidence string and passing it through
+# :meth:`TriageAgent.triage_batch` lets the brake see the same source
+# token the LLM is quoting, so legitimate inter-procedural TPs are no
+# longer rewritten to UNCERTAIN.  Semgrep findings carry no such
+# metadata; the helper returns ``""`` for them and the call site is
+# behaviourally identical to the old no-evidence path.
+
+_STRUCTURAL_EVIDENCE_FLOW_CAP = 6
+_STRUCTURAL_EVIDENCE_ALT_SOURCES_CAP = 4
+_STRUCTURAL_EVIDENCE_FIELD_CAP = 240
+
+
+def _truncate_evidence_field(
+    value: Any, cap: int = _STRUCTURAL_EVIDENCE_FIELD_CAP
+) -> str:
+    text = "" if value is None else str(value)
+    if len(text) <= cap:
+        return text
+    return text[: cap - 3] + "..."
+
+
+def _is_self_flow_source(candidate: str, sink_code: str, sink_api: str) -> bool:
+    """Return True if *candidate* is indistinguishable from the sink itself.
+
+    Joern reports a degenerate "self-flow" whenever a sink-coloured
+    pattern accidentally lands in the source catalog (e.g.
+    ``subprocess.Popen`` listed in both ``sources`` and ``sinks``).  In
+    structural evidence that surfaces as ``Source: subprocess.Popen``,
+    which the triage LLM (correctly) refuses to call attacker-controlled
+    and downgrades to ``UNCERTAIN``.  Fix #1
+    (:mod:`splitEvaluations.clean_seed_catalog`) wipes those entries out
+    of the catalog at build time; this predicate is the runtime
+    belt-and-suspenders that lets
+    :func:`_structural_evidence_for_finding` swap a non-self-flow
+    alternative source into the canonical ``Source:`` slot if Joern's
+    primary report still happens to be self-coloured.
+
+    Matching rules:
+
+      * an empty / missing ``candidate`` is treated as self-flow, so the
+        caller will look for a real alt source;
+      * exact equality with ``sink_code`` (after strip) — covers the
+        case where the catalog literally contains the sink expression;
+      * the sink_api's last dotted segment appearing as a whole-word
+        token in ``candidate`` (case-insensitive) — catches
+        ``Popen.communicate`` against a sink_api of
+        ``subprocess.Popen``, while leaving legitimate caller-side
+        sources like ``request.body`` untouched.
+    """
+    cand = (candidate or "").strip()
+    if not cand:
+        return True
+    sink_c = (sink_code or "").strip()
+    if sink_c and cand == sink_c:
+        return True
+    api = (sink_api or "").strip()
+    if api:
+        tail = api.split(".")[-1].strip()
+        if tail and re.search(rf"\b{re.escape(tail)}\b", cand, flags=re.IGNORECASE):
+            return True
+    return False
+
+
+def _structural_evidence_for_finding(finding: Finding) -> str:
+    """Return a deterministic structural-evidence block for *finding*.
+
+    Empty if the finding's metadata carries no usable taint-flow info
+    (typical for Semgrep findings).  The Joern arm's
+    ``_parse_taint_results`` populates ``sourceCode`` /
+    ``sourceFile`` / ``sourceLine`` / ``sinkCode`` / ``sinkName``
+    plus ``dedup_sources`` (alternative source variants collapsed into
+    the same sink) and ``recovery_kind`` / ``recovery_kinds_seen``,
+    every one of which is useful triage context.
+    """
+    md = finding.metadata or {}
+    if not isinstance(md, dict):
+        return ""
+
+    parts: list[str] = []
+
+    # Compute the sink half first so the source-selection step (Fix #2)
+    # can detect self-flows before we commit to the canonical "Source:"
+    # line.  Reordering relative to the original implementation is
+    # cosmetic — the rendered block still emits Source / Alt source /
+    # Sink / Sink API in the prior order.
+    sink_code = _truncate_evidence_field(md.get("sinkCode"))
+    sink_api = str(md.get("sinkName") or finding.sink_api or "").strip()
+
+    src_code = _truncate_evidence_field(md.get("sourceCode"))
+    src_file = str(md.get("sourceFile") or "").strip()
+    src_line_raw = md.get("sourceLine")
+    src_line = str(src_line_raw) if src_line_raw not in (None, "", -1, "-1") else ""
+
+    # Fix #2 — defensive non-self-flow source preference.  When Joern's
+    # primary source is sink-coloured (catalog leak or a code shape that
+    # matches both lists), promote the first non-self-flow alt from
+    # ``dedup_sources`` into the canonical Source: slot so the triage
+    # LLM doesn't see ``Source: subprocess.Popen`` as the only candidate.
+    # The original (demoted) self-flow is intentionally NOT re-emitted as
+    # an "Alt source:" line — keeping it would re-introduce the same
+    # noise the swap is designed to remove.  When every alt is also
+    # self-coloured (or there are no alts), the original src_code is
+    # left intact, preserving prior behaviour for fully clean catalogs.
+    alt_sources_raw = md.get("dedup_sources") or []
+    demoted_self_flow = ""
+    if _is_self_flow_source(src_code, sink_code, sink_api) and isinstance(
+        alt_sources_raw, list
+    ):
+        for alt in alt_sources_raw:
+            alt_t = _truncate_evidence_field(alt)
+            if alt_t and not _is_self_flow_source(alt_t, sink_code, sink_api):
+                demoted_self_flow = src_code
+                src_code = alt_t
+                break
+
+    if src_code:
+        loc = f"{src_file}:{src_line}" if src_file and src_line else (src_file or "")
+        parts.append(f"Source: {src_code}" + (f"  (at {loc})" if loc else ""))
+
+    seen_sources: set[str] = set()
+    if src_code:
+        seen_sources.add(src_code)
+    if demoted_self_flow:
+        seen_sources.add(demoted_self_flow)
+    alt_emitted = 0
+    if isinstance(alt_sources_raw, list):
+        for alt in alt_sources_raw:
+            if alt_emitted >= _STRUCTURAL_EVIDENCE_ALT_SOURCES_CAP:
+                break
+            alt_t = _truncate_evidence_field(alt)
+            if alt_t and alt_t not in seen_sources:
+                parts.append(f"Alt source: {alt_t}")
+                seen_sources.add(alt_t)
+                alt_emitted += 1
+
+    if sink_code:
+        parts.append(f"Sink: {sink_code}")
+
+    if sink_api:
+        parts.append(f"Sink API: {sink_api}")
+
+    sink_file = str(md.get("sinkFile") or "").strip()
+    sink_line_raw = md.get("sinkLine")
+    sink_line = str(sink_line_raw) if sink_line_raw not in (None, "", -1, "-1") else ""
+    if sink_file and sink_line:
+        parts.append(f"Sink location: {sink_file}:{sink_line}")
+
+    rk = str(md.get("recovery_kind") or md.get("recoveryKind") or "").strip()
+    kinds_seen = md.get("recovery_kinds_seen")
+    if rk:
+        if isinstance(kinds_seen, list) and kinds_seen:
+            kinds_str = ",".join(str(k) for k in kinds_seen if k)
+            parts.append(f"recovery_kind={rk}; kinds_seen={kinds_str}")
+        else:
+            parts.append(f"recovery_kind={rk}")
+
+    dedup_count = md.get("dedup_count")
+    try:
+        dedup_n = int(dedup_count) if dedup_count is not None else 0
+    except (TypeError, ValueError):
+        dedup_n = 0
+    if dedup_n > 1:
+        parts.append(f"dedup_count={dedup_n}")
+
+    return "\n".join(parts)
+
+
+def _build_structural_evidence_map(findings: list[Finding]) -> dict[int, str]:
+    """Return ``{i: evidence}`` for findings whose metadata yields evidence.
+
+    Findings with no usable metadata (Semgrep, defensive ``None`` paths)
+    are simply omitted from the map; ``triage_batch`` then sees ``""``
+    for them and behaviour matches the prior no-evidence call site.
+
+    As a side-effect we *also* persist the rendered evidence into
+    ``f.metadata["structural_evidence"]``.  This is what lets the
+    scorer's hallucination brake (``label_findings`` in
+    :mod:`scripts.run_evaluation`) consider the same evidence the
+    triage LLM saw.  Without this hop the scorer would re-flag every
+    inter-procedural TP as ``fp_by_hallucinated_source`` even when the
+    triage agent correctly preserved the verdict, because its snippet
+    check covers only the ±N-line slice around the sink.  The 20260510
+    smoke audit exhibited exactly that pathology before the metadata
+    write was added.
+    """
+    out: dict[int, str] = {}
+    for i, f in enumerate(findings):
+        ev = _structural_evidence_for_finding(f)
+        if not ev:
+            continue
+        out[i] = ev
+        # Stash the evidence on the finding so the scorer + serializer
+        # can rebuild the same haystack the triage LLM saw.  Defensive
+        # ``setdefault({})`` keeps us safe against pre-existing None.
+        if not isinstance(f.metadata, dict):
+            f.metadata = {}
+        f.metadata["structural_evidence"] = ev
+    return out
+
+
 async def _connect_joern_with_retry(
     backend_cfg: Any,
     *,
@@ -150,6 +369,64 @@ def _joern_catalog_snapshot(joern: Any) -> dict[str, list[str]]:
         "sinks": list(getattr(joern, "sinks", []) or []),
         "sanitizers": list(getattr(joern, "sanitizers", []) or []),
     }
+
+
+def verify_sink_wrapper(
+    name: str,
+    neighbour: dict[str, Any],
+    current_sinks: list[str],
+    *,
+    evidence: str = "",
+) -> bool:
+    """Decide whether ``name`` may be promoted to the Joern sink catalog.
+
+    The 20260508_234404 audit showed that blindly trusting the LLM's
+    ``sink-wrapper`` classifications added wrappers like
+    ``secure_popen`` and ``run_command`` to the catalog purely on name
+    similarity, which then drove ~1500 ``scanner_location_fp`` rows
+    against unrelated repos.  This predicate gates the expansion on
+    structural evidence drawn from Joern's call-graph response:
+
+      * **callee match** — the wrapper's ``callees`` list (immediate
+        method calls inside the body, populated by the
+        Phase-B2 ``_expand_call_graph`` query) shares at least one
+        short name with the current sink catalog.  E.g.
+        ``callees=["system", "join"]`` matches ``os.system``.
+      * **body match** — failing that, the longer ``code`` excerpt
+        contains a regex hit for ``<sink_tail>(`` so wrappers whose
+        callees were truncated still get a chance to verify via the
+        method body.
+      * **evidence string** — if the LLM cited a verbatim evidence
+        substring AND that substring contains a known sink tail, that
+        also counts.  This honours the ``evidence`` field added to the
+        Phase-B2 helper-classification prompt without trusting it
+        blindly.
+
+    Returns ``True`` only when at least one of the above signals
+    fires; ``False`` (which causes the pipeline to drop the wrapper)
+    otherwise.  The decision is purely structural — the LLM's
+    classification still has to claim ``sink-wrapper`` first.
+    """
+    sink_tails = {s.rsplit(".", 1)[-1] for s in current_sinks if s}
+    if not sink_tails:
+        return False
+
+    callees = {str(c) for c in (neighbour.get("callees") or []) if c}
+    if callees & sink_tails:
+        return True
+
+    body = str(neighbour.get("code") or neighbour.get("source") or "")
+    if body:
+        for tail in sink_tails:
+            if re.search(rf"\b{re.escape(tail)}\s*\(", body):
+                return True
+
+    if evidence:
+        for tail in sink_tails:
+            if re.search(rf"\b{re.escape(tail)}\b", evidence):
+                return True
+
+    return False
 
 
 def build_phase_metrics(
@@ -246,6 +523,9 @@ class PipelineConfig:
         joern_sinks: list[str] | None = None,
         joern_sanitizers: list[str] | None = None,
         cpg_cache_dir: str | Path | None = None,
+        direct_sink_recovery: bool = True,
+        def_use_recovery: bool = True,
+        relaxed_taint_recovery: bool = True,
     ) -> None:
         self.max_iterations = max_iterations
         self.seed = seed
@@ -271,6 +551,19 @@ class PipelineConfig:
         # importCode on a hit — turning second-and-later runs of the
         # same (repo, commit) pair into a near-instant ``open()``.
         self.cpg_cache_dir = Path(cpg_cache_dir) if cpg_cache_dir else None
+        # Recovery passes (Recommendations 1-3 from the joern recovery
+        # sweep plan).  Each adds a CPGQL pass that runs alongside the
+        # strict ``task.joern_scan`` and merges into a single deduped
+        # finding set via ``JoernArm._parse_taint_results``.
+        # ``direct_sink_recovery`` emits every direct dangerous-sink
+        # call regardless of taint connectivity (broadest recall);
+        # ``relaxed_taint_recovery`` widens the source set to include
+        # identifiers and parameters; ``def_use_recovery`` walks back
+        # from sink arguments to any non-literal predecessor.
+        # Disable individually to ablate without code changes.
+        self.direct_sink_recovery = bool(direct_sink_recovery)
+        self.def_use_recovery = bool(def_use_recovery)
+        self.relaxed_taint_recovery = bool(relaxed_taint_recovery)
 
 
 class Pipeline:
@@ -332,8 +625,11 @@ class Pipeline:
                 findings = arm.get_findings_with_context(findings)
 
             tokens_before_triage = self._llm.usage.to_dict()
+            evidence_map = _build_structural_evidence_map(findings)
             with _stopwatch() as triage_t:
-                triage_results = await self._triage.triage_batch(findings)
+                triage_results = await self._triage.triage_batch(
+                    findings, structural_evidence_map=evidence_map
+                )
             tokens_after_triage = self._llm.usage.to_dict()
             llm_tokens_triage = _llm_tokens_delta(
                 tokens_before_triage, tokens_after_triage
@@ -547,20 +843,97 @@ class Pipeline:
                 catalog_pre = _joern_catalog_snapshot(joern) if joern else {}
 
                 with _stopwatch() as scan_t:
+                    # Strict taint pass: existing
+                    # ``task.joern_scan`` returns already-deduped Findings.
+                    # Recovery passes return raw JSON records that we
+                    # union back through ``JoernArm._parse_taint_results``
+                    # for global cross-pass dedup.  ``recoveryKind`` on
+                    # each record drives priority: a strict-taint hit on
+                    # the same sink line wins over a relaxed/def_use/
+                    # direct-sink hit.
                     scan_resp = await runtime.send_message(
                         Request(type="task.joern_scan", payload={}),
                         AgentId("joern_arm", "default"),
                     )
-                    raw_findings = scan_resp.data if scan_resp.success else []
-                    findings = [
-                        Finding(**f) if isinstance(f, dict) else f for f in raw_findings
-                    ]
+                    raw_taint_findings = scan_resp.data if scan_resp.success else []
+
+                    raw_union: list[dict[str, Any]] = []
+                    for entry in raw_taint_findings:
+                        if isinstance(entry, dict):
+                            md = entry.get("metadata") or {}
+                            kind = md.get("recovery_kind", "taint")
+                            payload = {
+                                "sinkFile": entry.get("file_path", ""),
+                                "sinkLine": entry.get("line_start", 0),
+                                "sinkName": entry.get("sink_api", ""),
+                                "sinkCode": entry.get("code_snippet", ""),
+                                "sourceFile": md.get("sourceFile", ""),
+                                "sourceLine": md.get("sourceLine", -1),
+                                "sourceCode": (
+                                    md.get("dedup_sources", [""])[0]
+                                    if md.get("dedup_sources")
+                                    else md.get("sourceCode", "")
+                                ),
+                                "recoveryKind": kind,
+                            }
+                            raw_union.append(payload)
+
+                    raw_recovery_counts: dict[str, int] = {
+                        "taint": len(raw_union),
+                        "direct_sink": 0,
+                        "relaxed": 0,
+                        "def_use": 0,
+                    }
+
+                    if self._cfg.direct_sink_recovery:
+                        ds_resp = await runtime.send_message(
+                            Request(type="task.joern_direct_sink_scan", payload={}),
+                            AgentId("joern_arm", "default"),
+                        )
+                        ds_raw = (
+                            ds_resp.data
+                            if ds_resp.success and isinstance(ds_resp.data, list)
+                            else []
+                        )
+                        raw_recovery_counts["direct_sink"] = len(ds_raw)
+                        raw_union.extend(r for r in ds_raw if isinstance(r, dict))
+
+                    if self._cfg.relaxed_taint_recovery:
+                        rx_resp = await runtime.send_message(
+                            Request(type="task.joern_relaxed_taint_scan", payload={}),
+                            AgentId("joern_arm", "default"),
+                        )
+                        rx_raw = (
+                            rx_resp.data
+                            if rx_resp.success and isinstance(rx_resp.data, list)
+                            else []
+                        )
+                        raw_recovery_counts["relaxed"] = len(rx_raw)
+                        raw_union.extend(r for r in rx_raw if isinstance(r, dict))
+
+                    if self._cfg.def_use_recovery:
+                        du_resp = await runtime.send_message(
+                            Request(type="task.joern_def_use_chase", payload={}),
+                            AgentId("joern_arm", "default"),
+                        )
+                        du_raw = (
+                            du_resp.data
+                            if du_resp.success and isinstance(du_resp.data, list)
+                            else []
+                        )
+                        raw_recovery_counts["def_use"] = len(du_raw)
+                        raw_union.extend(r for r in du_raw if isinstance(r, dict))
+
+                    findings = JoernArm._parse_taint_results(raw_union)
                     joern = joern_holder[0]
                     findings = joern.get_findings_with_context(findings, repo_path)
 
                 tokens_before_triage = self._llm.usage.to_dict()
+                evidence_map = _build_structural_evidence_map(findings)
                 with _stopwatch() as triage_t:
-                    triage_results = await self._triage.triage_batch(findings)
+                    triage_results = await self._triage.triage_batch(
+                        findings, structural_evidence_map=evidence_map
+                    )
                 llm_tokens_triage = _llm_tokens_delta(
                     tokens_before_triage, self._llm.usage.to_dict()
                 )
@@ -596,13 +969,23 @@ class Pipeline:
                                     current_sanitizers=joern.sanitizers,
                                 )
                             )
-                            refinement_actions.append(asdict(classification))
+                            # Index the call-graph response by name so
+                            # ``verify_sink_wrapper`` can pull callees /
+                            # body for each candidate wrapper without an
+                            # extra Joern roundtrip.
+                            neighbour_index: dict[str, dict[str, Any]] = {}
+                            for nb in neighbors:
+                                if isinstance(nb, dict):
+                                    nb_name = str(nb.get("name", ""))
+                                    if nb_name:
+                                        neighbour_index[nb_name] = nb
+
                             new_sources = [
                                 n
                                 for n, r in classification.classifications.items()
                                 if r == HelperRole.SOURCE_WRAPPER
                             ]
-                            new_sinks = [
+                            raw_sink_candidates = [
                                 n
                                 for n, r in classification.classifications.items()
                                 if r == HelperRole.SINK_WRAPPER
@@ -612,6 +995,46 @@ class Pipeline:
                                 for n, r in classification.classifications.items()
                                 if r == HelperRole.SANITIZER
                             ]
+
+                            # Gate sink-wrapper expansion on structural
+                            # evidence — see ``verify_sink_wrapper``.
+                            new_sinks: list[str] = []
+                            rejected_sinks: list[dict[str, str]] = []
+                            for candidate in raw_sink_candidates:
+                                neighbour = neighbour_index.get(candidate, {})
+                                cited_evidence = (
+                                    classification.evidence.get(candidate, "")
+                                    if classification.evidence
+                                    else ""
+                                )
+                                if verify_sink_wrapper(
+                                    candidate,
+                                    neighbour,
+                                    joern.sinks,
+                                    evidence=cited_evidence,
+                                ):
+                                    new_sinks.append(candidate)
+                                else:
+                                    reason = (
+                                        "no callee/body match against current "
+                                        "sink catalog"
+                                    )
+                                    if not neighbour:
+                                        reason = "no call-graph metadata for candidate"
+                                    rejected_sinks.append(
+                                        {"name": candidate, "reason": reason}
+                                    )
+                                    logger.info(
+                                        "sink-wrapper gate rejected %r (%s)",
+                                        candidate,
+                                        reason,
+                                    )
+
+                            classification_record = asdict(classification)
+                            classification_record["accepted_sinks"] = list(new_sinks)
+                            classification_record["rejected_sinks"] = rejected_sinks
+                            refinement_actions.append(classification_record)
+
                             joern.expand_sources(new_sources)
                             joern.expand_sinks(new_sinks)
                             joern.expand_sanitizers(new_sanitizers)
@@ -656,6 +1079,33 @@ class Pipeline:
                     > len(catalog_pre.get("sanitizers", []))
                 )
                 metrics["findings_hash"] = _findings_hash(findings)
+                # Recovery-pass attribution: how many raw records each
+                # CPGQL pass produced (pre-dedup), and how many of the
+                # final deduped findings each kind "won".  ``raw`` is
+                # useful for budget / cap tuning; ``post_dedup`` is
+                # what the audit consumes when reporting recall.
+                post_dedup_counts: dict[str, int] = {
+                    "taint": 0,
+                    "relaxed": 0,
+                    "def_use": 0,
+                    "direct_sink": 0,
+                }
+                for fnd in findings:
+                    kind = str((fnd.metadata or {}).get("recovery_kind", "taint"))
+                    if kind in post_dedup_counts:
+                        post_dedup_counts[kind] += 1
+                    else:
+                        post_dedup_counts.setdefault(kind, 0)
+                        post_dedup_counts[kind] += 1
+                metrics["n_findings_by_recovery"] = {
+                    "raw": dict(raw_recovery_counts),
+                    "post_dedup": post_dedup_counts,
+                }
+                metrics["recovery_flags"] = {
+                    "direct_sink": self._cfg.direct_sink_recovery,
+                    "relaxed_taint": self._cfg.relaxed_taint_recovery,
+                    "def_use": self._cfg.def_use_recovery,
+                }
                 metrics.update(cache_meta)
                 _log_phase_breakdown(cve_id=cve_id, arm="joern", k=k, metrics=metrics)
 

@@ -62,12 +62,33 @@ _REASONING_CAP = 200
 
 
 def _snippet_for(f: Finding) -> str:
-    """Return the text that ``source_expr`` / ``sink_expr`` are validated against."""
-    return (
-        (getattr(f, "surrounding_context", "") or "")
-        + "\n"
-        + (getattr(f, "code_snippet", "") or "")
-    )
+    """Return the text that ``source_expr`` / ``sink_expr`` are validated against.
+
+    Includes the finding's ``surrounding_context`` (±N-line slice around
+    the sink), the verbatim ``code_snippet``, and any structural
+    evidence the pipeline stamped onto ``Finding.metadata`` for the
+    triage LLM (see
+    :func:`auditzoo.agents.cwe78_study.pipeline._build_structural_evidence_map`).
+    Concatenating all three keeps the scorer's hallucination brake
+    aligned with the triage agent's brake: a ``source_expr`` the LLM
+    quoted from the structural-evidence block (typical for
+    inter-procedural CWE-78 chains where the source lives in a caller)
+    is recognised as legitimate evidence and the verdict is preserved.
+
+    Pre-evidence runs (or non-Joern arms whose findings have no
+    metadata) yield an empty structural-evidence string, so behaviour
+    is unchanged.
+    """
+    metadata = getattr(f, "metadata", None) or {}
+    structural = ""
+    if isinstance(metadata, dict):
+        structural = str(metadata.get("structural_evidence", "") or "")
+    parts = [
+        getattr(f, "surrounding_context", "") or "",
+        getattr(f, "code_snippet", "") or "",
+        structural,
+    ]
+    return "\n".join(p for p in parts if p)
 
 
 def serialize_triage_verdicts(
@@ -103,6 +124,15 @@ def serialize_triage_verdicts(
         # mass-flagged as hallucinations.
         source_in_snippet = (not source_expr) or (source_expr in snippet)
         sink_in_snippet = (not sink_expr) or (sink_expr in snippet)
+        # Joern recovery passes (taint / relaxed / def_use / direct_sink)
+        # tag every Finding with ``metadata["recovery_kind"]``.  Surface
+        # it here so the offline audit can attribute TP/FP/FN to the
+        # exact CPGQL pass that produced the candidate.  Findings from
+        # pre-recovery runs (or non-Joern arms) lack the field — emit
+        # an empty string so the audit CSV stays stable.
+        metadata = getattr(f, "metadata", {}) or {}
+        recovery_kind = str(metadata.get("recovery_kind", "") or "")
+        recovery_kinds_seen = list(metadata.get("recovery_kinds_seen") or [])
         out.append(
             {
                 "file": f.file_path,
@@ -118,6 +148,10 @@ def serialize_triage_verdicts(
                 "source_in_snippet": source_in_snippet,
                 "sink_in_snippet": sink_in_snippet,
                 "downgrade_reason": getattr(t, "downgrade_reason", "") or "",
+                "recovery_kind": recovery_kind,
+                "recovery_kinds_seen": ";".join(
+                    sorted({str(k) for k in recovery_kinds_seen if k})
+                ),
             }
         )
     return out
@@ -166,7 +200,7 @@ def label_findings(
     the LLM triage step incapable of moving TP/FP/FN and was the primary
     cause of the k-invariant metrics documented in ``results/full/...``.
 
-    The redesigned matrix (Phase-B1 + evidence extension)::
+    The redesigned matrix (Phase-B1 + evidence + uncertain-bucket extension)::
 
         verdict           gt_match  source_in_snippet -> label                      TP FP FN
         -------           --------  -----------------    ------                     -- -- --
@@ -176,15 +210,23 @@ def label_findings(
         TRUE_POSITIVE     match           false       -> fp_by_hallucinated_source  .  1  . (TP on GT line but source_expr invented)
         TRUE_POSITIVE     no_match        true        -> fp_by_llm_overclaim        .  1  .
         TRUE_POSITIVE     no_match        false       -> fp_by_hallucinated_source  .  1  .
-        UNCERTAIN         match           any         -> tp                         1  .  . (parity w/ previous)
-        UNCERTAIN         no_match        any         -> fp_by_location             .  1  . (parity w/ previous)
+        UNCERTAIN         match           any         -> uncertain_on_gt            .  .  .  (no positive credit; GT line stays FN)
+        UNCERTAIN         no_match        any         -> uncertain_off_gt           .  .  .  (separate bucket)
+
+    Rationale for the UNCERTAIN bucket: under the post-LLM precision
+    interpretation we only count findings the LLM has actually
+    *committed* to as positives.  Routing UNCERTAIN through TP/FP
+    (the previous parity branch) was the dominant cause of the
+    ``scanner_location_fp`` blow-up seen in the
+    ``20260508_234404`` audit (4340/4366 FP rows were UNCERTAIN).
+    Counts are still observable through the ``uncertain_*`` keys in
+    the returned dict so triage behaviour can be audited offline.
 
     FN over the whole CVE is ``|vuln_lines - matched_lines|`` where
-    ``matched_lines`` only counts findings the LLM did *not* suppress
-    *and* did not justify with a hallucinated ``source_expr``.  If the
-    LLM suppresses a finding that *was* on a ground-truth line, that
-    ground-truth line becomes an ``fn_by_llm`` (since a true alert was
-    retracted) in addition to still contributing to the ``fn`` count.
+    ``matched_lines`` only counts findings the LLM committed to with
+    ``TRUE_POSITIVE`` *and* did not justify with a hallucinated
+    ``source_expr``.  An UNCERTAIN verdict on a GT line therefore
+    leaves that line in FN — recall measures committed detections.
 
     Back-compat: when ``TriageResult.source_expr == ""`` (pre-evidence
     runs or scripted results that predate the field)
@@ -198,6 +240,8 @@ def label_findings(
     fp = 0
     fn_by_llm = 0  # ground-truth alerts the LLM retracted (subset of total FN)
     fp_by_hallucinated_source = 0  # subset of fp: TPs with source_expr not in snippet
+    uncertain_on_gt = 0  # UNCERTAIN findings that landed on a GT line
+    uncertain_off_gt = 0  # UNCERTAIN findings off any GT line
     labels: list[str] = []
 
     matched_vuln_lines: set[int] = (
@@ -213,13 +257,12 @@ def label_findings(
         )
 
         source_expr = (getattr(t, "source_expr", "") or "").strip()
-        snippet = (
-            (getattr(f, "surrounding_context", "") or "")
-            + "\n"
-            + (getattr(f, "code_snippet", "") or "")
-        )
+        snippet = _snippet_for(f)
         # Parity: empty source_expr ⇒ treat as "present" so pre-evidence
-        # runs aren't mass-flagged as hallucinations.
+        # runs aren't mass-flagged as hallucinations.  ``_snippet_for``
+        # includes any structural evidence the pipeline stamped onto
+        # the finding so this brake stays in lock-step with the triage
+        # agent's brake (see ``_snippet_for`` docstring).
         source_in_snippet = (not source_expr) or (source_expr in snippet)
 
         if t.verdict == Verdict.FALSE_POSITIVE:
@@ -251,17 +294,20 @@ def label_findings(
                 labels.append("fp_by_llm_overclaim")
             continue
 
-        # UNCERTAIN (and any unexpected verdict): parity with previous logic.
+        # UNCERTAIN (and any unexpected verdict): non-scoring bucket.
+        # The LLM has not committed to a positive, so we do not count
+        # the finding as TP or FP.  We still emit a label per finding
+        # for audit visibility, and the UNCERTAIN-on-GT case does NOT
+        # credit the GT line — it remains an FN.
         if is_match:
-            tp += 1
-            if matched_line is not None:
-                matched_vuln_lines.add(matched_line)
-            labels.append("tp")
+            uncertain_on_gt += 1
+            labels.append("uncertain_on_gt")
         else:
-            fp += 1
-            labels.append("fp_by_location")
+            uncertain_off_gt += 1
+            labels.append("uncertain_off_gt")
 
     fn = len(vuln_lines - matched_vuln_lines)
+    uncertain_total = uncertain_on_gt + uncertain_off_gt
 
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
@@ -277,6 +323,9 @@ def label_findings(
         "fn": fn,
         "fn_by_llm": fn_by_llm,
         "fp_by_hallucinated_source": fp_by_hallucinated_source,
+        "uncertain_total": uncertain_total,
+        "uncertain_on_gt": uncertain_on_gt,
+        "uncertain_off_gt": uncertain_off_gt,
         "precision": precision,
         "recall": recall,
         "f1": f1,
@@ -452,20 +501,45 @@ async def _run_with_timeout(
     actually drop before the caller starts the next CVE.
     """
     if timeout_s and timeout_s > 0:
-        try:
-            result = await asyncio.wait_for(
-                pipeline.run(repo_path, cve_id=cve_id),
-                timeout=timeout_s,
-            )
+        task = asyncio.create_task(pipeline.run(repo_path, cve_id=cve_id))
+        done, _ = await asyncio.wait({task}, timeout=timeout_s)
+        if task in done:
+            try:
+                result = task.result()
+            except asyncio.CancelledError:
+                logger.warning("  %s: pipeline.run was cancelled", cve_id)
+                _cleanup_stray_joern(joern_port)
+                return None, True
+            except Exception:
+                raise
             return result, False
+
+        logger.warning(
+            "  %s: pipeline.run exceeded %.0fs budget, aborting this CVE",
+            cve_id,
+            timeout_s,
+        )
+        # ``asyncio.wait_for`` cancels and then waits for the awaited
+        # coroutine to acknowledge cancellation.  In practice the Joern
+        # path can hang inside runtime cleanup after cancellation, leaving
+        # the sweep process alive but the log/results frozen.  Cancel the
+        # task without awaiting its cleanup, reap Joern, and let the
+        # caller record a timeout row and continue to the next CVE.
+        task.cancel()
+        _cleanup_stray_joern(joern_port)
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
+        except asyncio.CancelledError:
+            pass
         except asyncio.TimeoutError:
-            logger.warning(
-                "  %s: pipeline.run exceeded %.0fs budget, aborting this CVE",
+            logger.error(
+                "  %s: cancelled pipeline task did not settle after timeout; "
+                "exiting this sweep process so the caller can resume cleanly",
                 cve_id,
-                timeout_s,
             )
             _cleanup_stray_joern(joern_port)
-            return None, True
+            raise SystemExit(124)
+        return None, True
     else:
         return await pipeline.run(repo_path, cve_id=cve_id), False
 
@@ -481,9 +555,38 @@ async def run_main_comparison(
     per_cve_timeout: float = 900.0,
     skip_cves: list[str] | None = None,
     run_patched: bool = True,
+    resume_existing: bool = False,
 ) -> list[dict[str, Any]]:
-    """Run 2 tools x 4 k-levels x N CVEs x 2 commits."""
+    """Run 2 tools x 4 k-levels x N CVEs x 2 commits.
+
+    When ``resume_existing`` is True and ``output_dir/results.json``
+    exists, the previously-written CVE rows are pre-loaded into
+    ``all_results`` so this run's incremental writes APPEND to (rather
+    than overwrite) the partial sweep on disk.  Used by the resume loop
+    in ``splitEvaluations/run_joern_validation_full.sh`` to recover
+    from the v2-style "task_done() called too many times" stalls
+    without losing any completed CVEs.
+    """
     all_results: list[dict[str, Any]] = []
+    if resume_existing:
+        existing_path = output_dir / "results.json"
+        if existing_path.exists():
+            try:
+                loaded = json.loads(existing_path.read_text())
+                if isinstance(loaded, list):
+                    all_results = list(loaded)
+                    logger.info(
+                        "Resume: pre-loaded %d existing CVE rows from %s",
+                        len(all_results),
+                        existing_path,
+                    )
+            except (OSError, json.JSONDecodeError) as exc:
+                logger.warning(
+                    "Resume requested but %s could not be read (%s); "
+                    "starting from empty results list",
+                    existing_path,
+                    exc,
+                )
     skip_set = set(skip_cves or [])
     joern_port = (
         getattr(pipeline_cfg, "joern_port", None) if "joern" in pipeline_cfg.arms else None

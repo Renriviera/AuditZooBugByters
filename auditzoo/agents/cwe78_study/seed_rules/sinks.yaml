@@ -49,3 +49,60 @@ sinks:
     severity: medium
     shell_param: false
     framework: fabric
+
+  # ``os.exec*`` family — replaces the current process with a new program
+  # using attacker-controlled argv.  Always shell-free, but a tainted argv
+  # can still be ``CWE-78`` (e.g. ``os.execvp("/bin/sh", argv)``).
+  - api: "os.execv"
+    severity: high
+    shell_param: false
+  - api: "os.execve"
+    severity: high
+    shell_param: false
+  - api: "os.execl"
+    severity: high
+    shell_param: false
+  - api: "os.execle"
+    severity: high
+    shell_param: false
+  - api: "os.execlp"
+    severity: high
+    shell_param: false
+  - api: "os.execlpe"
+    severity: high
+    shell_param: false
+
+  # ``os.spawn*`` family — same threat model as exec*.
+  - api: "os.spawnv"
+    severity: high
+    shell_param: false
+  - api: "os.spawnve"
+    severity: high
+    shell_param: false
+  - api: "os.spawnvp"
+    severity: high
+    shell_param: false
+  - api: "os.spawnvpe"
+    severity: high
+    shell_param: false
+  - api: "os.spawnl"
+    severity: high
+    shell_param: false
+  - api: "os.spawnle"
+    severity: high
+    shell_param: false
+  - api: "os.spawnlp"
+    severity: high
+    shell_param: false
+  - api: "os.spawnlpe"
+    severity: high
+    shell_param: false
+
+  # asyncio subprocess primitives — the ``_shell`` variant is shell-true by
+  # construction; ``_exec`` is shell-free but can still be tainted via argv.
+  - api: "asyncio.create_subprocess_shell"
+    severity: critical
+    shell_param: false
+  - api: "asyncio.create_subprocess_exec"
+    severity: high
+    shell_param: false

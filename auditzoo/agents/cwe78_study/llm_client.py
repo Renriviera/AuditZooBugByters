@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import logging
 import threading
 import time
@@ -21,7 +22,14 @@ class LLMConfig:
     model: str = "gpt-5.4-mini"
     temperature: float = 0.1
     api_key: str = "not-needed"
-    max_tokens: int = 1024
+    # 1024 was too tight for triage: gpt-5.4-mini regularly emits
+    # multi-sentence ``reasoning`` blocks that overflow the budget,
+    # truncating the JSON mid-string and forcing every triage round to
+    # raise ``Could not extract JSON from LLM response`` (observed on
+    # 20260508_215020 — every per-finding triage was downgraded to
+    # UNCERTAIN).  4096 leaves comfortable headroom for triage +
+    # refinement payloads while still capping pathological loops.
+    max_tokens: int = 4096
     seed: int | None = 235711
     # Optional path to an append-only JSONL trace of every chat request +
     # response.  Used for the Phase-A3 deep dive on the UNCERTAIN-collapse
@@ -72,6 +80,7 @@ class LLMClient:
         *,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        json_mode: bool = False,
     ) -> str:
         """Send a chat completion request and return the assistant's reply."""
         request: dict[str, Any] = {
@@ -88,6 +97,14 @@ class LLMClient:
             request["max_completion_tokens"] = token_budget
         else:
             request["max_tokens"] = token_budget
+        if json_mode:
+            # Force the server to emit a syntactically valid JSON object.
+            # Without this, gpt-5.4-mini regularly produces JSON-shaped
+            # output with unescaped quotes inside string values (e.g.
+            # ``"reasoning":"... `["git", "ls-remote", ...]` ..."``)
+            # which breaks ``json.loads`` and downgrades the entire
+            # triage finding to UNCERTAIN.
+            request["response_format"] = {"type": "json_object"}
 
         response = await self._client.chat.completions.create(**request)
         choice = response.choices[0]
@@ -152,8 +169,11 @@ class LLMClient:
     ) -> dict[str, Any]:
         """Chat and parse the response as JSON.
 
-        Falls back to extracting JSON from markdown fences if direct parse fails.
+        Sets ``response_format=json_object`` on the upstream request so
+        the server emits valid JSON, then falls back to markdown-fence
+        extraction if a legacy backend ignored the directive.
         """
+        kwargs.setdefault("json_mode", True)
         raw = await self.chat(system_prompt, user_prompt, **kwargs)
         return _parse_json(raw)
 
@@ -162,17 +182,92 @@ class LLMClient:
 
 
 def _parse_json(text: str) -> dict[str, Any]:
-    """Best-effort JSON extraction from an LLM response."""
+    """Best-effort JSON extraction from an LLM response.
+
+    Layered recovery strategy (each layer is cheaper than the next):
+
+    1. ``json.loads`` on the trimmed body.
+    2. Strip a leading ``\u0060\u0060\u0060json`` / ``\u0060\u0060\u0060``
+       markdown fence if present.
+    3. Field-level regex recovery for the small set of keys the CWE-78
+       triage / refinement agents actually consume (``verdict``,
+       ``confidence``, ``source_expr``, ``sink_expr``, ``reasoning``,
+       ``suggestion``, ``add_sources``, ``add_sinks``, ``add_sanitizers``).
+       This handles two common gpt-5.4-mini failure modes:
+
+       * unescaped ``"`` characters embedded in a string value (e.g.
+         ``"reasoning":"... `[\\"git\\", \\"ls-remote\\"]` ..."``); and
+       * ``finish_reason="length"`` runaway responses that emit
+         thousands of whitespace characters before the budget runs out
+         and never close the JSON object.
+
+       The verdict string alone is enough to keep triage from
+       collapsing to UNCERTAIN, so partial extraction beats raising.
+    """
     text = text.strip()
-    # Try direct parse
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
-    # Try stripping markdown fences
     for fence in ("```json", "```"):
         if fence in text:
             start = text.index(fence) + len(fence)
-            end = text.index("```", start)
-            return json.loads(text[start:end].strip())
+            try:
+                end = text.index("```", start)
+            except ValueError:
+                end = len(text)
+            try:
+                return json.loads(text[start:end].strip())
+            except json.JSONDecodeError:
+                pass
+    recovered = _regex_extract_fields(text)
+    if recovered:
+        return recovered
     raise ValueError(f"Could not extract JSON from LLM response: {text[:200]}")
+
+
+_VERDICT_RE = re.compile(
+    r'"verdict"\s*:\s*"(true_positive|false_positive|uncertain)"',
+    re.IGNORECASE,
+)
+_CONFIDENCE_RE = re.compile(r'"confidence"\s*:\s*([0-9]*\.?[0-9]+)')
+_STRING_FIELD_RES: dict[str, re.Pattern[str]] = {
+    name: re.compile(rf'"{name}"\s*:\s*"((?:[^"\\]|\\.){{0,8000}}?)"')
+    for name in ("source_expr", "sink_expr", "reasoning", "suggestion")
+}
+_LIST_FIELD_RES: dict[str, re.Pattern[str]] = {
+    name: re.compile(rf'"{name}"\s*:\s*\[(.*?)\]', re.DOTALL)
+    for name in ("add_sources", "add_sinks", "add_sanitizers")
+}
+_LIST_ITEM_RE = re.compile(r'"((?:[^"\\]|\\.)*?)"')
+
+
+def _regex_extract_fields(text: str) -> dict[str, Any] | None:
+    """Recover known triage / refinement fields from a malformed JSON blob."""
+    out: dict[str, Any] = {}
+    m = _VERDICT_RE.search(text)
+    if m:
+        out["verdict"] = m.group(1).lower()
+    m = _CONFIDENCE_RE.search(text)
+    if m:
+        try:
+            out["confidence"] = float(m.group(1))
+        except ValueError:
+            pass
+    for name, pat in _STRING_FIELD_RES.items():
+        m = pat.search(text)
+        if m:
+            try:
+                out[name] = json.loads(f'"{m.group(1)}"')
+            except json.JSONDecodeError:
+                out[name] = m.group(1)
+    for name, pat in _LIST_FIELD_RES.items():
+        m = pat.search(text)
+        if m:
+            items = [
+                json.loads(f'"{item}"') if "\\" in item else item
+                for item in _LIST_ITEM_RE.findall(m.group(1))
+            ]
+            if items:
+                out[name] = items
+    return out or None

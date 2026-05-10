@@ -1,0 +1,124 @@
+Joern CWE-78 evaluation robustness — change log
+================================================
+This note summarizes work that makes the Joern arm easier to run to
+completion, easier to score fairly against ground truth, and easier to
+audit when numbers look wrong.  It covers both what is already on
+origin/main’s recent history (see git log) and the follow-on hardening
+landed in the same effort (pipeline, audit, scoring, recovery queries).
+
+1. Sweep architecture and wall-clock reliability
+----------------------------------------------------
+• Split Joern and Semgrep into separate sweep entry points so a Joern
+  failure or timeout does not take down a cheap Semgrep iteration, and
+  so each arm can use budgets tuned to its cost model.
+• Joern-only sweep defaults to a higher per-CVE wall-clock budget
+  (1800 s vs legacy 900 s) and, for v1 evaluation, “no patched” mode so
+  only one CPG is built per CVE (patched-rescan remains optional for FP
+  signal when affordable).
+• Resume / output-subdir: sweeps can append into an existing
+  results.json when re-invoked with the same output subdirectory and a
+  reduced --only-cves list, so mid-run exits do not discard finished
+  work.
+• Shell wrappers (e.g. splitEvaluations/run_joern_validation_full.sh,
+  run_joern_cached_with_audit.sh) automate resumption after timeout or
+  “task_done called too many times” stalls, prefer the iris conda Python
+  when present, and document env overrides (heap, cache dir, seed
+  catalog, etc.).
+• CPG disk cache + pre-warm: splitEvaluations/build_cpg_cache.py and
+  auditzoo/agents/cwe78_study/cpg_cache.py avoid repeated importCode for
+  CVEs already built; the cached sweep path skips the dominant multi-hour
+  cost while still cloning repos for line context.
+• JVM heap and Java opts are tunable for large Python CPGs; catalog
+  sanitizer and regex-escape paths prevent bad seed rules from breaking
+  CPGQL compilation.
+• Per-CVE process restart / hardening in the Joern client path reduces
+  leak and stuck-state risk across many sequential imports.
+
+2. Dataset and validation
+-------------------------
+• CWE-78 benchmark metadata was revised (v1.2-style): timeouts and bad
+  rows were archived, replacements and diffs were added, and
+  scripts/dataset_collection/validate_dataset.py gained stricter checks
+  so broken entries surface before a long sweep.
+
+3. Reproducible train/validation splits (model-seeded rules)
+------------------------------------------------------------
+• auditzoo/agents/cwe78_study/model_seed.py plus sweep flags allow a
+  deterministic train/val partition and LLM-generated Joern seed
+  catalogs; splitEvaluations/seed_joern_catalog.py produces a one-shot
+  catalog so production sweeps can skip repeated training clones and
+  seed LLM calls (--joern-seed-catalog).
+• splitEvaluations/clean_seed_catalog.py and merge_seed_catalog.py
+  sanitize merged catalogs (blacklist/disjointness) so sources do not
+  double as sinks in a way that creates degenerate self-flows.
+
+4. Joern arm: queries, recovery, and evidence for downstream agents
+-----------------------------------------------------------------
+• Safe regex construction: sink/source tokens are escaped and
+  validated before embedding in CPGQL; bad fragments are dropped or
+  neutralized with logging instead of failing the whole CVE.
+• Multi-pass recovery after strict taint: direct sink scan, relaxed
+  taint, and def-use chase tasks merge raw hits into one deduplicated
+  parse step so caps apply per pass but dedup is global.
+• Call-graph expansion for refinement now returns richer structure
+  (longer code excerpt, callee names capped for prompt budget) so
+  wrapper promotion can be gated on evidence that a helper actually
+  reaches a sink primitive.
+• YAML seed rules (seed_rules/sources.yaml, sinks.yaml) were expanded
+  and aligned with the sanitizer pipeline.
+
+5. Pipeline and triage: structural evidence
+-------------------------------------------
+• Inter-procedural Joern flows previously tripped the triage “evidence
+  in snippet” brake because the snippet was sink-local; the pipeline now
+  builds a deterministic structural-evidence block from Finding.metadata
+  (source/sink locations, APIs, alt sources, recovery kind) so legitimate
+  source_expr citations match the text the scorer sees.
+• Self-flow detection: when the primary “source” is sink-coloured, the
+  pipeline prefers the first non-degenerate alternative from
+  dedup_sources so the LLM is not pushed into UNCERTAIN solely because
+  of catalog overlap.
+
+6. Scoring and FP/FN audit
+--------------------------
+• scripts/run_evaluation.py: snippet for evidence checks includes
+  structural_evidence; triage serialization carries recovery_kind (and
+  merged recovery_kinds_seen) for attribution in CSV audits.
+• UNCERTAIN verdicts are no longer folded into TP/FP in a way that
+  inflated precision; they are counted in explicit uncertain_on_gt /
+  uncertain_off_gt buckets while committed TRUE_POSITIVE/FALSE_POSITIVE
+  drive TP/FP/FN.  Recall aligns with “LLM actually committed.”
+• splitEvaluations/audit_joern_results.py: relaxed scoring lanes use
+  OLD-side unified-diff hunk ranges (pre-fix line numbers match what
+  Joern analyzes), tolerant parsing of diff headers, and configurable
+  GT line clustering (gt-cluster-gap) so nearby multi-line fixes score
+  as one region without crediting distant unrelated lines.
+
+7. Tests
+--------
+• New/extended tests cover catalog sanitization, CPG cache, FP/FN
+  audit, model seed splits, relaxed audit scoring, deduplication,
+  direct-sink and relaxed-taint queries, structural evidence plumbing,
+  sink-wrapper gates, and k-move metrics.  Run the joern-tagged subset
+  under pytest when touching these modules.
+
+8. Key files (non-exhaustive)
+------------------------------
+splitEvaluations/run_joern_sweep.py
+splitEvaluations/audit_joern_results.py
+splitEvaluations/build_cpg_cache.py
+splitEvaluations/seed_joern_catalog.py
+splitEvaluations/clean_seed_catalog.py
+splitEvaluations/merge_seed_catalog.py
+splitEvaluations/run_joern_validation_full.sh
+splitEvaluations/run_joern_cached_with_audit.sh
+auditzoo/agents/cwe78_study/joern_arm.py
+auditzoo/agents/cwe78_study/pipeline.py
+auditzoo/agents/cwe78_study/catalog_sanitizer.py
+auditzoo/agents/cwe78_study/cpg_cache.py
+auditzoo/agents/cwe78_study/model_seed.py
+auditzoo/agents/cwe78_study/llm_client.py
+scripts/run_evaluation.py
+benchmark/python/cwe78_cves/metadata.json (+ DATASET.md, diffs)
+
+End of document.
