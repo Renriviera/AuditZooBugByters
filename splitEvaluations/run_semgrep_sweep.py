@@ -107,7 +107,6 @@ def parse_args() -> argparse.Namespace:
 async def main() -> None:
     args = parse_args()
     configure_logging()
-    llm_api_key = resolve_llm_api_key(args.llm_api_key)
 
     dataset = json.loads(args.dataset.read_text())
     logger.info("Loaded %d CVEs from %s", len(dataset), args.dataset)
