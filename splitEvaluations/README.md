@@ -50,7 +50,7 @@ python -m splitEvaluations.run_semgrep_sweep
 # Smoke run: select 10 eligible CVEs, seed rules from 3, evaluate on 7
 python -m splitEvaluations.run_semgrep_sweep \
     --dataset-size 10 --max-k 0 --no-patched \
-    --llm-model GPT5.5mini --seed-model GPT5.5mini
+    --llm-model gpt-5.4-mini --seed-model gpt-5.4-mini
 ```
 
 The sweep ends with an auto-audit; `rules_hash_summary.csv` and
@@ -67,7 +67,7 @@ python -m splitEvaluations.run_joern_sweep
 # Smoke run: select 10 eligible CVEs, seed catalogs from 3, evaluate on 7
 python -m splitEvaluations.run_joern_sweep \
     --dataset-size 10 --max-k 0 \
-    --llm-model GPT5.5mini --seed-model GPT5.5mini
+    --llm-model gpt-5.4-mini --seed-model gpt-5.4-mini
 ```
 
 Use `--run-patched` to opt back into the "alerts-on-patched = FP"

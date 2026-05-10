@@ -1,0 +1,10 @@
+{
+  "prior_rows": 60,
+  "rerun_rows": 26,
+  "merged_rows": 65,
+  "replaced_rows": 21,
+  "appended_rows": 5,
+  "rerun_full_rows": 24,
+  "rerun_timeout_rows": 2,
+  "rerun_error_rows": 0
+}

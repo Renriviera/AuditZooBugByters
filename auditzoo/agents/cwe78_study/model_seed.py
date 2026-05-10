@@ -132,6 +132,7 @@ def collect_training_examples(
     training_dataset: list[dict[str, Any]],
     clone_dir: Path,
     dataset_path: Path,
+    clone_timeout_s: float = 300.0,
 ) -> list[dict[str, Any]]:
     """Clone training commits and extract compact vulnerable/patched evidence."""
     examples: list[dict[str, Any]] = []
@@ -145,10 +146,14 @@ def collect_training_examples(
         vulnerable_snippet = ""
         patched_snippet = ""
         if repo_url and vuln_commit:
-            if clone_and_checkout(repo_url, vuln_commit, repo_dest):
+            if clone_and_checkout(
+                repo_url, vuln_commit, repo_dest, timeout_s=clone_timeout_s
+            ):
                 vulnerable_snippet = _snippet_from_repo(repo_dest, cve)
         if repo_url and patch_commit:
-            if clone_and_checkout(repo_url, patch_commit, repo_dest):
+            if clone_and_checkout(
+                repo_url, patch_commit, repo_dest, timeout_s=clone_timeout_s
+            ):
                 patched_snippet = _snippet_from_repo(repo_dest, cve)
         shutil.rmtree(repo_dest, ignore_errors=True)
 

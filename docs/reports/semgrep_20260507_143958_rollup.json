@@ -1,0 +1,496 @@
+{
+  "generated_at_utc": "2026-05-08T15:28:43.491922+00:00",
+  "sweep_output_dir": "results/semgrep/20260507_143958",
+  "source_artifacts": {
+    "results_json": "results/semgrep/20260507_143958/results.json",
+    "run_config_json": "results/semgrep/20260507_143958/run_config.json",
+    "seed_llm_usage_json": "results/semgrep/20260507_143958/seed_llm_usage.json",
+    "rules_hash_audit_json": "results/semgrep/20260507_143958/rules_hash_audit.json"
+  },
+  "run_config_summary": {
+    "llm_model": "gpt-5.4-mini",
+    "seed_model": "gpt-5.4-mini",
+    "llm_url": "https://api.openai.com/v1",
+    "max_k": 3,
+    "per_cve_timeout_s": 900.0,
+    "clone_timeout_s": 600.0,
+    "run_patched": true,
+    "dataset_size": "full",
+    "train_fraction": 0.25,
+    "seed": 235711,
+    "selected_count": 87,
+    "training_count": 22,
+    "validation_count": 65
+  },
+  "coverage": {
+    "validation_cves_planned": 65,
+    "results_json_rows": 60,
+    "full_evaluations_with_arms": 39,
+    "timeout_stubs": 21,
+    "missing_rows_no_result_object": 5,
+    "equation_check": "39 + 21 + 5 = 65 (expected 65)"
+  },
+  "tokens": {
+    "seed": {
+      "prompt_tokens": 24398,
+      "completion_tokens": 445,
+      "total_tokens": 24843,
+      "call_count": 1
+    },
+    "pipeline_39_full_cves": {
+      "triage_tokens": 5685940,
+      "refinement_tokens": 289741,
+      "subtotal_tokens": 5975681
+    },
+    "grand_total_tokens_seed_plus_pipeline_metrics": 6000524,
+    "methodology": "Pipeline totals sum metrics.llm_tokens_triage and metrics.llm_tokens_refinement across all arms whose keys start with 'semgrep' (includes semgrep_*_patched). Seed from seed_llm_usage.json.",
+    "per_cve_tokens_sorted_desc": [
+      {
+        "cve_id": "CVE-2023-50094",
+        "triage_tokens": 883348,
+        "refinement_tokens": 9419,
+        "subtotal_tokens": 892767
+      },
+      {
+        "cve_id": "CVE-2020-35459",
+        "triage_tokens": 763520,
+        "refinement_tokens": 8623,
+        "subtotal_tokens": 772143
+      },
+      {
+        "cve_id": "CVE-2021-23727",
+        "triage_tokens": 584025,
+        "refinement_tokens": 8681,
+        "subtotal_tokens": 592706
+      },
+      {
+        "cve_id": "CVE-2025-64340",
+        "triage_tokens": 533624,
+        "refinement_tokens": 8476,
+        "subtotal_tokens": 542100
+      },
+      {
+        "cve_id": "CVE-2017-16667",
+        "triage_tokens": 354119,
+        "refinement_tokens": 9165,
+        "subtotal_tokens": 363284
+      },
+      {
+        "cve_id": "CVE-2024-53526",
+        "triage_tokens": 254946,
+        "refinement_tokens": 9950,
+        "subtotal_tokens": 264896
+      },
+      {
+        "cve_id": "CVE-2025-62703",
+        "triage_tokens": 233329,
+        "refinement_tokens": 2790,
+        "subtotal_tokens": 236119
+      },
+      {
+        "cve_id": "CVE-2024-22423",
+        "triage_tokens": 216520,
+        "refinement_tokens": 9539,
+        "subtotal_tokens": 226059
+      },
+      {
+        "cve_id": "CVE-2023-40581",
+        "triage_tokens": 216808,
+        "refinement_tokens": 9225,
+        "subtotal_tokens": 226033
+      },
+      {
+        "cve_id": "CVE-2024-13129",
+        "triage_tokens": 210236,
+        "refinement_tokens": 9910,
+        "subtotal_tokens": 220146
+      },
+      {
+        "cve_id": "CVE-2023-6018",
+        "triage_tokens": 180355,
+        "refinement_tokens": 9757,
+        "subtotal_tokens": 190112
+      },
+      {
+        "cve_id": "CVE-2023-5002",
+        "triage_tokens": 157921,
+        "refinement_tokens": 8748,
+        "subtotal_tokens": 166669
+      },
+      {
+        "cve_id": "CVE-2025-58180",
+        "triage_tokens": 156352,
+        "refinement_tokens": 9246,
+        "subtotal_tokens": 165598
+      },
+      {
+        "cve_id": "CVE-2026-33046",
+        "triage_tokens": 150949,
+        "refinement_tokens": 9245,
+        "subtotal_tokens": 160194
+      },
+      {
+        "cve_id": "CVE-2023-1000",
+        "triage_tokens": 94900,
+        "refinement_tokens": 7221,
+        "subtotal_tokens": 102121
+      },
+      {
+        "cve_id": "CVE-2026-33310",
+        "triage_tokens": 68059,
+        "refinement_tokens": 11188,
+        "subtotal_tokens": 79247
+      },
+      {
+        "cve_id": "CVE-2023-4033",
+        "triage_tokens": 72803,
+        "refinement_tokens": 4607,
+        "subtotal_tokens": 77410
+      },
+      {
+        "cve_id": "CVE-2021-43857",
+        "triage_tokens": 63396,
+        "refinement_tokens": 10015,
+        "subtotal_tokens": 73411
+      },
+      {
+        "cve_id": "CVE-2024-53899",
+        "triage_tokens": 63133,
+        "refinement_tokens": 10273,
+        "subtotal_tokens": 73406
+      },
+      {
+        "cve_id": "CVE-2024-47821",
+        "triage_tokens": 60526,
+        "refinement_tokens": 9409,
+        "subtotal_tokens": 69935
+      },
+      {
+        "cve_id": "CVE-2025-47782",
+        "triage_tokens": 59595,
+        "refinement_tokens": 9137,
+        "subtotal_tokens": 68732
+      },
+      {
+        "cve_id": "CVE-2025-60787",
+        "triage_tokens": 59559,
+        "refinement_tokens": 8985,
+        "subtotal_tokens": 68544
+      },
+      {
+        "cve_id": "CVE-2021-39159",
+        "triage_tokens": 44841,
+        "refinement_tokens": 9839,
+        "subtotal_tokens": 54680
+      },
+      {
+        "cve_id": "CVE-2025-55037",
+        "triage_tokens": 43890,
+        "refinement_tokens": 9553,
+        "subtotal_tokens": 53443
+      },
+      {
+        "cve_id": "CVE-2021-39160",
+        "triage_tokens": 29171,
+        "refinement_tokens": 9578,
+        "subtotal_tokens": 38749
+      },
+      {
+        "cve_id": "CVE-2015-8557",
+        "triage_tokens": 26794,
+        "refinement_tokens": 9261,
+        "subtotal_tokens": 36055
+      },
+      {
+        "cve_id": "CVE-2026-33154",
+        "triage_tokens": 25588,
+        "refinement_tokens": 9470,
+        "subtotal_tokens": 35058
+      },
+      {
+        "cve_id": "CVE-2023-40267",
+        "triage_tokens": 20850,
+        "refinement_tokens": 9425,
+        "subtotal_tokens": 30275
+      },
+      {
+        "cve_id": "CVE-2024-29189",
+        "triage_tokens": 18553,
+        "refinement_tokens": 9778,
+        "subtotal_tokens": 28331
+      },
+      {
+        "cve_id": "CVE-2026-27602",
+        "triage_tokens": 12227,
+        "refinement_tokens": 8085,
+        "subtotal_tokens": 20312
+      },
+      {
+        "cve_id": "CVE-2021-21386",
+        "triage_tokens": 9141,
+        "refinement_tokens": 8995,
+        "subtotal_tokens": 18136
+      },
+      {
+        "cve_id": "CVE-2020-15271",
+        "triage_tokens": 8751,
+        "refinement_tokens": 7104,
+        "subtotal_tokens": 15855
+      },
+      {
+        "cve_id": "CVE-2025-0655",
+        "triage_tokens": 7094,
+        "refinement_tokens": 3794,
+        "subtotal_tokens": 10888
+      },
+      {
+        "cve_id": "CVE-2024-4343",
+        "triage_tokens": 1017,
+        "refinement_tokens": 1250,
+        "subtotal_tokens": 2267
+      },
+      {
+        "cve_id": "CVE-2021-22557",
+        "triage_tokens": 0,
+        "refinement_tokens": 0,
+        "subtotal_tokens": 0
+      },
+      {
+        "cve_id": "CVE-2021-38305",
+        "triage_tokens": 0,
+        "refinement_tokens": 0,
+        "subtotal_tokens": 0
+      },
+      {
+        "cve_id": "CVE-2022-24065",
+        "triage_tokens": 0,
+        "refinement_tokens": 0,
+        "subtotal_tokens": 0
+      },
+      {
+        "cve_id": "CVE-2022-42906",
+        "triage_tokens": 0,
+        "refinement_tokens": 0,
+        "subtotal_tokens": 0
+      },
+      {
+        "cve_id": "CVE-2023-34233",
+        "triage_tokens": 0,
+        "refinement_tokens": 0,
+        "subtotal_tokens": 0
+      }
+    ]
+  },
+  "ground_truth_metrics_vulnerable_commit": {
+    "arm": "semgrep_3",
+    "n_cves": 39,
+    "tp": 12,
+    "fp": 363,
+    "fn": 298,
+    "reference_semgrep_0": {
+      "tp": 9,
+      "fp": 387,
+      "fn": 300
+    }
+  },
+  "patched_commit_semgrep_3_patched": {
+    "note": "Patched arms do not include top-level tp/fp/fn in results.json; metrics below are triage/finding counts only.",
+    "total_findings_summed": 625,
+    "triage_verdict_counts": {
+      "true_positive": 10,
+      "false_positive": 231,
+      "other_mostly_uncertain": 384
+    }
+  },
+  "rules_hash_audit": {
+    "results_path": "/workspace/AuditZooBugByters/results/semgrep/20260507_143958/results.json",
+    "csv_path": "/workspace/AuditZooBugByters/results/semgrep/20260507_143958/rules_hash_summary.csv",
+    "n_semgrep_rows": 156,
+    "refine_actions_total": 88,
+    "refine_actions_no_op": 6,
+    "refine_no_op_rate": 0.06818181818181818,
+    "cves_in_audit": 39,
+    "cves_with_k_invariant_findings": 25,
+    "findings_invariance_frac": 0.6410256410256411
+  },
+  "skipped_cves": {
+    "timeout_900s_pipeline": {
+      "count": 21,
+      "cve_ids": [
+        "CVE-2020-1734",
+        "CVE-2021-3583",
+        "CVE-2022-1813",
+        "CVE-2022-33891",
+        "CVE-2022-38649",
+        "CVE-2022-40127",
+        "CVE-2022-40189",
+        "CVE-2022-40954",
+        "CVE-2022-41131",
+        "CVE-2022-46421",
+        "CVE-2023-22884",
+        "CVE-2023-32007",
+        "CVE-2023-38673",
+        "CVE-2023-52310",
+        "CVE-2023-52311",
+        "CVE-2023-52314",
+        "CVE-2024-0815",
+        "CVE-2024-0817",
+        "CVE-2024-4181",
+        "CVE-2025-22237",
+        "CVE-2025-67511"
+      ],
+      "explanation": "asyncio.wait_for around pipeline.run exceeded per_cve_timeout (900s); minimal result row written with skipped=timeout"
+    },
+    "clone_failed_no_row": {
+      "count": 5,
+      "details": [
+        {
+          "cve_id": "CVE-2022-39327",
+          "repo_url": "https://github.com/Azure/azure-cli",
+          "vulnerable_lines": [
+            179
+          ],
+          "skip_reason": "clone_failed_no_row",
+          "note": "git clone/checkout failed or timed out (600s); run_evaluation does not append a row on clone failure"
+        },
+        {
+          "cve_id": "CVE-2023-6940",
+          "repo_url": "https://github.com/mlflow/mlflow",
+          "vulnerable_lines": [
+            332,
+            341,
+            342,
+            343
+          ],
+          "skip_reason": "clone_failed_no_row",
+          "note": "git clone/checkout failed or timed out (600s); run_evaluation does not append a row on clone failure"
+        },
+        {
+          "cve_id": "CVE-2024-3126",
+          "repo_url": "https://github.com/parisneo/lollms-webui",
+          "vulnerable_lines": [
+            35,
+            50,
+            110,
+            124,
+            125
+          ],
+          "skip_reason": "clone_failed_no_row",
+          "note": "git clone/checkout failed or timed out (600s); run_evaluation does not append a row on clone failure"
+        },
+        {
+          "cve_id": "CVE-2024-51378",
+          "repo_url": "https://github.com/usmannasir/cyberpanel",
+          "vulnerable_lines": [
+            253
+          ],
+          "skip_reason": "clone_failed_no_row",
+          "note": "git clone/checkout failed or timed out (600s); run_evaluation does not append a row on clone failure"
+        },
+        {
+          "cve_id": "CVE-2025-14287",
+          "repo_url": "https://github.com/mlflow/mlflow",
+          "vulnerable_lines": [
+            8,
+            15,
+            145,
+            146,
+            147,
+            148,
+            149,
+            150,
+            151,
+            152,
+            153,
+            154,
+            155,
+            156,
+            157,
+            158,
+            159,
+            161,
+            162,
+            164,
+            166,
+            167,
+            1162
+          ],
+          "skip_reason": "clone_failed_no_row",
+          "note": "git clone/checkout failed or timed out (600s); run_evaluation does not append a row on clone failure"
+        }
+      ],
+      "explanation": "clone_and_checkout returned False; run_evaluation continues without appending (no results.json row)"
+    },
+    "skip_empty_gt_path": {
+      "explanation": "If vulnerable_lines were missing, run would log 'Skipping \u2014 no ground-truth lines' and skip without a row; the five missing CVEs had metadata vulnerable_lines\u2014confirmed clone failures in semgrep_full log",
+      "cve_ids": []
+    }
+  },
+  "validation_cve_list": [
+    "CVE-2015-8557",
+    "CVE-2017-16667",
+    "CVE-2020-15271",
+    "CVE-2020-1734",
+    "CVE-2020-35459",
+    "CVE-2021-21386",
+    "CVE-2021-22557",
+    "CVE-2021-23727",
+    "CVE-2021-3583",
+    "CVE-2021-38305",
+    "CVE-2021-39159",
+    "CVE-2021-39160",
+    "CVE-2021-43857",
+    "CVE-2022-1813",
+    "CVE-2022-24065",
+    "CVE-2022-33891",
+    "CVE-2022-38649",
+    "CVE-2022-39327",
+    "CVE-2022-40127",
+    "CVE-2022-40189",
+    "CVE-2022-40954",
+    "CVE-2022-41131",
+    "CVE-2022-42906",
+    "CVE-2022-46421",
+    "CVE-2023-1000",
+    "CVE-2023-22884",
+    "CVE-2023-32007",
+    "CVE-2023-34233",
+    "CVE-2023-38673",
+    "CVE-2023-40267",
+    "CVE-2023-4033",
+    "CVE-2023-40581",
+    "CVE-2023-5002",
+    "CVE-2023-50094",
+    "CVE-2023-52310",
+    "CVE-2023-52311",
+    "CVE-2023-52314",
+    "CVE-2023-6018",
+    "CVE-2023-6940",
+    "CVE-2024-0815",
+    "CVE-2024-0817",
+    "CVE-2024-13129",
+    "CVE-2024-22423",
+    "CVE-2024-29189",
+    "CVE-2024-3126",
+    "CVE-2024-4181",
+    "CVE-2024-4343",
+    "CVE-2024-47821",
+    "CVE-2024-51378",
+    "CVE-2024-53526",
+    "CVE-2024-53899",
+    "CVE-2025-0655",
+    "CVE-2025-14287",
+    "CVE-2025-22237",
+    "CVE-2025-47782",
+    "CVE-2025-55037",
+    "CVE-2025-58180",
+    "CVE-2025-60787",
+    "CVE-2025-62703",
+    "CVE-2025-64340",
+    "CVE-2025-67511",
+    "CVE-2026-27602",
+    "CVE-2026-33046",
+    "CVE-2026-33154",
+    "CVE-2026-33310"
+  ]
+}

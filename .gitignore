@@ -53,9 +53,13 @@ Thumbs.db
 
 # Logs
 *.log
+logs/
 
 # AuditZoo
 .auditzoo/
+
+# Local evaluation outputs
+results/semgrep/20*/
 
 # Benchmark
 benchmark/builders-hub*
@@ -68,6 +72,7 @@ node_modules/
 
 # Environment secrets
 .env
+.openai_api_key
 
 # Dataset collection intermediates
 data/raw/

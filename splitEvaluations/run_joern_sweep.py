@@ -39,6 +39,7 @@ from splitEvaluations.common import (
     configure_logging,
     eligible_dataset,
     filter_dataset,
+    llm_api_key,
     run_main_comparison,
     select_dataset_subset,
     split_train_validate,
@@ -52,17 +53,21 @@ def parse_args() -> argparse.Namespace:
     add_common_sweep_args(ap)
     ap.add_argument("--joern-port", type=int, default=12345)
     ap.add_argument(
-        "--per-cve-timeout", type=float, default=1800.0,
+        "--per-cve-timeout",
+        type=float,
+        default=1800.0,
         help="Wall-clock seconds budget per CVE.  Default 1800 s "
-             "(vs 900 s for the legacy combined sweep) because Joern "
-             "CPG construction on Python projects is O(10 min) for "
-             "many of our CVEs.  0 disables the budget.",
+        "(vs 900 s for the legacy combined sweep) because Joern "
+        "CPG construction on Python projects is O(10 min) for "
+        "many of our CVEs.  0 disables the budget.",
     )
     ap.add_argument(
-        "--run-patched", action="store_true", default=False,
+        "--run-patched",
+        action="store_true",
+        default=False,
         help="Re-scan the patched commit to obtain an 'alerts on "
-             "patched = FP' signal.  OFF by default (v1) so Joern "
-             "doesn't have to build two CPGs per CVE.",
+        "patched = FP' signal.  OFF by default (v1) so Joern "
+        "doesn't have to build two CPGs per CVE.",
     )
     return ap.parse_args()
 
@@ -105,12 +110,13 @@ async def main() -> None:
         training_dataset=training_dataset,
         clone_dir=args.clone_dir,
         dataset_path=args.dataset,
+        clone_timeout_s=args.clone_timeout_s,
     )
     seed_llm = LLMClient(
         LLMConfig(
             base_url=args.llm_url,
             model=args.seed_model,
-            api_key="not-needed",
+            api_key=llm_api_key(),
             seed=args.seed,
             log_io_path=str(args.log_llm_io) if args.log_llm_io else None,
         )
@@ -128,6 +134,7 @@ async def main() -> None:
         arms=["joern"],
         llm_base_url=args.llm_url,
         llm_model=args.llm_model,
+        llm_api_key=llm_api_key(),
         joern_port=args.joern_port,
         llm_log_io_path=str(args.log_llm_io) if args.log_llm_io else None,
         joern_sources=joern_catalog.sources,
@@ -142,16 +149,25 @@ async def main() -> None:
 
     logger.info(
         "Joern sweep: %d selected CVEs (%d train / %d validate), "
-        "k=0..%d, per_cve_timeout=%.0fs, run_patched=%s, skip=%d",
-        len(selected), len(training_dataset), len(validation_dataset),
-        args.max_k, args.per_cve_timeout,
-        args.run_patched, len(args.skip_cves),
+        "k=0..%d, per_cve_timeout=%.0fs, clone_timeout=%.0fs, run_patched=%s, skip=%d",
+        len(selected),
+        len(training_dataset),
+        len(validation_dataset),
+        args.max_k,
+        args.per_cve_timeout,
+        args.clone_timeout_s,
+        args.run_patched,
+        len(args.skip_cves),
     )
     await run_main_comparison(
-        validation_dataset, pipeline_cfg, args.clone_dir, output_dir,
+        validation_dataset,
+        pipeline_cfg,
+        args.clone_dir,
+        output_dir,
         line_tolerance=args.line_tolerance,
         skip_empty_gt=False,
         per_cve_timeout=args.per_cve_timeout,
+        clone_timeout_s=args.clone_timeout_s,
         skip_cves=[],
         run_patched=args.run_patched,
     )

@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import logging
 import math
+import os
 import random
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,29 @@ from scripts.run_evaluation import (  # noqa: F401 — re-exports
 
 logger = logging.getLogger(__name__)
 
+# Cloud evaluation sweeps (Semgrep / Joern): seed + pipeline use the same model by default.
+DEFAULT_EVAL_LLM_MODEL = "gpt-5.4-mini"
+
+
+def llm_api_key() -> str:
+    """Resolve API key for OpenAI-compatible endpoints.
+
+    Order: ``OPENAI_API_KEY_FILE``, ``OPENAI_API_KEY``, repo-local
+    ``.openai_api_key``, then ``"not-needed"`` for local vLLM.
+    """
+    path = os.environ.get("OPENAI_API_KEY_FILE")
+    if path:
+        p = Path(path)
+        if p.is_file():
+            return p.read_text().splitlines()[0].strip()
+    env_key = os.environ.get("OPENAI_API_KEY")
+    if env_key:
+        return env_key
+    repo_key = DEFAULT_DATASET.parents[3] / ".openai_api_key"
+    if repo_key.is_file():
+        return repo_key.read_text().splitlines()[0].strip()
+    return "not-needed"
+
 
 def add_common_sweep_args(p: argparse.ArgumentParser) -> None:
     """Populate the argparse parser with flags shared by both sweeps."""
@@ -47,10 +71,10 @@ def add_common_sweep_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--max-k", type=int, default=3)
     p.add_argument("--seed", type=int, default=235711)
     p.add_argument("--llm-url", default="http://localhost:8000/v1")
-    p.add_argument("--llm-model", default="Qwen/Qwen2.5-Coder-7B-Instruct")
+    p.add_argument("--llm-model", default=DEFAULT_EVAL_LLM_MODEL)
     p.add_argument(
         "--seed-model",
-        default="GPT5.5mini",
+        default=DEFAULT_EVAL_LLM_MODEL,
         help="Model used for the one-time initial rule/catalog seeding call.",
     )
     p.add_argument(
@@ -66,17 +90,29 @@ def add_common_sweep_args(p: argparse.ArgumentParser) -> None:
         help="Fraction of the selected dataset used to seed initial rules/catalogs.",
     )
     p.add_argument("--line-tolerance", type=int, default=LINE_TOLERANCE)
+    p.add_argument(
+        "--clone-timeout-s",
+        type=float,
+        default=300.0,
+        help="Seconds budget for each git clone and fetch during checkout.",
+    )
     p.add_argument("--skip-empty-gt", action="store_true", default=True)
     p.add_argument(
-        "--skip-cves", nargs="+", default=[],
+        "--skip-cves",
+        nargs="+",
+        default=[],
         help="CVE IDs to skip entirely (e.g. pathologically large repos).",
     )
     p.add_argument(
-        "--only-cves", nargs="+", default=[],
+        "--only-cves",
+        nargs="+",
+        default=[],
         help="If non-empty, restrict evaluation to these CVE IDs only.",
     )
     p.add_argument(
-        "--log-llm-io", type=Path, default=None,
+        "--log-llm-io",
+        type=Path,
+        default=None,
         help="Append every LLM chat round-trip as JSONL to this path.",
     )
 
@@ -89,7 +125,9 @@ def filter_dataset(dataset: list[dict], only: list[str]) -> list[dict]:
     out = [c for c in dataset if c.get("cve_id") in keep]
     logger.info(
         "Restricted dataset to %d/%d CVEs via --only-cves: %s",
-        len(out), len(dataset), sorted(keep),
+        len(out),
+        len(dataset),
+        sorted(keep),
     )
     return out
 

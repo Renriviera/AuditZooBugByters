@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -20,6 +22,23 @@ from .schemas import Finding, ToolArm
 logger = logging.getLogger(__name__)
 
 _SEED_RULES_DIR = Path(__file__).parent / "seed_rules"
+
+
+def _semgrep_env() -> dict[str, str]:
+    """Prefer the active Python environment and Semgrep's bundled core."""
+    env = os.environ.copy()
+    path_parts: list[str] = [str(Path(sys.executable).resolve().parent)]
+    try:
+        import semgrep
+
+        core_bin = Path(semgrep.__file__).resolve().parent / "bin"
+        if core_bin.is_dir():
+            path_parts.append(str(core_bin))
+    except Exception as exc:  # pragma: no cover - diagnostic fallback
+        logger.debug("Could not locate Semgrep package bin dir: %s", exc)
+    path_parts.append(env.get("PATH", ""))
+    env["PATH"] = os.pathsep.join(part for part in path_parts if part)
+    return env
 
 
 def _parse_rule_patch(rule_yaml_patch: str) -> dict[str, Any] | None:
@@ -84,9 +103,7 @@ class SemgrepArm:
         Returns a list of :class:`Finding` dataclass instances.
         """
         repo_path = Path(repo_path)
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".yaml", delete=False
-        ) as tmp:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as tmp:
             tmp.write(self._rules_yaml)
             tmp.flush()
             rule_file = tmp.name
@@ -104,6 +121,7 @@ class SemgrepArm:
                 capture_output=True,
                 text=True,
                 timeout=300,
+                env=_semgrep_env(),
             )
         except FileNotFoundError:
             logger.error("semgrep not found on PATH")
@@ -115,7 +133,11 @@ class SemgrepArm:
             Path(rule_file).unlink(missing_ok=True)
 
         if result.returncode not in (0, 1):
-            logger.warning("semgrep exited with code %d: %s", result.returncode, result.stderr[:500])
+            logger.warning(
+                "semgrep exited with code %d: %s",
+                result.returncode,
+                result.stderr[:500],
+            )
 
         return self._parse_output(result.stdout, repo_path)
 
@@ -134,9 +156,7 @@ class SemgrepArm:
 
             start = max(0, f.line_start - 1 - self._context_lines)
             end = min(len(lines), f.line_end + self._context_lines)
-            ctx = "\n".join(
-                f"{i + 1:>5}| {lines[i]}" for i in range(start, end)
-            )
+            ctx = "\n".join(f"{i + 1:>5}| {lines[i]}" for i in range(start, end))
             enriched.append(
                 Finding(
                     file_path=f.file_path,
@@ -220,9 +240,7 @@ class SemgrepArm:
         else:
             return "noop_empty_patch"
 
-        self._rules_yaml = yaml.dump(
-            current, default_flow_style=False, sort_keys=False
-        )
+        self._rules_yaml = yaml.dump(current, default_flow_style=False, sort_keys=False)
         return status
 
     # ------------------------------------------------------------------

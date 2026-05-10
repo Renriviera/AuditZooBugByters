@@ -1,0 +1,42 @@
+{
+  "fingerprint": "a0598ac7f4d195de",
+  "source": "bootstrap_from_run",
+  "source_run_dir": "/workspace/AuditZooBugByters/results/semgrep/20260507_143958",
+  "seed": 235711,
+  "seed_model": "gpt-5.4-mini",
+  "dataset_size": "full",
+  "train_fraction": 0.25,
+  "training_cves": [
+    "CVE-2021-23422",
+    "CVE-2023-39523",
+    "CVE-2021-23556",
+    "CVE-2026-32608",
+    "CVE-2026-33744",
+    "CVE-2024-0520",
+    "CVE-2026-33718",
+    "CVE-2014-6633",
+    "CVE-2023-34540",
+    "CVE-2018-6353",
+    "CVE-2024-34073",
+    "CVE-2019-7537",
+    "CVE-2025-15379",
+    "CVE-2023-24816",
+    "CVE-2017-17835",
+    "CVE-2025-12763",
+    "CVE-2020-7698",
+    "CVE-2024-52803",
+    "CVE-2026-0596",
+    "CVE-2024-53305",
+    "CVE-2025-54941",
+    "CVE-2025-1753"
+  ],
+  "yaml_sha256": "58c8df714a0e4d15e5d26142a641748d0e1a4b50eaf3eb171545f0cb10054466",
+  "prompt_sha256": "34e709396f04fbc3c3eac11aa46f2e707cfb8a2ccdf07900a49f46dd7cbe954c",
+  "seed_llm_usage": {
+    "prompt_tokens": 24398,
+    "completion_tokens": 445,
+    "total_tokens": 24843,
+    "call_count": 1
+  },
+  "bootstrapped_at_utc": "2026-05-08T16:00:31.667981+00:00"
+}

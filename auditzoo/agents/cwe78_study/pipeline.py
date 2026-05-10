@@ -32,6 +32,7 @@ from .schemas import (
     IterationResult,
     RunResult,
     ToolArm,
+    TriageResult,
     Verdict,
 )
 from .semgrep_arm import SemgrepArm
@@ -227,7 +228,7 @@ class PipelineConfig:
         max_context_tokens: int = 2000,
         arms: list[str] | None = None,
         llm_base_url: str = "http://localhost:8000/v1",
-        llm_model: str = "Qwen/Qwen2.5-Coder-7B-Instruct",
+        llm_model: str = "gpt-5.4-mini",
         llm_temperature: float = 0.1,
         llm_api_key: str = "not-needed",
         joern_port: int = 12345,
@@ -237,6 +238,7 @@ class PipelineConfig:
         joern_sources: list[str] | None = None,
         joern_sinks: list[str] | None = None,
         joern_sanitizers: list[str] | None = None,
+        triage_disabled: bool = False,
     ) -> None:
         self.max_iterations = max_iterations
         self.seed = seed
@@ -256,6 +258,44 @@ class PipelineConfig:
         self.joern_sanitizers = (
             list(joern_sanitizers) if joern_sanitizers is not None else None
         )
+        # When True the pipeline never instantiates LLMClient and stubs every
+        # triage result as UNCERTAIN.  Combined with max_iterations==0 this
+        # produces a pure-Semgrep (or pure-Joern) baseline with zero LLM calls.
+        self.triage_disabled = triage_disabled
+
+
+class _NoLLMUsage:
+    """Drop-in replacement for ``LLMClient.usage`` when no LLM is wired up.
+
+    Exposes :py:meth:`to_dict` and :py:meth:`reset_usage` shaped exactly
+    like :class:`auditzoo.agents.cwe78_study.llm_client.LLMUsage` so the
+    pipeline's per-iteration accounting and ``result.metadata["llm_usage"]``
+    serialisation continue to work without conditional branching.
+    """
+
+    @staticmethod
+    def to_dict() -> dict[str, int]:
+        return {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "call_count": 0,
+        }
+
+
+class _NoLLMClient:
+    """Stand-in for :class:`LLMClient` used when ``triage_disabled=True``.
+
+    Only the surfaces the pipeline actually touches in the no-LLM path
+    (``usage.to_dict()`` and ``reset_usage()``) are implemented; calling
+    any other method indicates a bug in the no-LLM gating.
+    """
+
+    def __init__(self) -> None:
+        self.usage = _NoLLMUsage()
+
+    def reset_usage(self) -> None:  # noqa: D401 - mirrors LLMClient
+        self.usage = _NoLLMUsage()
 
 
 class Pipeline:
@@ -263,18 +303,29 @@ class Pipeline:
 
     def __init__(self, config: PipelineConfig) -> None:
         self._cfg = config
-        self._llm = LLMClient(
-            LLMConfig(
-                base_url=config.llm_base_url,
-                model=config.llm_model,
-                temperature=config.llm_temperature,
-                api_key=config.llm_api_key,
-                seed=config.seed,
-                log_io_path=config.llm_log_io_path,
+        # When the caller explicitly disables triage we also skip building
+        # any LLM-backed agent.  This guarantees zero network traffic and
+        # zero token accounting for pure-tool baselines (e.g. Semgrep at
+        # k=0).  Refinement is already gated by ``k < max_iterations`` so
+        # max_iterations==0 alone disables it; we still null the agent
+        # references defensively in case future code paths change.
+        if config.triage_disabled:
+            self._llm = _NoLLMClient()
+            self._triage = None
+            self._refinement = None
+        else:
+            self._llm = LLMClient(
+                LLMConfig(
+                    base_url=config.llm_base_url,
+                    model=config.llm_model,
+                    temperature=config.llm_temperature,
+                    api_key=config.llm_api_key,
+                    seed=config.seed,
+                    log_io_path=config.llm_log_io_path,
+                )
             )
-        )
-        self._triage = TriageAgent(self._llm)
-        self._refinement = RefinementAgent(self._llm)
+            self._triage = TriageAgent(self._llm)
+            self._refinement = RefinementAgent(self._llm)
 
     async def run(self, repo_path: str | Path, cve_id: str = "") -> RunResult:
         """Run both arms across k=0..max_iterations on *repo_path*."""
@@ -318,7 +369,21 @@ class Pipeline:
 
             tokens_before_triage = self._llm.usage.to_dict()
             with _stopwatch() as triage_t:
-                triage_results = await self._triage.triage_batch(findings)
+                if self._triage is None:
+                    # No-LLM baseline: every finding gets a neutral UNCERTAIN
+                    # verdict.  ``label_findings`` then scores them as raw
+                    # Semgrep would (TP on GT-line match, FP otherwise) since
+                    # source_expr is empty and no hallucination brake fires.
+                    triage_results = [
+                        TriageResult(
+                            verdict=Verdict.UNCERTAIN,
+                            confidence=0.0,
+                            reasoning="",
+                        )
+                        for _ in findings
+                    ]
+                else:
+                    triage_results = await self._triage.triage_batch(findings)
             tokens_after_triage = self._llm.usage.to_dict()
             llm_tokens_triage = _llm_tokens_delta(
                 tokens_before_triage, tokens_after_triage
@@ -327,7 +392,11 @@ class Pipeline:
             refinement_actions: list[dict[str, Any]] = []
             refinement_s = 0.0
             llm_tokens_refinement = 0
-            if k < self._cfg.max_iterations and findings:
+            if (
+                k < self._cfg.max_iterations
+                and findings
+                and self._refinement is not None
+            ):
                 triage_summary = _triage_summary(triage_results)
 
                 # Previously refinement only fired when at least one triage

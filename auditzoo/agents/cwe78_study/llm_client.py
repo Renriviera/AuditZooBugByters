@@ -6,11 +6,11 @@ import json
 import logging
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, BadRequestError
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class LLMConfig:
     base_url: str = "http://localhost:8000/v1"
-    model: str = "Qwen/Qwen2.5-Coder-7B-Instruct"
+    model: str = "gpt-5.4-mini"
     temperature: float = 0.1
     api_key: str = "not-needed"
     max_tokens: int = 1024
@@ -74,16 +74,23 @@ class LLMClient:
         max_tokens: int | None = None,
     ) -> str:
         """Send a chat completion request and return the assistant's reply."""
-        response = await self._client.chat.completions.create(
-            model=self.config.model,
-            messages=[
+        request = {
+            "model": self.config.model,
+            "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=temperature or self.config.temperature,
-            max_tokens=max_tokens or self.config.max_tokens,
-            seed=self.config.seed,
-        )
+            "temperature": temperature or self.config.temperature,
+            "max_tokens": max_tokens or self.config.max_tokens,
+            "seed": self.config.seed,
+        }
+        try:
+            response = await self._client.chat.completions.create(**request)
+        except BadRequestError as exc:
+            if "max_tokens" not in str(exc):
+                raise
+            request["max_completion_tokens"] = request.pop("max_tokens")
+            response = await self._client.chat.completions.create(**request)
         choice = response.choices[0]
         text = choice.message.content or ""
 
@@ -119,10 +126,16 @@ class LLMClient:
             "system_prompt": system_prompt[:2000],
             "user_prompt": user_prompt[:6000],
             "response_text": response_text,
-            "usage": {
-                "prompt_tokens": getattr(response.usage, "prompt_tokens", None),
-                "completion_tokens": getattr(response.usage, "completion_tokens", None),
-            } if getattr(response, "usage", None) else None,
+            "usage": (
+                {
+                    "prompt_tokens": getattr(response.usage, "prompt_tokens", None),
+                    "completion_tokens": getattr(
+                        response.usage, "completion_tokens", None
+                    ),
+                }
+                if getattr(response, "usage", None)
+                else None
+            ),
             "finish_reason": getattr(response.choices[0], "finish_reason", None),
         }
         try:
