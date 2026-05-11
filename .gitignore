@@ -1,4 +1,6 @@
-# Python
+# =============================================================================
+# Python build / packaging artefacts
+# =============================================================================
 __pycache__/
 *.py[cod]
 *$py.class
@@ -15,72 +17,97 @@ parts/
 sdist/
 var/
 wheels/
+*.egg
 *.egg-info/
 .installed.cfg
-*.egg
 
+# =============================================================================
 # Virtual environments
+# =============================================================================
 venv/
 .venv/
 ENV/
 env/
 
-# IDEs
+# =============================================================================
+# IDE / OS scratch
+# =============================================================================
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
+.DS_Store
+Thumbs.db
 
-# Testing
+# =============================================================================
+# Tooling caches
+# =============================================================================
 .pytest_cache/
 .coverage
 htmlcov/
 .tox/
-
-# Type checking
 .mypy_cache/
 .dmypy.json
+.ruff_cache/
+.claude/
 
-# Joern
+# =============================================================================
+# Joern / CPG artefacts (local working state)
+# =============================================================================
 *.cpg
 cpg_output/
 workspace/
+.auditzoo/
 
-# OS
-.DS_Store
-Thumbs.db
-
+# =============================================================================
 # Logs
+# =============================================================================
 *.log
 logs/
 
-# AuditZoo
-.auditzoo/
-
-# Local evaluation outputs
-results/semgrep/20*/
-
-# Benchmark
-benchmark/builders-hub*
-
-# Node modules
-node_modules/
-
-# Claude code cache
-.claude/
-
-# Environment secrets
+# =============================================================================
+# Environment secrets — never commit credentials
+# =============================================================================
 .env
 .openai_api_key
 
-# Dataset collection intermediates
+# =============================================================================
+# Node modules (transitive dev tooling)
+# =============================================================================
+node_modules/
+
+# =============================================================================
+# Dataset collection intermediates (regenerable; large)
+# =============================================================================
 data/raw/
 data/advisory-database/
-
 # Shallow repo clones used during dataset collection
 benchmark/python/cwe78_cves/repos/
+benchmark/builders-hub*
 
-# Sweep + audit artifacts (regenerated on every run)
+# =============================================================================
+# Sweep + audit artefacts (regenerated on every run)
+# -----------------------------------------------------------------------------
+# This umbrella ignores the entire results/ tree, including:
+#   - results/joern_cpg_cache/          (~4 GB of Joern CPG bins, fully regenerable)
+#   - results/joern_only_k0_archives/   (shipped archives of joern-only k=0 sweeps)
+#   - results/joern/<timestamp>/        (per-sweep output dirs)
+#   - results/semgrep/<timestamp>/      (per-sweep output dirs)
+# Pre-paper history committed before this rule was added stays tracked
+# (use `git rm --cached` if you want to remove it later).
+# =============================================================================
 results/
 
+# =============================================================================
+# Paper draft assets and rendered tables/plots (not tracked on main)
+# -----------------------------------------------------------------------------
+# Paper/                 = main_results.tex/.pdf, figure PNGs, submission zip
+# PlotsTables/           = generated CSVs / Markdown tables / PNGs from sweeps
+# _local/                = scratch dir for local-only experiments
+# *.tar.gz at repo root  = sweep tarballs created by ad-hoc shell scripts
+# =============================================================================
+Paper/
+PlotsTables/
+_local/
+/*.tar.gz

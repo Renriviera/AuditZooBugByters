@@ -1,0 +1,237 @@
+{
+  "sources": [
+    "os.environ.get",
+    "sys.argv",
+    "sys.stdin",
+    "input",
+    "pathlib.Path.read_text",
+    "pickle.loads",
+    "yaml.unsafe_load",
+    "socket.recv",
+    "request.args",
+    "request.form",
+    "request.json",
+    "request.headers",
+    "request.cookies",
+    "flask.request.args",
+    "flask.request.form",
+    "flask.request.json",
+    "flask.request.headers",
+    "flask.request.cookies",
+    "django.http.HttpRequest.GET",
+    "django.http.HttpRequest.POST",
+    "django.http.HttpRequest.body",
+    "django.http.HttpRequest.headers",
+    "fastapi.Request",
+    "starlette.requests.Request",
+    "urllib.request.urlopen",
+    "requests.get",
+    "requests.post",
+    "requests.put",
+    "requests.patch",
+    "requests.delete",
+    "httpx.get",
+    "httpx.post",
+    "httpx.put",
+    "httpx.patch",
+    "httpx.delete"
+  ],
+  "sinks": [
+    "os.system",
+    "os.popen",
+    "os.execv",
+    "os.execvp",
+    "os.execve",
+    "os.execvpe",
+    "os.spawnv",
+    "os.spawnvp",
+    "os.spawnve",
+    "os.spawnvpe",
+    "subprocess.Popen",
+    "subprocess.run",
+    "subprocess.call",
+    "subprocess.check_output",
+    "subprocess.check_call",
+    "subprocess.getoutput",
+    "subprocess.getstatusoutput",
+    "asyncio.create_subprocess_shell",
+    "asyncio.create_subprocess_exec",
+    "pty.spawn",
+    "commands.getoutput",
+    "commands.getstatusoutput"
+  ],
+  "sanitizers": [
+    "shlex.quote",
+    "shlex.split",
+    "pipes.quote",
+    "re.escape"
+  ],
+  "metadata": {
+    "n_training_cves": 44,
+    "training_cve_ids": [
+      "CVE-2025-66398",
+      "CVE-2026-35216",
+      "CVE-2026-33482",
+      "CVE-2026-0596",
+      "CVE-2026-26279",
+      "GHSA-8mf7-vv8w-hjr2",
+      "CVE-2023-4033",
+      "CVE-2023-6019",
+      "CVE-2023-52311",
+      "CVE-2023-52314",
+      "CVE-2023-52310",
+      "CVE-2024-42370",
+      "CVE-2024-6091",
+      "GHSA-fm76-w8jw-xf8m",
+      "CVE-2024-0815",
+      "CVE-2025-62801",
+      "CVE-2025-54941",
+      "CVE-2025-1753",
+      "CVE-2025-30370",
+      "CVE-2021-32849",
+      "CVE-2022-40127",
+      "CVE-2022-38649",
+      "CVE-2022-41131",
+      "CVE-2022-40189",
+      "CVE-2022-22984",
+      "CVE-2022-40954",
+      "CVE-2020-1734",
+      "CVE-2020-16846",
+      "CVE-2017-1000220",
+      "CVE-2024-51378",
+      "CVE-2024-3126",
+      "CVE-2019-20807",
+      "CVE-2024-0817",
+      "CVE-2023-22884",
+      "CVE-2022-46421",
+      "CVE-2025-67511",
+      "CVE-2023-6572",
+      "CVE-2024-4181",
+      "CVE-2024-0520",
+      "CVE-2023-6940",
+      "CVE-2025-15379",
+      "CVE-2025-14287",
+      "CVE-2025-22237",
+      "CVE-2021-3148"
+    ],
+    "seed_model": "gpt-5.4-mini",
+    "seed_random_seed": 235711,
+    "dataset_path": "benchmark/python/cwe78_cves/metadata.json",
+    "generated_at": "2026-05-10T16:39:07.653575",
+    "llm_usage": {
+      "prompt_tokens": 42171,
+      "completion_tokens": 357,
+      "total_tokens": 42528,
+      "call_count": 1
+    },
+    "cleaned_with": {
+      "blacklist_used": [
+        "shell",
+        "subprocess",
+        "popen",
+        "system",
+        "exec",
+        "eval",
+        "popen.communicate",
+        "popen.stdout.read",
+        "popen.stderr.read"
+      ],
+      "max_source_drop_frac": 0.6,
+      "dropped_sources": [
+        {
+          "pattern": "subprocess.Popen",
+          "reason": "disjointness:source-equals-sink"
+        },
+        {
+          "pattern": "subprocess.run",
+          "reason": "disjointness:source-equals-sink"
+        },
+        {
+          "pattern": "subprocess.call",
+          "reason": "disjointness:source-equals-sink"
+        },
+        {
+          "pattern": "subprocess.check_output",
+          "reason": "disjointness:source-equals-sink"
+        },
+        {
+          "pattern": "subprocess.check_call",
+          "reason": "disjointness:source-equals-sink"
+        },
+        {
+          "pattern": "subprocess.getoutput",
+          "reason": "disjointness:source-equals-sink"
+        },
+        {
+          "pattern": "subprocess.getstatusoutput",
+          "reason": "disjointness:source-equals-sink"
+        },
+        {
+          "pattern": "os.system",
+          "reason": "disjointness:source-equals-sink"
+        },
+        {
+          "pattern": "os.popen",
+          "reason": "disjointness:source-equals-sink"
+        },
+        {
+          "pattern": "os.execv",
+          "reason": "disjointness:source-equals-sink"
+        },
+        {
+          "pattern": "os.execvp",
+          "reason": "disjointness:source-equals-sink"
+        },
+        {
+          "pattern": "os.execve",
+          "reason": "disjointness:source-equals-sink"
+        },
+        {
+          "pattern": "os.execvpe",
+          "reason": "disjointness:source-equals-sink"
+        },
+        {
+          "pattern": "os.spawnv",
+          "reason": "disjointness:source-equals-sink"
+        },
+        {
+          "pattern": "os.spawnvp",
+          "reason": "disjointness:source-equals-sink"
+        },
+        {
+          "pattern": "os.spawnve",
+          "reason": "disjointness:source-equals-sink"
+        },
+        {
+          "pattern": "os.spawnvpe",
+          "reason": "disjointness:source-equals-sink"
+        },
+        {
+          "pattern": "pty.spawn",
+          "reason": "disjointness:source-equals-sink"
+        },
+        {
+          "pattern": "commands.getoutput",
+          "reason": "disjointness:source-equals-sink"
+        },
+        {
+          "pattern": "commands.getstatusoutput",
+          "reason": "disjointness:source-equals-sink"
+        }
+      ],
+      "dropped_sinks": [],
+      "dropped_sanitizers": [],
+      "kept_counts": {
+        "sources": 35,
+        "sinks": 22,
+        "sanitizers": 4
+      },
+      "input_counts": {
+        "sources": 55,
+        "sinks": 22,
+        "sanitizers": 4
+      },
+      "cleaned_at": "2026-05-10T17:16:15.472952Z"
+    }
+  }
+}
