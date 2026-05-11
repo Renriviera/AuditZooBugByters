@@ -524,6 +524,10 @@ class PipelineConfig:
         joern_sinks: list[str] | None = None,
         joern_sanitizers: list[str] | None = None,
         triage_disabled: bool = False,
+        cpg_cache_dir: "str | Path | None" = None,
+        direct_sink_recovery: bool = True,
+        relaxed_taint_recovery: bool = True,
+        def_use_recovery: bool = True,
     ) -> None:
         self.max_iterations = max_iterations
         self.seed = seed
@@ -547,6 +551,22 @@ class PipelineConfig:
         # triage result as UNCERTAIN.  Combined with max_iterations==0 this
         # produces a pure-Semgrep (or pure-Joern) baseline with zero LLM calls.
         self.triage_disabled = triage_disabled
+        # Stable workspace root for cached Joern CPGs.  When set, the
+        # Joern arm reuses ``cpg_cache_location(cpg_cache_dir, repo_url,
+        # commit)`` instead of the ephemeral ``<repo>/.auditzoo`` workspace,
+        # so re-runs of the same vulnerable commit skip importCode entirely.
+        # ``None`` (default) preserves legacy behaviour.
+        self.cpg_cache_dir = cpg_cache_dir
+        # Multi-pass Joern recovery toggles.  After the strict taint pass
+        # the pipeline can fall through to (1) a direct sink scan,
+        # (2) a relaxed-taint scan, and (3) a def-use chase, merging raw
+        # hits into one deduplicated parse step.  Defaults match the
+        # production sweep behaviour documented in
+        # ``JOERN_EVALUATION_ROBUSTNESS_CHANGES.txt``; flip individually
+        # to ``False`` for ablations.
+        self.direct_sink_recovery = direct_sink_recovery
+        self.relaxed_taint_recovery = relaxed_taint_recovery
+        self.def_use_recovery = def_use_recovery
 
 
 class _NoLLMUsage:

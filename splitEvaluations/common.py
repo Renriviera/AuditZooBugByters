@@ -123,6 +123,19 @@ def add_common_sweep_args(p: argparse.ArgumentParser) -> None:
         "sha256(repo_url, commit, language).  When set, a re-run of the "
         "same CVE skips the expensive importCode step entirely.",
     )
+    # ``run_joern_sweep`` reads ``args.llm_api_key`` directly and
+    # ``redacted_sweep_args`` indexes ``out["llm_api_key"]``; both
+    # paths require this attribute to exist on the Namespace.  We
+    # default to None so the resolution chain still falls back to
+    # AUDITZOO_LLM_API_KEY / OPENAI_API_KEY / .openai_api_key when no
+    # CLI value is given (per ``resolve_llm_api_key`` precedence).
+    p.add_argument(
+        "--llm-api-key",
+        default=None,
+        help="API key for the OpenAI-compatible LLM endpoint.  Prefer "
+        "setting AUDITZOO_LLM_API_KEY (or OPENAI_API_KEY) instead so "
+        "the secret never lands in process listings or run_config.json.",
+    )
 
 
 def resolve_llm_api_key(cli_value: str | None = None) -> str:
